@@ -20,8 +20,8 @@ const SHELL_RULES: ShellRule[] = [
   {
     id: "shell.sudo",
     pattern: /(^|\s)sudo(\s|$)/i,
-    riskLevel: "high",
-    reason: "sudo can change system state or access protected data."
+    riskLevel: "blocked",
+    reason: "sudo is not allowed."
   },
   {
     id: "shell.dd_if",
@@ -64,6 +64,30 @@ const SHELL_RULES: ShellRule[] = [
     pattern: /\bkill\s+-9\s+-1\b/i,
     riskLevel: "blocked",
     reason: "Killing all accessible processes is destructive."
+  },
+  {
+    id: "shell.shell_wrapper",
+    pattern: /(^|\s)(?:bash|dash|fish|sh|zsh)\s+-c(\s|$)/i,
+    riskLevel: "blocked",
+    reason: "Shell wrapper execution is not allowed."
+  },
+  {
+    id: "shell.metacharacter",
+    pattern: /[`$][(]|[;&|<>]/,
+    riskLevel: "blocked",
+    reason: "Shell metacharacters require a shell and are not allowed."
+  },
+  {
+    id: "shell.destructive_file_command",
+    pattern: /(^|\s)(?:rm|rmdir|shred|truncate|unlink)(\s|$)/i,
+    riskLevel: "blocked",
+    reason: "Destructive file commands are not allowed."
+  },
+  {
+    id: "shell.package_or_system_change",
+    pattern: /(^|\s)(?:apt|apt-get|dnf|yum|pacman|zypper|snap|flatpak|systemctl|service)\s+(?:install|remove|purge|upgrade|dist-upgrade|update|start|stop|restart|enable|disable)\b/i,
+    riskLevel: "blocked",
+    reason: "Package installation or system service changes are not allowed in Phase 3."
   }
 ];
 

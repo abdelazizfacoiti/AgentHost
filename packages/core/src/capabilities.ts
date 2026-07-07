@@ -42,17 +42,75 @@ export class CapabilityRegistry implements CapabilityRegistrySnapshot {
 export function createBaseCapabilityRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
 
-  registry.registerTool({
-    name: "system.get_info",
-    riskLevel: "observe",
-    description: "Returns local system information and AgentHost runtime details."
-  });
-
-  registry.registerTool({
-    name: "system.list_capabilities",
-    riskLevel: "observe",
-    description: "Lists AgentHost strategies, tools, and registered app capabilities."
-  });
+  for (const capability of [
+    {
+      name: "system.get_info",
+      riskLevel: "observe" as const,
+      description: "Returns local system information and AgentHost runtime details."
+    },
+    {
+      name: "system.list_capabilities",
+      riskLevel: "observe" as const,
+      description: "Lists AgentHost strategies, tools, and registered app capabilities."
+    },
+    {
+      name: "system.check_dependency",
+      riskLevel: "low" as const,
+      description: "Checks whether a command or desktop app appears to be available."
+    },
+    {
+      name: "app.detect",
+      riskLevel: "low" as const,
+      description: "Detects a Linux app generically and reports available automation strategies."
+    },
+    {
+      name: "app.list_installed",
+      riskLevel: "low" as const,
+      description: "Lists installed Linux desktop apps and commands on a best-effort basis."
+    },
+    {
+      name: "app.open",
+      riskLevel: "medium" as const,
+      description: "Opens a detected Linux app through a generic CLI or desktop-entry launch path."
+    },
+    {
+      name: "app.get_strategy",
+      riskLevel: "low" as const,
+      description: "Recommends an app-agnostic automation strategy for an app and task type."
+    },
+    {
+      name: "shell.run_safe",
+      riskLevel: "medium" as const,
+      description: "Runs a classified command with shell disabled, timeout, and output limits."
+    },
+    {
+      name: "file.write",
+      riskLevel: "medium" as const,
+      description: "Writes a new file inside approved roots only."
+    },
+    {
+      name: "file.read",
+      riskLevel: "low" as const,
+      description: "Reads a file when path safety policy allows it."
+    },
+    {
+      name: "file.exists",
+      riskLevel: "low" as const,
+      description: "Checks whether a path exists when path safety policy allows it."
+    },
+    {
+      name: "file.list",
+      riskLevel: "low" as const,
+      description: "Lists a directory non-recursively when path safety policy allows it."
+    },
+    {
+      name: "file.ensure_dir",
+      riskLevel: "medium" as const,
+      description: "Creates an approved directory if needed."
+    }
+  ]) {
+    registry.registerTool(capability);
+  }
 
   return registry;
 }

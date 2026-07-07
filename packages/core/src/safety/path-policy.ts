@@ -115,6 +115,10 @@ function pathRisk(
     return isAllowedWriteRoot ? "medium" : "high";
   }
 
+  if (protectionKind === "home" && isAllowedWriteRoot) {
+    return "low";
+  }
+
   return protectionKind === "none" ? "low" : "high";
 }
 

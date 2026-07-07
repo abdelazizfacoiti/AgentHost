@@ -7,8 +7,9 @@ import {
 } from "@agenthost/core";
 import { describe, expect, it } from "vitest";
 import { runTool, type ToolExecutionContext } from "../tool-runner.js";
-import { createSystemTools, type SystemToolContext } from "../tools/system.js";
+import { createSystemTools } from "../tools/system.js";
 import { z } from "zod";
+import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
 
 class MemoryLogger implements AuditLogger {
   readonly entries: AuditLogEntry[] = [];
@@ -18,7 +19,7 @@ class MemoryLogger implements AuditLogger {
   }
 }
 
-function createContext(logger: MemoryLogger): SystemToolContext {
+function createContext(logger: MemoryLogger): AgentHostMcpContext {
   const registry = createBaseCapabilityRegistry();
   const policy = getPolicyProfile("strict");
   const config: AgentHostConfig = {
@@ -28,13 +29,7 @@ function createContext(logger: MemoryLogger): SystemToolContext {
     profile: "strict",
     policy
   };
-
-  return {
-    sessionId: "session_test",
-    config,
-    policy,
-    registry,
-    logger,
+  const linux: LinuxAutomation = {
     getSystemInfo: () => ({
       platform: "linux",
       arch: "x64",
@@ -43,7 +38,68 @@ function createContext(logger: MemoryLogger): SystemToolContext {
       profile: config.profile,
       strategies: registry.listStrategies(),
       tools: registry.listTools().map((tool) => tool.name)
-    })
+    }),
+    checkDependency: async (input) => ({
+      found: false,
+      kind: input.kind ?? "any",
+      name: input.name,
+      reason: "Not found in test context."
+    }),
+    detectApp: async (input) => ({
+      found: false,
+      appId: `unknown:${input.appName}`,
+      adapterAvailable: false,
+      availableStrategies: ["guide_only"],
+      recommendedStrategy: "guide_only",
+      appSensitivity: "unknown",
+      reason: "Not found in test context."
+    }),
+    listInstalledApps: async () => ({ apps: [], truncated: false }),
+    openApp: async (input) => ({
+      opened: false,
+      appId: `unknown:${input.appName}`,
+      strategy: "guide_only",
+      reason: "Not found in test context."
+    }),
+    getAppStrategy: async (input) => ({
+      found: false,
+      appId: `unknown:${input.appName}`,
+      adapterAvailable: false,
+      availableStrategies: ["guide_only"],
+      recommendedStrategy: "guide_only",
+      appSensitivity: "unknown",
+      taskType: input.taskType ?? "unknown",
+      reason: "Not found in test context."
+    }),
+    runSafeCommand: async () => ({
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 0,
+      timedOut: false,
+      truncated: false
+    }),
+    writeFile: async (input) => ({ path: input.path, bytesWritten: input.content.length, created: true }),
+    readFile: async (input) => ({
+      path: input.path,
+      content: "",
+      encoding: input.encoding ?? "utf8",
+      bytesRead: 0,
+      truncated: false
+    }),
+    fileExists: async (input) => ({ path: input.path, exists: false }),
+    listDirectory: async (input) => ({ path: input.path, entries: [], truncated: false }),
+    ensureDir: async (input) => ({ path: input.path, exists: true, created: true })
+  };
+
+  return {
+    sessionId: "session_test",
+    config,
+    policy,
+    registry,
+    logger,
+    linux
   };
 }
 
@@ -71,16 +127,10 @@ describe("system tools", () => {
     const result = await runTool(tool!, {}, context);
 
     expect(result.ok).toBe(true);
-    expect(result.data).toMatchObject({
-      tools: [
-        {
-          name: "system.get_info"
-        },
-        {
-          name: "system.list_capabilities"
-        }
-      ]
-    });
+    const data = result.data as { tools: Array<{ name: string }> };
+    expect(data.tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(["system.get_info", "system.list_capabilities", "system.check_dependency"])
+    );
   });
 
   it("rejects unexpected input before execution", async () => {
@@ -88,7 +138,7 @@ describe("system tools", () => {
     const context = createContext(logger) as ToolExecutionContext;
     const tool = createSystemTools()[0];
 
-    const result = await runTool(tool!, { unexpected: true }, context as SystemToolContext);
+    const result = await runTool(tool!, { unexpected: true }, context as AgentHostMcpContext);
 
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("invalid_input");

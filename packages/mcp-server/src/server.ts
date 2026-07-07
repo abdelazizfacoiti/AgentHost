@@ -12,9 +12,26 @@ import {
   type PolicyProfile,
   type ToolResult
 } from "@agenthost/core";
-import { getLinuxSystemInfo } from "@agenthost/os-linux";
+import {
+  checkLinuxDependency,
+  detectLinuxApp,
+  ensureLinuxDir,
+  getLinuxAppStrategy,
+  getLinuxSystemInfo,
+  linuxFileExists,
+  listInstalledLinuxApps,
+  listLinuxDirectory,
+  openLinuxApp,
+  readLinuxFile,
+  runSafeLinuxCommand,
+  writeLinuxFile
+} from "@agenthost/os-linux";
+import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { runTool } from "./tool-runner.js";
-import { createSystemTools, type SystemToolContext } from "./tools/system.js";
+import { createAppTools } from "./tools/app.js";
+import { createFileTools } from "./tools/file.js";
+import { createShellTools } from "./tools/shell.js";
+import { createSystemTools } from "./tools/system.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -27,6 +44,7 @@ export interface AgentHostServerOptions {
   registry?: CapabilityRegistry;
   logger?: AuditLogger;
   sessionId?: string;
+  linux?: LinuxAutomation;
 }
 
 function toMcpToolResult(result: ToolResult): {
@@ -46,20 +64,36 @@ function toMcpToolResult(result: ToolResult): {
 
 export async function createAgentHostMcpServer(options: AgentHostServerOptions = {}): Promise<{
   server: Server;
-  context: SystemToolContext;
+  context: AgentHostMcpContext;
 }> {
   const config = options.config ?? (await loadAgentHostConfig());
   const registry = options.registry ?? createBaseCapabilityRegistry();
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
-  const context: SystemToolContext = {
+  const policy = options.policy ?? config.policy;
+  const linux: LinuxAutomation =
+    options.linux ?? {
+      getSystemInfo: () => getLinuxSystemInfo(config, registry),
+      checkDependency: (input) => checkLinuxDependency(input),
+      detectApp: (input) => detectLinuxApp(input, policy),
+      listInstalledApps: (input) => listInstalledLinuxApps(input),
+      openApp: (input) => openLinuxApp(input, policy),
+      getAppStrategy: (input) => getLinuxAppStrategy(input, policy),
+      runSafeCommand: (input) => runSafeLinuxCommand(input),
+      writeFile: (input) => writeLinuxFile(input, { agentHostDir: config.agentHostDir }),
+      readFile: (input) => readLinuxFile(input, { agentHostDir: config.agentHostDir }),
+      fileExists: (input) => linuxFileExists(input, { agentHostDir: config.agentHostDir }),
+      listDirectory: (input) => listLinuxDirectory(input, { agentHostDir: config.agentHostDir }),
+      ensureDir: (input) => ensureLinuxDir(input, { agentHostDir: config.agentHostDir })
+    };
+  const context: AgentHostMcpContext = {
     sessionId: options.sessionId ?? createSessionId(),
     config,
-    policy: options.policy ?? config.policy,
+    policy,
     registry,
     logger,
-    getSystemInfo: () => getLinuxSystemInfo(config, registry)
+    linux
   };
-  const tools = createSystemTools();
+  const tools = [...createSystemTools(), ...createAppTools(), ...createShellTools(), ...createFileTools()];
 
   const server = new Server(
     {
