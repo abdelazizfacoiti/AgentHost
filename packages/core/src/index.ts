@@ -1,3 +1,4 @@
+export * from "./adapters.js";
 export * from "./capabilities.js";
 export * from "./config.js";
 export * from "./guide.js";

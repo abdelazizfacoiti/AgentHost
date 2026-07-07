@@ -26,7 +26,10 @@ describe("CapabilityRegistry", () => {
       "file.list",
       "file.ensure_dir",
       "guide.create_steps",
-      "guide.explain_strategy"
+      "guide.explain_strategy",
+      "adapter.list",
+      "adapter.get_capabilities",
+      "adapter.detect_for_app"
     ]);
   });
 

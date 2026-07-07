@@ -6,7 +6,7 @@ import type {
   InstalledAppSummary,
   ToolResult
 } from "@agenthost/core";
-import { toolSuccess } from "@agenthost/core";
+import { applyAdapterDetectionToAppResult, toolSuccess } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
@@ -57,10 +57,16 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
       getInput: (input) => ({ appName: input.appName })
     },
     async handler(input, context): Promise<ToolResult<AppDetectionResult>> {
+      const linuxResult = await context.linux.detectApp(input);
+      const data = applyAdapterDetectionToAppResult(
+        linuxResult,
+        context.adapters.detectForApp({ appName: input.appName, appId: linuxResult.appId })
+      );
+
       return toolSuccess({
         tool: "app.detect",
         riskLevel: "low",
-        data: await context.linux.detectApp(input),
+        data,
         observations: ["Detected app using generic Linux discovery."]
       });
     }
@@ -173,10 +179,16 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
         strategyInput.taskType = input.taskType as AppStrategyTaskType;
       }
 
+      const linuxResult = await context.linux.getAppStrategy(strategyInput);
+      const data = applyAdapterDetectionToAppResult(
+        linuxResult,
+        context.adapters.detectForApp({ appName: input.appName, appId: linuxResult.appId })
+      );
+
       return toolSuccess({
         tool: "app.get_strategy",
         riskLevel: "low",
-        data: await context.linux.getAppStrategy(strategyInput),
+        data,
         observations: ["Recommended an app-agnostic strategy."]
       });
     }

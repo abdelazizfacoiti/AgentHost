@@ -119,6 +119,21 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       riskLevel: "observe" as const,
       strategy: "guide_only" as const,
       description: "Explains why guide mode is recommended and suggests structured guide steps."
+    },
+    {
+      name: "adapter.list",
+      riskLevel: "observe" as const,
+      description: "Lists registered optional app adapters."
+    },
+    {
+      name: "adapter.get_capabilities",
+      riskLevel: "low" as const,
+      description: "Lists capabilities exposed by registered app adapters."
+    },
+    {
+      name: "adapter.detect_for_app",
+      riskLevel: "low" as const,
+      description: "Detects whether registered app adapters can support a given app."
     }
   ]) {
     registry.registerTool(capability);

@@ -2,10 +2,12 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
+  createAdapterRegistry,
   createBaseCapabilityRegistry,
   createSessionId,
   JsonlAuditLogger,
   loadAgentHostConfig,
+  type AdapterRegistry,
   type AgentHostConfig,
   type AuditLogger,
   type CapabilityRegistry,
@@ -28,6 +30,7 @@ import {
 } from "@agenthost/os-linux";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { runTool } from "./tool-runner.js";
+import { createAdapterTools } from "./tools/adapter.js";
 import { createAppTools } from "./tools/app.js";
 import { createFileTools } from "./tools/file.js";
 import { createGuideTools } from "./tools/guide.js";
@@ -43,6 +46,7 @@ export interface AgentHostServerOptions {
   config?: AgentHostConfig;
   policy?: PolicyProfile;
   registry?: CapabilityRegistry;
+  adapters?: AdapterRegistry;
   logger?: AuditLogger;
   sessionId?: string;
   linux?: LinuxAutomation;
@@ -69,6 +73,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
 }> {
   const config = options.config ?? (await loadAgentHostConfig());
   const registry = options.registry ?? createBaseCapabilityRegistry();
+  const adapters = options.adapters ?? createAdapterRegistry();
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
   const policy = options.policy ?? config.policy;
   const linux: LinuxAutomation =
@@ -91,11 +96,13 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     config,
     policy,
     registry,
+    adapters,
     logger,
     linux
   };
   const tools = [
     ...createSystemTools(),
+    ...createAdapterTools(),
     ...createAppTools(),
     ...createShellTools(),
     ...createFileTools(),

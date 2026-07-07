@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  createAdapterRegistry,
   createBaseCapabilityRegistry,
   createSessionId,
   JsonlAuditLogger,
@@ -29,12 +30,14 @@ const config = await loadAgentHostConfig({
   }
 });
 const registry = createBaseCapabilityRegistry();
+const adapters = createAdapterRegistry();
 const logger = new JsonlAuditLogger(config.logFile);
 const context = {
   sessionId: createSessionId(),
   config,
   policy: config.policy,
   registry,
+  adapters,
   logger,
   linux: {
     getSystemInfo: () => getLinuxSystemInfo(config, registry)
