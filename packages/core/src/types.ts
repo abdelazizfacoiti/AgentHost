@@ -87,11 +87,19 @@ export interface ToolCapability {
 
 export interface AppCapability {
   id: string;
+  adapterId?: string;
   appId?: string;
   strategy: AutomationStrategy;
   riskLevel: RiskLevel;
   description: string;
   inputSchema?: unknown;
+  safety: {
+    actionType: ActionType;
+    dataSensitivity?: DataSensitivity;
+    externalEffect?: boolean;
+    destructive?: boolean;
+    communicative?: boolean;
+  };
 }
 
 export interface CapabilityRegistrySnapshot {
@@ -129,12 +137,73 @@ export interface ToolContext {
   registry: CapabilityRegistrySnapshot;
 }
 
+export interface AdapterActionRequest {
+  adapterId: string;
+  capabilityId: string;
+  appId?: string;
+  input: unknown;
+}
+
 export interface AppAdapter {
   id: string;
   displayName: string;
+  appIds: string[];
   supportedPlatforms: string[];
+  matchesApp?(input: { appId?: string; appName?: string }): boolean;
   getCapabilities(): AppCapability[];
-  execute(action: unknown, context: ToolContext): Promise<ToolResult>;
+  execute(action: AdapterActionRequest, context: ToolContext): Promise<ToolResult>;
+}
+
+export interface AdapterSummary {
+  id: string;
+  displayName: string;
+  appIds: string[];
+  supportedPlatforms: string[];
+  capabilityCount: number;
+}
+
+export interface AdapterRegistrationResult {
+  registered: boolean;
+  skipped: boolean;
+  adapterId: string;
+  reason: string;
+}
+
+export interface AdapterCapabilityFilter {
+  adapterId?: string;
+  appId?: string;
+}
+
+export interface AdapterDetectionInput {
+  appName: string;
+  appId?: string;
+}
+
+export interface AdapterDetectionResult {
+  appName: string;
+  appId?: string;
+  adapterAvailable: boolean;
+  adapters: AdapterSummary[];
+  capabilities: AppCapability[];
+  recommendedStrategy: AutomationStrategy;
+  reason: string;
+}
+
+export interface AdapterListResult {
+  adapters: AdapterSummary[];
+}
+
+export interface AdapterCapabilitiesResult {
+  adapterId?: string;
+  appId?: string;
+  capabilities: AppCapability[];
+}
+
+export interface AdapterRegistrySnapshot {
+  get(adapterId: string): AppAdapter | undefined;
+  listAdapters(): AdapterSummary[];
+  listCapabilities(filter?: AdapterCapabilityFilter): AppCapability[];
+  detectForApp(input: AdapterDetectionInput): AdapterDetectionResult;
 }
 
 export const GUIDE_WORKFLOW_KINDS = [
@@ -292,6 +361,8 @@ export interface AppDetectionResult {
   executablePath?: string;
   desktopEntryPath?: string;
   adapterAvailable: boolean;
+  adapterIds?: string[];
+  adapterCapabilities?: AppCapability[];
   availableStrategies: AutomationStrategy[];
   recommendedStrategy: AutomationStrategy;
   appSensitivity: AppSensitivity;

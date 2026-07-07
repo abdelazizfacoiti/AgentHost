@@ -61,7 +61,7 @@ export function createSystemTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
         data: {
           strategies: context.registry.listStrategies(),
           tools: context.registry.listTools(),
-          appCapabilities: context.registry.listAppCapabilities()
+          appCapabilities: [...context.registry.listAppCapabilities(), ...context.adapters.listCapabilities()]
         },
         observations: ["Returned registered AgentHost capabilities."]
       });

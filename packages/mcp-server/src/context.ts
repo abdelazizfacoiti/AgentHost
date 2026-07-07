@@ -4,6 +4,7 @@ import type {
   AppOpenResult,
   AppStrategyResult,
   AppStrategyTaskType,
+  AdapterRegistrySnapshot,
   AuditLogger,
   CapabilityRegistrySnapshot,
   DependencyCheckResult,
@@ -45,6 +46,7 @@ export interface AgentHostMcpContext {
   config: AgentHostConfig;
   policy: PolicyProfile;
   registry: CapabilityRegistrySnapshot;
+  adapters: AdapterRegistrySnapshot;
   logger: AuditLogger;
   linux: LinuxAutomation;
 }

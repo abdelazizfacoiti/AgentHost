@@ -1,4 +1,5 @@
 import {
+  createAdapterRegistry,
   createBaseCapabilityRegistry,
   getPolicyProfile,
   type AgentHostConfig,
@@ -135,6 +136,7 @@ function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext &
     config,
     policy,
     registry,
+    adapters: createAdapterRegistry({ platform: "linux" }),
     logger: new MemoryLogger(),
     linux,
     calls
