@@ -1,0 +1,30 @@
+{
+  "name": "agenthost",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A universal local MCP server that gives AI agents safe, permissioned access to local computer capabilities.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "lint": "tsc -b --pretty false",
+    "test": "vitest run",
+    "start:mcp": "node packages/mcp-server/dist/index.js",
+    "smoke:mcp": "node scripts/smoke-mcp.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

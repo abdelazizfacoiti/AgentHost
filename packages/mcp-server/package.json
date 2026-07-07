@@ -1,0 +1,25 @@
+{
+  "name": "@agenthost/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agenthost-mcp": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@agenthost/core": "file:../core",
+    "@agenthost/os-linux": "file:../os-linux",
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "zod": "^3.25.76"
+  }
+}
