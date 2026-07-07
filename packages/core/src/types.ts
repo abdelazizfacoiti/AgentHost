@@ -183,6 +183,103 @@ export interface SafetyEvaluationContext {
   agentHostDir?: string;
 }
 
+export type DependencyKind = "command" | "desktop_app" | "any";
+
+export interface DependencyCheckResult {
+  found: boolean;
+  kind: DependencyKind;
+  name: string;
+  commandPath?: string;
+  desktopEntryPath?: string;
+  displayName?: string;
+  reason: string;
+}
+
+export interface InstalledAppSummary {
+  appId: string;
+  displayName: string;
+  command?: string;
+  executablePath?: string;
+  desktopEntryPath?: string;
+}
+
+export interface AppDetectionResult {
+  found: boolean;
+  appId: string;
+  displayName?: string;
+  executablePath?: string;
+  desktopEntryPath?: string;
+  adapterAvailable: boolean;
+  availableStrategies: AutomationStrategy[];
+  recommendedStrategy: AutomationStrategy;
+  appSensitivity: AppSensitivity;
+  reason: string;
+}
+
+export type AppStrategyTaskType = "open" | "inspect" | "automate" | "unknown";
+
+export interface AppStrategyResult extends AppDetectionResult {
+  taskType: AppStrategyTaskType;
+}
+
+export interface AppOpenResult {
+  opened: boolean;
+  appId: string;
+  displayName?: string;
+  pid?: number;
+  strategy: AutomationStrategy;
+  command?: string;
+  reason: string;
+}
+
+export interface ShellRunResult {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+  truncated: boolean;
+}
+
+export interface FileWriteResult {
+  path: string;
+  bytesWritten: number;
+  created: true;
+}
+
+export interface FileReadResult {
+  path: string;
+  content: string;
+  encoding: "utf8" | "base64";
+  bytesRead: number;
+  truncated: boolean;
+}
+
+export interface FileExistsResult {
+  path: string;
+  exists: boolean;
+  type?: "file" | "directory" | "other";
+}
+
+export interface FileListEntry {
+  name: string;
+  path: string;
+  type: "file" | "directory" | "other";
+}
+
+export interface FileListResult {
+  path: string;
+  entries: FileListEntry[];
+  truncated: boolean;
+}
+
+export interface FileEnsureDirResult {
+  path: string;
+  exists: boolean;
+  created: boolean;
+}
+
 export interface SystemInfo {
   platform: string;
   arch: string;

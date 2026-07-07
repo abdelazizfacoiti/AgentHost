@@ -1,7 +1,8 @@
-import type { CapabilityList, SystemInfo, ToolResult } from "@agenthost/core";
+import type { CapabilityList, DependencyCheckResult, DependencyKind, SystemInfo, ToolResult } from "@agenthost/core";
 import { toolSuccess } from "@agenthost/core";
 import { z } from "zod";
-import type { AgentHostToolDefinition, ToolExecutionContext } from "../tool-runner.js";
+import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
+import type { AgentHostMcpContext } from "../context.js";
 
 const emptyInputSchema = z.object({}).strict();
 
@@ -13,12 +14,17 @@ const emptyMcpInputSchema = {
 
 type EmptyInput = z.infer<typeof emptyInputSchema>;
 
-export interface SystemToolContext extends ToolExecutionContext {
-  getSystemInfo(): Promise<SystemInfo> | SystemInfo;
-}
+const checkDependencyInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    kind: z.enum(["command", "desktop_app", "any"]).optional()
+  })
+  .strict();
 
-export function createSystemTools(): AgentHostToolDefinition<EmptyInput, unknown, SystemToolContext>[] {
-  const getInfo: AgentHostToolDefinition<EmptyInput, SystemInfo, SystemToolContext> = {
+type CheckDependencyInput = z.infer<typeof checkDependencyInputSchema>;
+
+export function createSystemTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
+  const getInfo: AgentHostToolDefinition<EmptyInput, SystemInfo, AgentHostMcpContext> = {
     name: "system.get_info",
     description: "Returns local system information and AgentHost runtime details.",
     riskLevel: "observe",
@@ -32,13 +38,13 @@ export function createSystemTools(): AgentHostToolDefinition<EmptyInput, unknown
       return toolSuccess({
         tool: "system.get_info",
         riskLevel: "observe",
-        data: await context.getSystemInfo(),
+        data: await context.linux.getSystemInfo(),
         observations: ["Returned local runtime information."]
       });
     }
   };
 
-  const listCapabilities: AgentHostToolDefinition<EmptyInput, CapabilityList, SystemToolContext> = {
+  const listCapabilities: AgentHostToolDefinition<EmptyInput, CapabilityList, AgentHostMcpContext> = {
     name: "system.list_capabilities",
     description: "Lists AgentHost strategies, tools, and registered app capabilities.",
     riskLevel: "observe",
@@ -62,5 +68,48 @@ export function createSystemTools(): AgentHostToolDefinition<EmptyInput, unknown
     }
   };
 
-  return [getInfo, listCapabilities];
+  const checkDependency: AgentHostToolDefinition<CheckDependencyInput, DependencyCheckResult, AgentHostMcpContext> = {
+    name: "system.check_dependency",
+    description: "Checks whether a command or desktop app appears to be available.",
+    riskLevel: "low",
+    inputSchema: checkDependencyInputSchema,
+    mcpInputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200
+        },
+        kind: {
+          type: "string",
+          enum: ["command", "desktop_app", "any"]
+        }
+      },
+      required: ["name"],
+      additionalProperties: false
+    },
+    inputSummary: "Check dependency",
+    safety: {
+      actionType: "inspect"
+    },
+    async handler(input, context): Promise<ToolResult<DependencyCheckResult>> {
+      const dependencyInput: { name: string; kind?: DependencyKind } = {
+        name: input.name
+      };
+
+      if (input.kind !== undefined) {
+        dependencyInput.kind = input.kind;
+      }
+
+      return toolSuccess({
+        tool: "system.check_dependency",
+        riskLevel: "low",
+        data: await context.linux.checkDependency(dependencyInput),
+        observations: ["Checked dependency availability without executing it."]
+      });
+    }
+  };
+
+  return [getInfo, listCapabilities, checkDependency];
 }

@@ -36,7 +36,9 @@ const context = {
   policy: config.policy,
   registry,
   logger,
-  getSystemInfo: () => getLinuxSystemInfo(config, registry)
+  linux: {
+    getSystemInfo: () => getLinuxSystemInfo(config, registry)
+  }
 };
 const tools = createSystemTools();
 

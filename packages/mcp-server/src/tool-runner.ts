@@ -38,6 +38,9 @@ export interface AgentHostToolDefinition<
   handler(input: TInput, context: TContext): Promise<ToolResult<TData>> | ToolResult<TData>;
 }
 
+export type AnyAgentHostToolDefinition<TContext extends ToolExecutionContext = ToolExecutionContext> =
+  AgentHostToolDefinition<any, any, TContext>;
+
 function createAuditLogEntry(
   result: ToolResult,
   context: ToolExecutionContext,

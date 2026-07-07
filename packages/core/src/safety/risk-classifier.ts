@@ -106,10 +106,6 @@ export function classifyRisk(
   policy: PolicyProfile,
   context: SafetyEvaluationContext = {}
 ): SafetyDecision {
-  if (input.actionType === "shell_command" && input.shellCommand !== undefined) {
-    return classifyShellCommand(input.shellCommand, policy, context);
-  }
-
   let riskLevel = baseRiskForAction(input.actionType);
   const appSensitivity = classifyAppSensitivity(input);
   const reasons: string[] = [];
