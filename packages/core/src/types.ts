@@ -137,6 +137,88 @@ export interface AppAdapter {
   execute(action: unknown, context: ToolContext): Promise<ToolResult>;
 }
 
+export const GUIDE_WORKFLOW_KINDS = [
+  "unsupported_app",
+  "unknown_app",
+  "sensitive_app",
+  "unsafe_action",
+  "manual_review",
+  "general"
+] as const;
+export type GuideWorkflowKind = (typeof GUIDE_WORKFLOW_KINDS)[number];
+
+export interface GuideToolSuggestion {
+  tool: string;
+  reason: string;
+  input?: unknown;
+}
+
+export interface GuideStep {
+  id: string;
+  title: string;
+  instruction: string;
+  appName?: string;
+  riskLevel: RiskLevel;
+  expectedResult?: string;
+  warning?: string;
+  userActionRequired: boolean;
+  canAutomateLater: boolean;
+  relatedToolSuggestion?: GuideToolSuggestion;
+}
+
+export interface GuideCreateStepsInput {
+  workflowGoal: string;
+  appName?: string;
+  appId?: string;
+  workflowKind?: GuideWorkflowKind;
+  taskType?: AppStrategyTaskType;
+  reason?: string;
+  availableStrategies?: AutomationStrategy[];
+  knownAppSensitivity?: AppSensitivity;
+  knownRiskLevel?: RiskLevel;
+}
+
+export interface GuideResult {
+  strategy: "guide_only";
+  workflowGoal: string;
+  workflowKind: GuideWorkflowKind;
+  appName?: string;
+  appSensitivity: AppSensitivity;
+  riskLevel: RiskLevel;
+  summary: string;
+  warnings: string[];
+  steps: GuideStep[];
+  canAutomateLater: boolean;
+  relatedToolSuggestions: GuideToolSuggestion[];
+}
+
+export interface GuideSuggestion {
+  strategy: "guide_only";
+  reason: string;
+  warning?: string;
+  suggestedTool: "guide.create_steps";
+  input: GuideCreateStepsInput;
+}
+
+export interface GuideExplainStrategyInput {
+  appName?: string;
+  taskType?: AppStrategyTaskType;
+  availableStrategies?: AutomationStrategy[];
+  recommendedStrategy?: AutomationStrategy;
+  reason?: string;
+  knownAppSensitivity?: AppSensitivity;
+}
+
+export interface GuideStrategyExplanationResult {
+  recommendedStrategy: AutomationStrategy;
+  appName?: string;
+  appSensitivity: AppSensitivity;
+  summary: string;
+  reasons: string[];
+  warnings: string[];
+  guideSuggestion: GuideSuggestion;
+}
+
 export interface SafetyInput {
   tool: string;
   actionType: ActionType;
@@ -214,6 +296,7 @@ export interface AppDetectionResult {
   recommendedStrategy: AutomationStrategy;
   appSensitivity: AppSensitivity;
   reason: string;
+  guideSuggestion?: GuideSuggestion;
 }
 
 export type AppStrategyTaskType = "open" | "inspect" | "automate" | "unknown";
