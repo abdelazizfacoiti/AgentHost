@@ -3,11 +3,15 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import {
   classifyAppSensitivity,
+  createGuideSuggestion,
   type AppDetectionResult,
   type AppOpenResult,
   type AppStrategyResult,
   type AppStrategyTaskType,
   type AutomationStrategy,
+  type AppSensitivity,
+  type GuideCreateStepsInput,
+  type GuideWorkflowKind,
   type InstalledAppSummary,
   type PolicyProfile
 } from "@agenthost/core";
@@ -44,22 +48,76 @@ function strategiesFor(found: boolean, policy: PolicyProfile): AutomationStrateg
   return strategies;
 }
 
+function guideKindForDetection(found: boolean, sensitivity: AppSensitivity): GuideWorkflowKind | undefined {
+  if (!found) {
+    return "unknown_app";
+  }
+
+  if (sensitivity !== "normal" && sensitivity !== "unknown") {
+    return "sensitive_app";
+  }
+
+  return undefined;
+}
+
+function guideSuggestionForDetection(input: {
+  appName: string;
+  appId: string;
+  found: boolean;
+  sensitivity: AppSensitivity;
+  reason: string;
+  availableStrategies: AutomationStrategy[];
+  taskType?: AppStrategyTaskType;
+}) {
+  const guideInput: GuideCreateStepsInput = {
+    workflowGoal: `Use ${input.appName} safely with manual guide mode.`,
+    appName: input.appName,
+    appId: input.appId,
+    reason: input.reason,
+    availableStrategies: input.availableStrategies,
+    knownAppSensitivity: input.sensitivity
+  };
+  const workflowKind = guideKindForDetection(input.found, input.sensitivity);
+
+  if (workflowKind !== undefined) {
+    guideInput.workflowKind = workflowKind;
+  }
+
+  if (input.taskType !== undefined) {
+    guideInput.taskType = input.taskType;
+  }
+
+  return createGuideSuggestion(guideInput);
+}
+
 function detectionFromDesktopEntry(
   appName: string,
   entry: DesktopEntry,
   policy: PolicyProfile,
   executablePath?: string
 ): AppDetectionResult {
+  const appId = slugify(entry.appId);
+  const availableStrategies = strategiesFor(true, policy);
+  const appSensitivity = classifyAppSensitivity({ appId: entry.appId, appName: entry.displayName });
+  const reason = `Found generic Linux desktop entry for ${appName}.`;
   const result: AppDetectionResult = {
     found: true,
-    appId: slugify(entry.appId),
+    appId,
     displayName: entry.displayName,
     desktopEntryPath: entry.desktopEntryPath,
     adapterAvailable: false,
-    availableStrategies: strategiesFor(true, policy),
+    availableStrategies,
     recommendedStrategy: "guide_only",
-    appSensitivity: classifyAppSensitivity({ appId: entry.appId, appName: entry.displayName }),
-    reason: `Found generic Linux desktop entry for ${appName}.`
+    appSensitivity,
+    reason,
+    guideSuggestion: guideSuggestionForDetection({
+      appName: entry.displayName,
+      appId,
+      found: true,
+      sensitivity: appSensitivity,
+      reason,
+      availableStrategies
+    })
   };
 
   if (executablePath !== undefined) {
@@ -95,16 +153,29 @@ export async function detectLinuxApp(
   const commandPath = await findCommandPath(input.appName, context);
 
   if (commandPath !== undefined) {
+    const appId = slugify(input.appName);
+    const availableStrategies = strategiesFor(true, policy);
+    const appSensitivity = classifyAppSensitivity({ appId: input.appName, appName: input.appName });
+    const reason = "Found command on PATH.";
+
     return {
       found: true,
-      appId: slugify(input.appName),
+      appId,
       displayName: input.appName,
       executablePath: commandPath,
       adapterAvailable: false,
-      availableStrategies: strategiesFor(true, policy),
+      availableStrategies,
       recommendedStrategy: "guide_only",
-      appSensitivity: classifyAppSensitivity({ appId: input.appName, appName: input.appName }),
-      reason: "Found command on PATH."
+      appSensitivity,
+      reason,
+      guideSuggestion: guideSuggestionForDetection({
+        appName: input.appName,
+        appId,
+        found: true,
+        sensitivity: appSensitivity,
+        reason,
+        availableStrategies
+      })
     };
   }
 
@@ -119,14 +190,27 @@ export async function detectLinuxApp(
     );
   }
 
+  const appId = `unknown:${slugify(input.appName)}`;
+  const appSensitivity = classifyAppSensitivity({ appName: input.appName });
+  const availableStrategies: AutomationStrategy[] = ["guide_only"];
+  const reason = "No adapter, CLI, API, browser, accessibility, or GUI method is available yet.";
+
   return {
     found: false,
-    appId: `unknown:${slugify(input.appName)}`,
+    appId,
     adapterAvailable: false,
-    availableStrategies: ["guide_only"],
+    availableStrategies,
     recommendedStrategy: "guide_only",
-    appSensitivity: classifyAppSensitivity({ appName: input.appName }),
-    reason: "No adapter, CLI, API, browser, accessibility, or GUI method is available yet."
+    appSensitivity,
+    reason,
+    guideSuggestion: guideSuggestionForDetection({
+      appName: input.appName,
+      appId,
+      found: false,
+      sensitivity: appSensitivity,
+      reason,
+      availableStrategies
+    })
   };
 }
 
@@ -223,11 +307,22 @@ export async function getLinuxAppStrategy(
   context: LinuxLookupContext = {}
 ): Promise<AppStrategyResult> {
   const detection = await detectLinuxApp({ appName: input.appName }, policy, context);
-
-  return {
+  const strategyResult: AppStrategyResult = {
     ...detection,
     taskType: input.taskType ?? "unknown"
   };
+
+  strategyResult.guideSuggestion = guideSuggestionForDetection({
+    appName: detection.displayName ?? input.appName,
+    appId: detection.appId,
+    found: detection.found,
+    sensitivity: detection.appSensitivity,
+    reason: detection.reason,
+    availableStrategies: detection.availableStrategies,
+    taskType: strategyResult.taskType
+  });
+
+  return strategyResult;
 }
 
 export async function openLinuxApp(

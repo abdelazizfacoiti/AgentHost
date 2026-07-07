@@ -24,7 +24,9 @@ describe("CapabilityRegistry", () => {
       "file.read",
       "file.exists",
       "file.list",
-      "file.ensure_dir"
+      "file.ensure_dir",
+      "guide.create_steps",
+      "guide.explain_strategy"
     ]);
   });
 

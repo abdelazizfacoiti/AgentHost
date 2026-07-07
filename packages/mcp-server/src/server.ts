@@ -30,6 +30,7 @@ import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { runTool } from "./tool-runner.js";
 import { createAppTools } from "./tools/app.js";
 import { createFileTools } from "./tools/file.js";
+import { createGuideTools } from "./tools/guide.js";
 import { createShellTools } from "./tools/shell.js";
 import { createSystemTools } from "./tools/system.js";
 
@@ -93,7 +94,13 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     logger,
     linux
   };
-  const tools = [...createSystemTools(), ...createAppTools(), ...createShellTools(), ...createFileTools()];
+  const tools = [
+    ...createSystemTools(),
+    ...createAppTools(),
+    ...createShellTools(),
+    ...createFileTools(),
+    ...createGuideTools()
+  ];
 
   const server = new Server(
     {

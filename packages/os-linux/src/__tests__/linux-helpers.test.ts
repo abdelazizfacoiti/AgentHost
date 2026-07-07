@@ -39,7 +39,29 @@ describe("Linux helpers", () => {
     ).resolves.toMatchObject({
       found: false,
       recommendedStrategy: "guide_only",
-      availableStrategies: ["guide_only"]
+      availableStrategies: ["guide_only"],
+      guideSuggestion: {
+        suggestedTool: "guide.create_steps",
+        input: {
+          workflowKind: "unknown_app"
+        }
+      }
+    });
+  });
+
+  it("prefers guide suggestions for sensitive apps", async () => {
+    await expect(
+      detectLinuxApp({ appName: "Gmail" }, getPolicyProfile("dev"), {
+        env: { PATH: "" },
+        homeDir: path.join(os.tmpdir(), "agenthost-empty-home")
+      })
+    ).resolves.toMatchObject({
+      recommendedStrategy: "guide_only",
+      appSensitivity: "communication",
+      guideSuggestion: {
+        strategy: "guide_only",
+        warning: expect.stringContaining("will not send messages")
+      }
     });
   });
 

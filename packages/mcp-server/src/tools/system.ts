@@ -63,7 +63,7 @@ export function createSystemTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
           tools: context.registry.listTools(),
           appCapabilities: context.registry.listAppCapabilities()
         },
-        observations: ["Returned registered Phase 0 and Phase 1 capabilities."]
+        observations: ["Returned registered AgentHost capabilities."]
       });
     }
   };

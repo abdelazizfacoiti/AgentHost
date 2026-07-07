@@ -107,6 +107,18 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       name: "file.ensure_dir",
       riskLevel: "medium" as const,
       description: "Creates an approved directory if needed."
+    },
+    {
+      name: "guide.create_steps",
+      riskLevel: "observe" as const,
+      strategy: "guide_only" as const,
+      description: "Creates structured guide-only steps for unsupported, unknown, sensitive, or unsafe workflows."
+    },
+    {
+      name: "guide.explain_strategy",
+      riskLevel: "observe" as const,
+      strategy: "guide_only" as const,
+      description: "Explains why guide mode is recommended and suggests structured guide steps."
     }
   ]) {
     registry.registerTool(capability);
