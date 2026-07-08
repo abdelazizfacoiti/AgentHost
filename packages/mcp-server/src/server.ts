@@ -47,6 +47,7 @@ import {
 } from "@agenthost/os-linux";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { ConfirmationManager } from "./confirmation.js";
+import { GrantStore } from "./grants.js";
 import { runTool } from "./tool-runner.js";
 import { createAdapterTools } from "./tools/adapter.js";
 import { createAccessibilityTools } from "./tools/accessibility.js";
@@ -55,6 +56,7 @@ import { BLENDER_RUN_PYTHON_TOOL, createBlenderTools } from "./tools/blender.js"
 import { createDesktopTools } from "./tools/desktop.js";
 import { createFileTools } from "./tools/file.js";
 import { createGuideTools } from "./tools/guide.js";
+import { createPolicyTools } from "./tools/policy.js";
 import { createShellTools } from "./tools/shell.js";
 import { createSystemTools } from "./tools/system.js";
 import { createWindowTools } from "./tools/window.js";
@@ -101,6 +103,7 @@ export interface AgentHostServerOptions {
   logger?: AuditLogger;
   sessionId?: string;
   linux?: LinuxAutomation;
+  sessionGrants?: import("@agenthost/core").CapabilityGrant[];
 }
 
 function toMcpToolResult(result: ToolResult): {
@@ -129,6 +132,10 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
   const policy = options.policy ?? config.policy;
   const confirmations = new ConfirmationManager();
+  const grants = new GrantStore({
+    persistentGrants: policy.grants,
+    ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
+  });
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -169,6 +176,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     adapters,
     logger,
     confirmations,
+    grants,
     linux
   };
   const tools = [
@@ -181,7 +189,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createDesktopTools(),
     ...createWindowTools(),
     ...createAccessibilityTools(),
-    ...createGuideTools()
+    ...createGuideTools(),
+    ...createPolicyTools()
   ];
 
   const server = new Server(
@@ -229,6 +238,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       await logger.log({
         timestamp: new Date().toISOString(),
         sessionId: context.sessionId,
+        profile: context.policy.name,
         tool: request.params.name,
         riskLevel: "observe",
         inputSummary: "Unknown tool call",

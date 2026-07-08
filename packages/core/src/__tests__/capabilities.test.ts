@@ -8,13 +8,17 @@ describe("CapabilityRegistry", () => {
     expect(registry.listStrategies()).toEqual([...AUTOMATION_STRATEGIES]);
   });
 
-  it("registers base AgentHost tools through Phase 9", () => {
+  it("registers base AgentHost tools through Phase 12", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
       "system.get_info",
       "system.list_capabilities",
       "system.check_dependency",
+      "policy.get_profile",
+      "policy.list_profiles",
+      "policy.list_grants",
+      "policy.explain_decision",
       "app.detect",
       "app.list_installed",
       "app.open",

@@ -238,6 +238,140 @@ describe("evaluateSafety", () => {
     expect(result.allowed).toBe(false);
     expect(result.matchedRules).toContain("action.unknown.conservative");
   });
+
+  it("requires explicit grants for private-data reads in the private-data profile", () => {
+    const result = evaluateSafety(
+      {
+        tool: "file.read",
+        actionType: "file_read",
+        filePath: "/tmp/private.txt",
+        dataSensitivity: "sensitive"
+      },
+      getPolicyProfile("private-data"),
+      { homeDir }
+    );
+
+    expect(result.blocked).toBe(true);
+    expect(result.approval.status).toBe("denied");
+    expect(result.matchedRules).toContain("profile.default.file_read.deny");
+  });
+
+  it("lets an explicit grant allow private-data reads without weakening other safety rules", () => {
+    const result = evaluateSafety(
+      {
+        tool: "file.read",
+        actionType: "file_read",
+        filePath: "/tmp/private.txt",
+        dataSensitivity: "sensitive"
+      },
+      getPolicyProfile("private-data", {
+        grants: [
+          {
+            id: "private-data-read",
+            scope: "persistent",
+            effect: "allow",
+            match: {
+              tools: ["file.read"],
+              dataSensitivities: ["sensitive"]
+            }
+          }
+        ]
+      }),
+      { homeDir }
+    );
+
+    expect(result.blocked).toBe(false);
+    expect(result.allowed).toBe(false);
+    expect(result.approval.status).toBe("required");
+    expect(result.grantDecision.allowedByGrantIds).toEqual(["private-data-read"]);
+  });
+
+  it("requires an explicit grant before reading private data from communication apps", () => {
+    const withoutGrant = evaluateSafety(
+      {
+        tool: "accessibility.inspect_element",
+        actionType: "inspect",
+        appName: "Gmail",
+        dataSensitivity: "sensitive"
+      },
+      getPolicyProfile("dev"),
+      { homeDir }
+    );
+    const withGrant = evaluateSafety(
+      {
+        tool: "accessibility.inspect_element",
+        actionType: "inspect",
+        appName: "Gmail",
+        dataSensitivity: "sensitive"
+      },
+      getPolicyProfile("dev", {
+        grants: [
+          {
+            id: "comm-private-read",
+            scope: "persistent",
+            effect: "allow",
+            match: {
+              tools: ["accessibility.inspect_element"],
+              appSensitivities: ["communication"],
+              dataSensitivities: ["sensitive"]
+            }
+          }
+        ]
+      }),
+      { homeDir }
+    );
+
+    expect(withoutGrant.blocked).toBe(true);
+    expect(withoutGrant.matchedRules).toContain("app.communication.private_data_requires_grant");
+    expect(withGrant.blocked).toBe(false);
+    expect(withGrant.grantDecision.allowedByGrantIds).toEqual(["comm-private-read"]);
+  });
+
+  it("lets gui-dev permit generic GUI input while still requiring preview and confirmation", () => {
+    const result = evaluateSafety(
+      {
+        tool: "desktop.click",
+        actionType: "gui_click",
+        appName: "Notes"
+      },
+      getPolicyProfile("gui-dev"),
+      { homeDir }
+    );
+
+    expect(result.blocked).toBe(false);
+    expect(result.allowed).toBe(true);
+    expect(result.grantDecision.requiresDryRun).toBe(true);
+    expect(result.grantDecision.requiresConfirmationToken).toBe(true);
+  });
+
+  it("ignores expired grants", () => {
+    const result = evaluateSafety(
+      {
+        tool: "file.read",
+        actionType: "file_read",
+        filePath: "/tmp/private.txt",
+        dataSensitivity: "sensitive"
+      },
+      getPolicyProfile("private-data", {
+        grants: [
+          {
+            id: "expired-private-read",
+            scope: "persistent",
+            effect: "allow",
+            expiresAt: "2000-01-01T00:00:00.000Z",
+            match: {
+              tools: ["file.read"],
+              dataSensitivities: ["sensitive"]
+            }
+          }
+        ]
+      }),
+      { homeDir }
+    );
+
+    expect(result.blocked).toBe(true);
+    expect(result.grantDecision.allowedByGrantIds).toEqual([]);
+  });
 });
 
 describe("evaluateApprovalRequirement", () => {

@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { ConfirmationManager } from "../confirmation.js";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
+import { GrantStore } from "../grants.js";
 import { runTool } from "../tool-runner.js";
 import { createDesktopTools } from "../tools/desktop.js";
 
@@ -243,6 +244,7 @@ function createContext(
     registry,
     adapters: createAdapterRegistry({ platform: "linux" }),
     confirmations: new ConfirmationManager(),
+    grants: new GrantStore({ persistentGrants: policy.grants }),
     logger,
     linux,
     calls
@@ -338,7 +340,7 @@ describe("desktop MCP tools", () => {
       }
     });
 
-    expect(context.calls).toEqual([]);
+    expect(context.calls).toEqual(["desktop.get_active_window", "desktop.get_active_window"]);
   });
 
   it("previews a desktop click by validating the active window without clicking", async () => {
@@ -412,6 +414,16 @@ describe("desktop MCP tools", () => {
       allowGenericClick: true,
       allowGenericType: true
     });
+    context.linux.getActiveWindow = async () => ({
+      supported: true,
+      backend: "xdotool",
+      activeWindow: {
+        windowId: "99",
+        appName: "Bitwarden",
+        title: "Vault"
+      },
+      reason: "Fake sensitive active window."
+    });
 
     await expect(
       callTool(context, "desktop.type_text", {
@@ -429,7 +441,7 @@ describe("desktop MCP tools", () => {
       callTool(context, "desktop.click", {
         x: 1,
         y: 2,
-        activeWindow: { appName: "Gmail" }
+        activeWindow: { appName: "Bitwarden" }
       })
     ).resolves.toMatchObject({
       ok: false,
@@ -472,7 +484,7 @@ describe("desktop MCP tools", () => {
     ).resolves.toMatchObject({
       ok: false,
       error: {
-        code: "confirmation_required"
+        code: "dry_run_required"
       }
     });
 

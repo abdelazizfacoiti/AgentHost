@@ -10,6 +10,8 @@ import {
   loadAgentHostConfig
 } from "../packages/core/dist/index.js";
 import { getLinuxSystemInfo } from "../packages/os-linux/dist/index.js";
+import { ConfirmationManager } from "../packages/mcp-server/dist/confirmation.js";
+import { GrantStore } from "../packages/mcp-server/dist/grants.js";
 import { runTool } from "../packages/mcp-server/dist/tool-runner.js";
 import { createSystemTools } from "../packages/mcp-server/dist/tools/system.js";
 
@@ -39,6 +41,8 @@ const context = {
   registry,
   adapters,
   logger,
+  confirmations: new ConfirmationManager(),
+  grants: new GrantStore({ persistentGrants: config.policy.grants }),
   linux: {
     getSystemInfo: () => getLinuxSystemInfo(config, registry)
   }

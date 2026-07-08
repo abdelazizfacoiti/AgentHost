@@ -1,6 +1,7 @@
 export * from "./adapters.js";
 export * from "./capabilities.js";
 export * from "./config.js";
+export * from "./grants.js";
 export * from "./guide.js";
 export * from "./logging.js";
 export * from "./policies.js";

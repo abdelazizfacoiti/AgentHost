@@ -184,6 +184,23 @@ export function confirmationRequired(reason: string): ToolConfirmationInfo {
   };
 }
 
+export function missingConfirmationReason(safety: SafetyDecision): {
+  code: "dry_run_required" | "confirmation_required";
+  reason: string;
+} {
+  if (safety.grantDecision.requiresDryRun) {
+    return {
+      code: "dry_run_required",
+      reason: "This action requires a dry-run preview before execution."
+    };
+  }
+
+  return {
+    code: "confirmation_required",
+    reason: "Execution requires a fresh dry-run preview confirmation token."
+  };
+}
+
 export function usedConfirmation(tokenId: string | undefined, reason: string): ToolConfirmationInfo {
   return {
     status: "tokenUsed",

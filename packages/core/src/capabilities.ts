@@ -59,6 +59,26 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Checks whether a command or desktop app appears to be available."
     },
     {
+      name: "policy.get_profile",
+      riskLevel: "observe" as const,
+      description: "Returns the active AgentHost permission profile and default grant requirements."
+    },
+    {
+      name: "policy.list_profiles",
+      riskLevel: "observe" as const,
+      description: "Lists built-in AgentHost permission profiles and their default behavior."
+    },
+    {
+      name: "policy.list_grants",
+      riskLevel: "observe" as const,
+      description: "Lists active persistent and session grants as safe summaries."
+    },
+    {
+      name: "policy.explain_decision",
+      riskLevel: "low" as const,
+      description: "Explains how the active profile and grants classify a potential action."
+    },
+    {
       name: "app.detect",
       riskLevel: "low" as const,
       description: "Detects a Linux app generically and reports available automation strategies."

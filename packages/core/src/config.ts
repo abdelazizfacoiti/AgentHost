@@ -3,15 +3,102 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { getPolicyProfile } from "./policies.js";
-import type { AgentHostConfig, PolicyProfileName } from "./types.js";
+import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, PolicyProfileName } from "./types.js";
 
-const policyProfileNameSchema = z.enum(["strict", "dev"]);
+const policyProfileNameSchema = z.enum([
+  "strict",
+  "dev",
+  "gui-dev",
+  "private-data",
+  "autopilot-future-disabled-by-default"
+]);
+
+const automationStrategySchema = z.enum([
+  "app_adapter",
+  "official_api",
+  "cli_or_script",
+  "browser_automation",
+  "accessibility",
+  "gui_control",
+  "guide_only"
+]);
+
+const actionTypeSchema = z.enum([
+  "observe",
+  "inspect",
+  "app_launch",
+  "shell_command",
+  "file_read",
+  "file_write",
+  "file_delete",
+  "gui_click",
+  "gui_type",
+  "accessibility_action",
+  "accessibility_set_value",
+  "accessibility_focus",
+  "browser_action",
+  "communication_send",
+  "upload",
+  "system_change",
+  "unknown"
+]);
+
+const appSensitivitySchema = z.enum([
+  "normal",
+  "communication",
+  "financial",
+  "credential_or_security",
+  "system_settings",
+  "unknown"
+]);
+
+const dataSensitivitySchema = z.enum(["none", "low", "sensitive", "secret"]);
+const riskLevelSchema = z.enum(["observe", "low", "medium", "high", "blocked"]);
+
+const capabilityGrantSchema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    scope: z.enum(["session", "persistent"]),
+    effect: z.enum(["allow", "deny", "guide_only"]),
+    description: z.string().trim().min(1).max(500).optional(),
+    createdAt: z.string().datetime().optional(),
+    expiresAt: z.string().datetime().optional(),
+    match: z
+      .object({
+        tools: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+        strategies: z.array(automationStrategySchema).max(20).optional(),
+        actionTypes: z.array(actionTypeSchema).max(50).optional(),
+        appNames: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+        appIds: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+        appSensitivities: z.array(appSensitivitySchema).max(20).optional(),
+        dataSensitivities: z.array(dataSensitivitySchema).max(20).optional(),
+        fileRoots: z.array(z.string().trim().min(1).max(1000)).max(100).optional(),
+        commandAllowlist: z.array(z.string().trim().min(1).max(500)).max(100).optional(),
+        networkDomains: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
+        oauthScopes: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
+        generatedToolIds: z.array(z.string().trim().min(1).max(200)).max(100).optional()
+      })
+      .strict(),
+    requirements: z
+      .object({
+        requiresDryRun: z.boolean().optional(),
+        requiresConfirmationToken: z.boolean().optional(),
+        requiresApproval: z.boolean().optional(),
+        requiresExactTarget: z.boolean().optional(),
+        maxRiskLevel: riskLevelSchema.optional(),
+        allowedRoots: z.array(z.string().trim().min(1).max(1000)).max(100).optional()
+      })
+      .strict()
+      .optional()
+  })
+  .strict();
 
 const configFileSchema = z
   .object({
     agentHostDir: z.string().min(1).optional(),
     logFile: z.string().min(1).optional(),
-    profile: policyProfileNameSchema.optional()
+    profile: policyProfileNameSchema.optional(),
+    grants: z.array(capabilityGrantSchema).max(500).optional()
   })
   .strict();
 
@@ -52,6 +139,57 @@ async function readConfigFile(configPath: string): Promise<z.infer<typeof config
   }
 }
 
+function normalizeGrantMatch(match: z.infer<typeof capabilityGrantSchema>["match"]): CapabilityGrantMatch {
+  return {
+    ...(match.tools === undefined ? {} : { tools: match.tools }),
+    ...(match.strategies === undefined ? {} : { strategies: match.strategies }),
+    ...(match.actionTypes === undefined ? {} : { actionTypes: match.actionTypes }),
+    ...(match.appNames === undefined ? {} : { appNames: match.appNames }),
+    ...(match.appIds === undefined ? {} : { appIds: match.appIds }),
+    ...(match.appSensitivities === undefined ? {} : { appSensitivities: match.appSensitivities }),
+    ...(match.dataSensitivities === undefined ? {} : { dataSensitivities: match.dataSensitivities }),
+    ...(match.fileRoots === undefined ? {} : { fileRoots: match.fileRoots }),
+    ...(match.commandAllowlist === undefined ? {} : { commandAllowlist: match.commandAllowlist }),
+    ...(match.networkDomains === undefined ? {} : { networkDomains: match.networkDomains }),
+    ...(match.oauthScopes === undefined ? {} : { oauthScopes: match.oauthScopes }),
+    ...(match.generatedToolIds === undefined ? {} : { generatedToolIds: match.generatedToolIds })
+  };
+}
+
+function normalizeGrantRequirements(
+  requirements: z.infer<typeof capabilityGrantSchema>["requirements"]
+): CapabilityGrantRequirements | undefined {
+  if (requirements === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(requirements.requiresDryRun === undefined ? {} : { requiresDryRun: requirements.requiresDryRun }),
+    ...(requirements.requiresConfirmationToken === undefined
+      ? {}
+      : { requiresConfirmationToken: requirements.requiresConfirmationToken }),
+    ...(requirements.requiresApproval === undefined ? {} : { requiresApproval: requirements.requiresApproval }),
+    ...(requirements.requiresExactTarget === undefined ? {} : { requiresExactTarget: requirements.requiresExactTarget }),
+    ...(requirements.maxRiskLevel === undefined ? {} : { maxRiskLevel: requirements.maxRiskLevel }),
+    ...(requirements.allowedRoots === undefined ? {} : { allowedRoots: requirements.allowedRoots })
+  };
+}
+
+function normalizeGrant(grant: z.infer<typeof capabilityGrantSchema>): CapabilityGrant {
+  const requirements = normalizeGrantRequirements(grant.requirements);
+
+  return {
+    id: grant.id,
+    scope: grant.scope,
+    effect: grant.effect,
+    ...(grant.description === undefined ? {} : { description: grant.description }),
+    ...(grant.createdAt === undefined ? {} : { createdAt: grant.createdAt }),
+    ...(grant.expiresAt === undefined ? {} : { expiresAt: grant.expiresAt }),
+    match: normalizeGrantMatch(grant.match),
+    ...(requirements === undefined ? {} : { requirements })
+  };
+}
+
 export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Promise<AgentHostConfig> {
   const env = options.env ?? process.env;
   const homeDir = options.homeDir ?? os.homedir();
@@ -63,6 +201,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const agentHostDir = resolveLocalPath(env.AGENTHOST_HOME ?? fileConfig.agentHostDir ?? initialAgentHostDir, homeDir);
   const profile = (env.AGENTHOST_PROFILE ?? fileConfig.profile ?? "strict") as PolicyProfileName;
   const parsedProfile = policyProfileNameSchema.parse(profile);
+  const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
   const logFile = resolveLocalPath(
     env.AGENTHOST_LOG_FILE ?? fileConfig.logFile ?? path.join(agentHostDir, "logs", "agenthost.jsonl"),
     homeDir
@@ -73,6 +212,6 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     configPath,
     logFile,
     profile: parsedProfile,
-    policy: getPolicyProfile(parsedProfile)
+    policy: getPolicyProfile(parsedProfile, { grants })
   };
 }

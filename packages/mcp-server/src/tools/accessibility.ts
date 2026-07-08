@@ -19,12 +19,14 @@ import type {
   AnyAgentHostToolDefinition,
   ToolExecutionRuntime
 } from "../tool-runner.js";
+import { createSafetyEvaluationContext } from "../grants.js";
 import {
   acceptedConfirmation,
   buildPreviewResult,
   confirmationRequired,
   guideAlternative,
   inspectElementAlternative,
+  missingConfirmationReason,
   rejectedConfirmation,
   summarizeAccessibilityElement,
   toAccessibilityPreviewTarget
@@ -208,7 +210,7 @@ function initialSafetyForPreview(
         : {})
     },
     context.policy,
-    { agentHostDir: context.config.agentHostDir }
+    createSafetyEvaluationContext(context)
   );
 }
 
@@ -341,7 +343,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     },
     inputSummary: "Invoke accessibility action",
     safety: {
-      actionType: "accessibility_action",
+      actionType: "inspect",
       getInput: (input) => (input.appName === undefined ? {} : { appName: input.appName })
     },
     preview: {
@@ -390,7 +392,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
             ...(inspected.element.dataSensitivity === undefined ? {} : { dataSensitivity: inspected.element.dataSensitivity })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
         const actionAvailable = inspected.element.availableActions.includes(input.actionName);
         const availabilityReason = actionAvailable
@@ -455,7 +457,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
           ...(inspected.element.dataSensitivity === undefined ? {} : { dataSensitivity: inspected.element.dataSensitivity })
         },
         context.policy,
-        { agentHostDir: context.config.agentHostDir }
+        createSafetyEvaluationContext(context)
       );
 
       if (!postResolutionSafety.allowed) {
@@ -463,14 +465,14 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
       }
 
       if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        const { code, reason } = missingConfirmationReason(postResolutionSafety);
         return toolFailure({
           tool: "accessibility.invoke_action",
           riskLevel: postResolutionSafety.riskLevel,
           strategy: "accessibility",
           confirmation: confirmationRequired(reason),
           error: {
-            code: "confirmation_required",
+            code,
             message: reason
           },
           observations: [reason]
@@ -544,7 +546,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     },
     inputSummary: "Set accessibility value",
     safety: {
-      actionType: "accessibility_set_value",
+      actionType: "inspect",
       getInput: (input) => ({
         ...(input.appName === undefined ? {} : { appName: input.appName }),
         ...(input.dataSensitivity === undefined ? {} : { dataSensitivity: input.dataSensitivity })
@@ -598,7 +600,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
             ...(combinedDataSensitivity === undefined ? {} : { dataSensitivity: combinedDataSensitivity })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
         const valueMetadata = inspected.element.valueMetadata;
         const canSetValue =
@@ -669,7 +671,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
           ...(combinedDataSensitivity === undefined ? {} : { dataSensitivity: combinedDataSensitivity })
         },
         context.policy,
-        { agentHostDir: context.config.agentHostDir }
+        createSafetyEvaluationContext(context)
       );
 
       if (!postResolutionSafety.allowed) {
@@ -677,14 +679,14 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
       }
 
       if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        const { code, reason } = missingConfirmationReason(postResolutionSafety);
         return toolFailure({
           tool: "accessibility.set_value",
           riskLevel: postResolutionSafety.riskLevel,
           strategy: "accessibility",
           confirmation: confirmationRequired(reason),
           error: {
-            code: "confirmation_required",
+            code,
             message: reason
           },
           observations: [reason]
@@ -755,7 +757,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     },
     inputSummary: "Focus accessibility element",
     safety: {
-      actionType: "accessibility_focus",
+      actionType: "inspect",
       getInput: (input) => (input.appName === undefined ? {} : { appName: input.appName })
     },
     preview: {
@@ -805,7 +807,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
             ...(inspected.element.dataSensitivity === undefined ? {} : { dataSensitivity: inspected.element.dataSensitivity })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
 
         return buildPreviewResult({
@@ -863,7 +865,7 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
           ...(inspected.element.dataSensitivity === undefined ? {} : { dataSensitivity: inspected.element.dataSensitivity })
         },
         context.policy,
-        { agentHostDir: context.config.agentHostDir }
+        createSafetyEvaluationContext(context)
       );
 
       if (!postResolutionSafety.allowed) {
@@ -871,14 +873,14 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
       }
 
       if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        const { code, reason } = missingConfirmationReason(postResolutionSafety);
         return toolFailure({
           tool: "accessibility.focus_element",
           riskLevel: postResolutionSafety.riskLevel,
           strategy: "accessibility",
           confirmation: confirmationRequired(reason),
           error: {
-            code: "confirmation_required",
+            code,
             message: reason
           },
           observations: [reason]

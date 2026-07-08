@@ -149,6 +149,17 @@ export function classifyShellCommand(
     approval,
     allowed: !blocked && isApprovalSatisfied(approval),
     blocked,
+    guideOnly: false,
+    grantDecision: {
+      matchedGrantIds: [],
+      allowedByGrantIds: [],
+      deniedByGrantIds: [],
+      guideOnlyByGrantIds: [],
+      requiresDryRun: false,
+      requiresConfirmationToken: false,
+      requiresApproval: false,
+      requiresExactTarget: false
+    },
     reasons,
     matchedRules: [...new Set(matchedRules)]
   };
