@@ -41,6 +41,9 @@ export const ACTION_TYPES = [
   "file_delete",
   "gui_click",
   "gui_type",
+  "accessibility_action",
+  "accessibility_set_value",
+  "accessibility_focus",
   "browser_action",
   "communication_send",
   "upload",
@@ -564,6 +567,44 @@ export interface AccessibilityElementCandidate {
   reason: string;
 }
 
+export interface AccessibilityElementTarget {
+  appName?: string;
+  windowId?: string;
+  pid?: number;
+  elementId?: string;
+  query?: string;
+  role?: string;
+}
+
+export interface AccessibilityValueMetadata {
+  supportsText: boolean;
+  supportsValue: boolean;
+  editable: boolean;
+  readOnly: boolean;
+  textLength?: number;
+  minimum?: number;
+  maximum?: number;
+  step?: number;
+}
+
+export interface AccessibilityElementDetails {
+  elementId: string;
+  role: string;
+  name?: string;
+  description?: string;
+  states: string[];
+  availableActions: string[];
+  bounds?: DesktopWindowBounds;
+  valueMetadata?: AccessibilityValueMetadata;
+  appName?: string;
+  windowId?: string;
+  windowTitle?: string;
+  pid?: number;
+  appSensitivity?: AppSensitivity;
+  dataSensitivity: DataSensitivity;
+  hidden?: boolean;
+}
+
 export interface AccessibilityTreeResult {
   supported: boolean;
   backend: string;
@@ -579,6 +620,51 @@ export interface AccessibilityFindElementResult {
   backend: string;
   candidates: AccessibilityElementCandidate[];
   reason: string;
+}
+
+export interface AccessibilityInspectElementResult {
+  supported: boolean;
+  backend: string;
+  matched: boolean;
+  ambiguous: boolean;
+  redacted: boolean;
+  reason: string;
+  element?: AccessibilityElementDetails;
+}
+
+export interface AccessibilityInvokeActionResult {
+  supported: boolean;
+  backend: string;
+  matched: boolean;
+  ambiguous: boolean;
+  performed: boolean;
+  redacted: boolean;
+  actionName?: string;
+  reason: string;
+  target?: AccessibilityElementDetails;
+}
+
+export interface AccessibilitySetValueResult {
+  supported: boolean;
+  backend: string;
+  matched: boolean;
+  ambiguous: boolean;
+  changed: boolean;
+  redacted: boolean;
+  redactedValue: boolean;
+  reason: string;
+  target?: AccessibilityElementDetails;
+}
+
+export interface AccessibilityFocusElementResult {
+  supported: boolean;
+  backend: string;
+  matched: boolean;
+  ambiguous: boolean;
+  focused: boolean;
+  redacted: boolean;
+  reason: string;
+  target?: AccessibilityElementDetails;
 }
 
 export interface SystemInfo {

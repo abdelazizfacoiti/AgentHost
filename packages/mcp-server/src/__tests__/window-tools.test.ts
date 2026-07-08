@@ -186,6 +186,43 @@ function createContext(
       backend: "unavailable",
       candidates: [],
       reason: "unused"
+    }),
+    inspectAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      redacted: false,
+      reason: "unused"
+    }),
+    invokeAccessibilityAction: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      performed: false,
+      redacted: false,
+      actionName: input.actionName,
+      reason: "unused"
+    }),
+    setAccessibilityValue: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      changed: false,
+      redacted: true,
+      redactedValue: true,
+      reason: "unused"
+    }),
+    focusAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      focused: false,
+      redacted: false,
+      reason: "unused"
     })
   };
 

@@ -163,6 +163,43 @@ function createContext(profile: "strict" | "dev" = "strict"): AgentHostMcpContex
       backend: "unavailable",
       candidates: [],
       reason: "Not used in guide tests."
+    }),
+    inspectAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      redacted: false,
+      reason: "Not used in guide tests."
+    }),
+    invokeAccessibilityAction: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      performed: false,
+      redacted: false,
+      actionName: input.actionName,
+      reason: "Not used in guide tests."
+    }),
+    setAccessibilityValue: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      changed: false,
+      redacted: true,
+      redactedValue: true,
+      reason: "Not used in guide tests."
+    }),
+    focusAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      focused: false,
+      redacted: false,
+      reason: "Not used in guide tests."
     })
   };
   const logger = new MemoryLogger();

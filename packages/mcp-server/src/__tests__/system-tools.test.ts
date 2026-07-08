@@ -164,6 +164,43 @@ function createContext(logger: MemoryLogger): AgentHostMcpContext {
       backend: "unavailable",
       candidates: [],
       reason: "Not used in system tests."
+    }),
+    inspectAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      redacted: false,
+      reason: "Not used in system tests."
+    }),
+    invokeAccessibilityAction: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      performed: false,
+      redacted: false,
+      actionName: input.actionName,
+      reason: "Not used in system tests."
+    }),
+    setAccessibilityValue: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      changed: false,
+      redacted: true,
+      redactedValue: true,
+      reason: "Not used in system tests."
+    }),
+    focusAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      matched: false,
+      ambiguous: false,
+      focused: false,
+      redacted: false,
+      reason: "Not used in system tests."
     })
   };
 

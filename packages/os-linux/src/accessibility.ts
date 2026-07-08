@@ -1,9 +1,18 @@
 import {
+  classifyAppSensitivity,
   redactSensitiveText,
   type AccessibilityElementCandidate,
+  type AccessibilityElementDetails,
   type AccessibilityFindElementResult,
+  type AccessibilityFocusElementResult,
+  type AccessibilityInspectElementResult,
+  type AccessibilityInvokeActionResult,
+  type AccessibilitySetValueResult,
   type AccessibilityTreeNode,
   type AccessibilityTreeResult,
+  type AccessibilityValueMetadata,
+  type AppSensitivity,
+  type DataSensitivity,
   type DesktopCapabilitySupport,
   type DesktopWindowBounds
 } from "@agenthost/core";
@@ -12,6 +21,7 @@ import { runSafeLinuxCommand } from "./shell.js";
 
 export interface LinuxAccessibilityContext extends LinuxLookupContext {
   agentHostDir?: string;
+  runAccessibilityQuery?: (payload: Record<string, unknown>) => Promise<AccessibilityBackendResult>;
 }
 
 export interface LinuxAccessibilityTreeInput {
@@ -32,6 +42,27 @@ export interface LinuxAccessibilityFindElementInput {
   limit?: number;
 }
 
+export interface LinuxAccessibilityInspectElementInput {
+  appName?: string;
+  windowId?: string;
+  pid?: number;
+  elementId?: string;
+  query?: string;
+  role?: string;
+}
+
+export interface LinuxAccessibilityInvokeActionInput extends LinuxAccessibilityInspectElementInput {
+  actionName: string;
+  requireExactMatch?: boolean;
+}
+
+export interface LinuxAccessibilitySetValueInput extends LinuxAccessibilityInspectElementInput {
+  value: string;
+  dataSensitivity?: DataSensitivity;
+}
+
+export interface LinuxAccessibilityFocusElementInput extends LinuxAccessibilityInspectElementInput {}
+
 interface SessionInfo {
   sessionType: "x11" | "wayland" | "unknown";
   displayAvailable: boolean;
@@ -51,15 +82,67 @@ interface RawAccessibilityNode {
 
 interface RawAccessibilityCandidate {
   id: string;
-  role: string;
-  name?: string;
-  text?: string;
+  role?: string | null;
+  name?: string | null;
+  text?: string | null;
   bounds?: DesktopWindowBounds;
   confidence: number;
-  reason: string;
+  reason?: string | null;
   sensitive?: boolean;
   hidden?: boolean;
 }
+
+interface RawAccessibilityValueMetadata {
+  supportsText: boolean;
+  supportsValue: boolean;
+  editable: boolean;
+  readOnly: boolean;
+  textLength?: number;
+  minimum?: number;
+  maximum?: number;
+  step?: number;
+}
+
+interface RawAccessibilityElement {
+  id: string;
+  role?: string | null;
+  name?: string | null;
+  description?: string | null;
+  states?: string[];
+  availableActions?: string[];
+  bounds?: DesktopWindowBounds;
+  valueMetadata?: RawAccessibilityValueMetadata | null;
+  appName?: string | null;
+  windowId?: string | null;
+  windowTitle?: string | null;
+  pid?: number;
+  sensitive?: boolean;
+  hidden?: boolean;
+}
+
+type AccessibilityBackendResult =
+  | {
+      supported: false;
+      backend: string;
+      reason: string;
+    }
+  | {
+      supported: true;
+      backend: string;
+      reason: string;
+      root?: RawAccessibilityNode;
+      nodeCount?: number;
+      truncated?: boolean;
+      redacted?: boolean;
+      candidates?: RawAccessibilityCandidate[];
+      matched?: boolean;
+      ambiguous?: boolean;
+      element?: RawAccessibilityElement;
+      performed?: boolean;
+      changed?: boolean;
+      focused?: boolean;
+      actionName?: string;
+    };
 
 function sessionInfo(context: LinuxAccessibilityContext = {}): SessionInfo {
   const env = context.env ?? process.env;
@@ -86,7 +169,6 @@ function sessionInfo(context: LinuxAccessibilityContext = {}): SessionInfo {
 
 const ACCESSIBILITY_SCRIPT = String.raw`
 import json
-import re
 import sys
 
 def emit(payload):
@@ -102,15 +184,35 @@ except Exception:
     })
     raise SystemExit(0)
 
+WINDOW_ROLES = {
+    "frame",
+    "window",
+    "dialog",
+    "file chooser",
+    "alert",
+    "page tab",
+}
+
+def normalize(value):
+    return (value or "").strip().lower()
+
+def clamp_text(value, limit=300):
+    if value is None:
+        return None
+    value = str(value).strip()
+    if len(value) > limit:
+        return value[:limit] + "..."
+    return value
+
 def safe_name(node):
     try:
-        return node.name
+        return clamp_text(node.name)
     except Exception:
         return None
 
 def safe_description(node):
     try:
-        return node.description
+        return clamp_text(node.description)
     except Exception:
         return None
 
@@ -119,6 +221,12 @@ def safe_pid(node):
         return node.get_process_id()
     except Exception:
         return None
+
+def role_name(node):
+    try:
+        return normalize(node.getRoleName()) or "unknown"
+    except Exception:
+        return "unknown"
 
 def state_flags(node):
     sensitive = False
@@ -144,7 +252,7 @@ def safe_text(node, include_text, sensitive, hidden):
         char_count = min(getattr(text_iface, "characterCount", 0), 200)
         if char_count <= 0:
             return None
-        return text_iface.getText(0, char_count)
+        return clamp_text(text_iface.getText(0, char_count))
     except Exception:
         return None
 
@@ -161,14 +269,102 @@ def safe_bounds(node):
     except Exception:
         return None
 
-def role_name(node):
+def safe_states(node):
+    states = []
     try:
-        return node.getRoleName()
+        state_set = node.getState()
+        for state in state_set.getStates():
+            try:
+                states.append(normalize(str(state)))
+            except Exception:
+                continue
     except Exception:
-        return "unknown"
+        return []
+    unique = []
+    for state in states:
+        if state and state not in unique:
+            unique.append(state)
+    return unique[:20]
 
-def normalize(value):
-    return (value or "").strip().lower()
+def safe_actions(node):
+    actions = []
+    try:
+        action_iface = node.queryAction()
+        for index in range(min(getattr(action_iface, "nActions", 0), 20)):
+            try:
+                action_name = normalize(action_iface.getName(index))
+                if action_name:
+                    actions.append(action_name)
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return actions
+
+def safe_value_metadata(node, sensitive, hidden):
+    supports_text = False
+    supports_value = False
+    editable = False
+    text_length = None
+    minimum = None
+    maximum = None
+    step = None
+
+    try:
+        text_iface = node.queryText()
+        supports_text = True
+        if not sensitive and not hidden:
+            try:
+                text_length = int(min(getattr(text_iface, "characterCount", 0), 10000))
+            except Exception:
+                text_length = None
+    except Exception:
+        pass
+
+    try:
+        node.queryEditableText()
+        editable = True
+    except Exception:
+        pass
+
+    try:
+        value_iface = node.queryValue()
+        supports_value = True
+        try:
+            minimum = float(value_iface.minimumValue)
+        except Exception:
+            minimum = None
+        try:
+            maximum = float(value_iface.maximumValue)
+        except Exception:
+            maximum = None
+        try:
+            step = float(value_iface.minimumIncrement)
+        except Exception:
+            step = None
+    except Exception:
+        pass
+
+    if not supports_text and not supports_value and not editable:
+        return None
+
+    payload = {
+        "supportsText": supports_text,
+        "supportsValue": supports_value,
+        "editable": editable,
+        "readOnly": not editable and not supports_value,
+    }
+
+    if text_length is not None and not sensitive and not hidden:
+        payload["textLength"] = text_length
+    if minimum is not None and not sensitive and not hidden:
+        payload["minimum"] = minimum
+    if maximum is not None and not sensitive and not hidden:
+        payload["maximum"] = maximum
+    if step is not None and not sensitive and not hidden:
+        payload["step"] = step
+
+    return payload
 
 def matches_app(app_node, app_name, pid):
     if app_name is None and pid is None:
@@ -185,12 +381,47 @@ def matches_app(app_node, app_name, pid):
 
     return False
 
+def candidate_confidence(query_match, role_match, exact_match):
+    if exact_match and role_match:
+        return 1.0
+    if exact_match:
+        return 0.95
+    if query_match and role_match:
+        return 0.9
+    if query_match:
+        return 0.82
+    if role_match:
+        return 0.7
+    return 0.0
+
+def build_element(node, node_id, app_name, window_title, pid, sensitive, hidden):
+    return {
+        "id": node_id,
+        "role": role_name(node),
+        "name": safe_name(node),
+        "description": None if sensitive or hidden else safe_description(node),
+        "states": safe_states(node),
+        "availableActions": safe_actions(node),
+        "bounds": safe_bounds(node),
+        "valueMetadata": safe_value_metadata(node, sensitive, hidden),
+        "appName": app_name,
+        "windowTitle": window_title,
+        "pid": pid,
+        "sensitive": sensitive,
+        "hidden": hidden,
+    }
+
 input_data = json.loads(sys.argv[1])
 mode = input_data.get("mode", "tree")
-app_name = input_data.get("appName")
-pid = input_data.get("pid")
+app_name_filter = input_data.get("appName")
+window_id_filter = input_data.get("windowId")
+pid_filter = input_data.get("pid")
+element_id_filter = input_data.get("elementId")
 query = normalize(input_data.get("query"))
 role_hint = normalize(input_data.get("role"))
+action_name = normalize(input_data.get("actionName"))
+require_exact = bool(input_data.get("requireExactMatch", False))
+value_input = input_data.get("value")
 max_depth = int(input_data.get("maxDepth", 3))
 max_nodes = int(input_data.get("maxNodes", 200))
 include_text = bool(input_data.get("includeText", True))
@@ -205,70 +436,107 @@ for index in range(desktop.childCount):
     except Exception:
         continue
 
-    if matches_app(app, app_name, pid):
-        roots.append(app)
+    if matches_app(app, app_name_filter, pid_filter):
+        roots.append((index, app))
 
 if not roots:
-    emit({
-        "supported": True,
-        "backend": "atspi",
-        "reason": "No matching accessibility root was found.",
-        "root": None,
-        "nodeCount": 0,
-        "truncated": False,
-        "redacted": False,
-        "candidates": []
-    })
+    if mode == "tree":
+        emit({
+            "supported": True,
+            "backend": "atspi",
+            "reason": "No matching accessibility root was found.",
+            "root": None,
+            "nodeCount": 0,
+            "truncated": False,
+            "redacted": False
+        })
+    elif mode == "find":
+        emit({
+            "supported": True,
+            "backend": "atspi",
+            "reason": "No matching accessibility root was found.",
+            "candidates": []
+        })
+    else:
+        emit({
+            "supported": True,
+            "backend": "atspi",
+            "matched": False,
+            "ambiguous": False,
+            "reason": "No matching accessibility root was found.",
+            "redacted": False
+        })
     raise SystemExit(0)
 
 node_count = 0
 truncated = False
 redacted = False
 candidates = []
+matches = []
+window_id_warning = "AT-SPI windowId correlation is unavailable with the current safe backend." if window_id_filter else None
 
-def record_candidate(node_id, role, name, text, bounds, confidence, reason, sensitive, hidden):
-    global redacted
-    if sensitive or hidden:
-        redacted = True
-    candidates.append({
-        "id": node_id,
-        "role": role,
-        "name": name,
-        "text": None if sensitive or hidden else text,
-        "bounds": bounds,
-        "confidence": confidence,
-        "reason": reason,
-        "sensitive": sensitive,
-        "hidden": hidden
-    })
-
-def visit(node, depth):
+def visit(node, depth, root_index, path_parts, app_name_ctx, window_title_ctx):
     global node_count, truncated, redacted
     if node_count >= max_nodes:
-      truncated = True
-      return None
+        truncated = True
+        return None
 
     node_count += 1
     sensitive, hidden = state_flags(node)
     role = role_name(node)
     name = safe_name(node)
-    text = safe_text(node, include_text, sensitive, hidden)
     description = safe_description(node)
+    text = safe_text(node, include_text, sensitive, hidden)
     bounds = safe_bounds(node)
-    node_id = f"{safe_pid(node) or 'node'}:{node_count}"
+    pid = safe_pid(node)
+    node_id = f"{pid or root_index}:{'/'.join(path_parts)}"
+    current_window_title = window_title_ctx
+
+    if role in WINDOW_ROLES and name:
+        current_window_title = name
 
     if sensitive or hidden:
         redacted = True
 
-    if mode == "find":
-        haystacks = [normalize(name), normalize(text), normalize(description)]
-        role_match = role_hint and normalize(role) == role_hint
-        query_match = any(query and query in haystack for haystack in haystacks)
+    query_match = False
+    exact_match = False
+    role_match = role_hint == role if role_hint else True
+    if query:
+      haystacks = [normalize(name), normalize(description), normalize(text)]
+      query_match = any(query in haystack for haystack in haystacks if haystack)
+      exact_match = any(query == haystack for haystack in haystacks if haystack)
 
-        if role_match or query_match:
-            confidence = 1.0 if role_match and query_match else 0.82 if query_match else 0.7
-            reason = "Matched role and text hints." if role_match and query_match else "Matched text hint." if query_match else "Matched role hint."
-            record_candidate(node_id, role, name, text, bounds, confidence, reason, sensitive, hidden)
+    matched = False
+    if element_id_filter is not None:
+        matched = node_id == element_id_filter
+    elif query:
+        if require_exact:
+            matched = exact_match and role_match
+        else:
+            matched = role_match and query_match
+    elif role_hint:
+        matched = role_match
+
+    if matched and mode in {"inspect", "invoke_action", "set_value", "focus_element"}:
+        matches.append({
+            "node": node,
+            "element": build_element(node, node_id, app_name_ctx, current_window_title, pid, sensitive, hidden),
+            "confidence": candidate_confidence(query_match, role_match, exact_match)
+        })
+
+    if mode == "find":
+        if (query and query_match) or (role_hint and role_match):
+            candidates.append({
+                "id": node_id,
+                "role": role,
+                "name": name,
+                "text": None if sensitive or hidden else text,
+                "bounds": bounds,
+                "confidence": candidate_confidence(query_match, role_match, exact_match),
+                "reason": "Matched accessibility query." if query else "Matched accessibility role.",
+                "sensitive": sensitive,
+                "hidden": hidden
+            })
 
     children = []
     if depth < max_depth:
@@ -282,7 +550,15 @@ def visit(node, depth):
                 child = node.getChildAtIndex(child_index)
             except Exception:
                 continue
-            child_node = visit(child, depth + 1)
+
+            child_node = visit(
+                child,
+                depth + 1,
+                root_index,
+                path_parts + [str(child_index)],
+                app_name_ctx,
+                current_window_title
+            )
             if child_node is not None:
                 children.append(child_node)
     else:
@@ -292,7 +568,7 @@ def visit(node, depth):
         except Exception:
             pass
 
-    if mode == "find":
+    if mode == "find" or mode in {"inspect", "invoke_action", "set_value", "focus_element"}:
         return None
 
     result = {
@@ -300,7 +576,7 @@ def visit(node, depth):
         "role": role,
         "name": name,
         "text": None if sensitive or hidden else text,
-        "description": description,
+        "description": None if sensitive or hidden else description,
         "bounds": bounds,
         "sensitive": sensitive,
         "hidden": hidden
@@ -312,7 +588,8 @@ def visit(node, depth):
     return result
 
 if mode == "tree":
-    root_node = visit(roots[0], 0)
+    root_index, root = roots[0]
+    root_node = visit(root, 0, root_index, [str(root_index)], safe_name(root) or app_name_filter, None)
     emit({
         "supported": True,
         "backend": "atspi",
@@ -322,19 +599,198 @@ if mode == "tree":
         "truncated": truncated,
         "redacted": redacted
     })
-else:
-    for root in roots:
-        visit(root, 0)
-        if len(candidates) >= limit or node_count >= max_nodes:
-            break
+    raise SystemExit(0)
 
+for root_index, root in roots:
+    app_name_ctx = safe_name(root) or app_name_filter
+    visit(root, 0, root_index, [str(root_index)], app_name_ctx, None)
+    if mode == "find" and len(candidates) >= limit:
+        break
+    if mode in {"inspect", "invoke_action", "set_value", "focus_element"} and len(matches) > 1:
+        break
+    if node_count >= max_nodes:
+        break
+
+if mode == "find":
     emit({
         "supported": True,
         "backend": "atspi",
         "reason": "Found accessibility element candidates through AT-SPI.",
-        "candidates": candidates[:limit],
-        "redacted": redacted
+        "candidates": candidates[:limit]
     })
+    raise SystemExit(0)
+
+if len(matches) == 0:
+    emit({
+        "supported": True,
+        "backend": "atspi",
+        "matched": False,
+        "ambiguous": False,
+        "redacted": redacted,
+        "reason": window_id_warning or "No accessibility element matched the requested identity."
+    })
+    raise SystemExit(0)
+
+if len(matches) > 1:
+    emit({
+        "supported": True,
+        "backend": "atspi",
+        "matched": False,
+        "ambiguous": True,
+        "redacted": redacted,
+        "reason": "The requested accessibility target matched multiple elements."
+    })
+    raise SystemExit(0)
+
+match = matches[0]
+node = match["node"]
+element = match["element"]
+
+if mode == "inspect":
+    emit({
+        "supported": True,
+        "backend": "atspi",
+        "matched": True,
+        "ambiguous": False,
+        "redacted": redacted,
+        "reason": window_id_warning or "Resolved one accessibility element through AT-SPI.",
+        "element": element
+    })
+    raise SystemExit(0)
+
+if element.get("hidden") or element.get("sensitive"):
+    emit({
+        "supported": True,
+        "backend": "atspi",
+        "matched": True,
+        "ambiguous": False,
+        "redacted": True,
+        "performed": False,
+        "changed": False,
+        "focused": False,
+        "reason": "Sensitive or hidden accessibility targets cannot be changed.",
+        "element": element,
+        "actionName": action_name if action_name else None
+    })
+    raise SystemExit(0)
+
+if mode == "invoke_action":
+    try:
+        action_iface = node.queryAction()
+    except Exception:
+        emit({
+            "supported": True,
+            "backend": "atspi",
+            "matched": True,
+            "ambiguous": False,
+            "performed": False,
+            "redacted": redacted,
+            "reason": "The resolved element does not expose AT-SPI actions.",
+            "element": element,
+            "actionName": action_name
+        })
+        raise SystemExit(0)
+
+    action_index = None
+    for index in range(getattr(action_iface, "nActions", 0)):
+        try:
+            if normalize(action_iface.getName(index)) == action_name:
+                action_index = index
+                break
+        except Exception:
+            continue
+
+    if action_index is None:
+        emit({
+            "supported": True,
+            "backend": "atspi",
+            "matched": True,
+            "ambiguous": False,
+            "performed": False,
+            "redacted": redacted,
+            "reason": "The resolved element does not support the requested action.",
+            "element": element,
+            "actionName": action_name
+        })
+        raise SystemExit(0)
+
+    try:
+        performed = bool(action_iface.doAction(action_index))
+    except Exception:
+        performed = False
+
+    emit({
+        "supported": True,
+        "backend": "atspi",
+        "matched": True,
+        "ambiguous": False,
+        "performed": performed,
+        "redacted": redacted,
+        "reason": "Invoked the requested accessibility action." if performed else "The accessibility action did not complete successfully.",
+        "element": element,
+        "actionName": action_name
+    })
+    raise SystemExit(0)
+
+if mode == "set_value":
+    changed = False
+    reason = "The resolved element does not expose a settable accessibility value."
+
+    try:
+        editable_text = node.queryEditableText()
+        editable_text.setTextContents(str(value_input))
+        changed = True
+        reason = "Set the accessibility text value."
+    except Exception:
+        try:
+            value_iface = node.queryValue()
+            numeric_value = float(value_input)
+            try:
+                changed = bool(value_iface.setCurrentValue(numeric_value))
+            except Exception:
+                try:
+                    value_iface.currentValue = numeric_value
+                    changed = True
+                except Exception:
+                    changed = False
+            reason = "Set the accessibility numeric value." if changed else "The accessibility value backend did not complete successfully."
+        except Exception:
+            changed = False
+
+    emit({
+        "supported": True,
+        "backend": "atspi",
+        "matched": True,
+        "ambiguous": False,
+        "changed": changed,
+        "redacted": True,
+        "reason": reason,
+        "element": element
+    })
+    raise SystemExit(0)
+
+if mode == "focus_element":
+    focused = False
+    reason = "The resolved element cannot be focused through AT-SPI."
+
+    try:
+        component = node.queryComponent()
+        focused = bool(component.grabFocus())
+        reason = "Focused the accessibility element." if focused else "The accessibility focus backend did not complete successfully."
+    except Exception:
+        focused = False
+
+    emit({
+        "supported": True,
+        "backend": "atspi",
+        "matched": True,
+        "ambiguous": False,
+        "focused": focused,
+        "redacted": redacted,
+        "reason": reason,
+        "element": element
+    })
+    raise SystemExit(0)
 `;
 
 function support(backend: string, reason: string): DesktopCapabilitySupport {
@@ -378,13 +834,21 @@ async function runAccessibilityCommand(
   return runSafeLinuxCommand(input);
 }
 
-function redactUiString(value: string | undefined): string | undefined {
-  if (value === undefined) {
+function truncateString(value: string, limit: number): string {
+  return value.length > limit ? `${value.slice(0, limit)}...` : value;
+}
+
+function normalizeAccessibilityString(value: unknown, limit = 300): string | undefined {
+  if (value === null || value === undefined) {
     return undefined;
   }
 
-  const redacted = redactSensitiveText(value).trim();
-  return redacted.length > 0 ? redacted : undefined;
+  const redacted = redactSensitiveText(String(value)).trim();
+  return redacted.length > 0 ? truncateString(redacted, limit) : undefined;
+}
+
+function normalizeAccessibilityStringOrFallback(value: unknown, fallback: string, limit = 300): string {
+  return normalizeAccessibilityString(value, limit) ?? fallback;
 }
 
 function redactNode(node: RawAccessibilityNode | undefined): AccessibilityTreeNode | undefined {
@@ -397,9 +861,9 @@ function redactNode(node: RawAccessibilityNode | undefined): AccessibilityTreeNo
     role: node.role
   };
 
-  const name = redactUiString(node.name);
-  const description = redactUiString(node.description);
-  const text = node.sensitive || node.hidden ? undefined : redactUiString(node.text);
+  const name = normalizeAccessibilityString(node.name);
+  const description = normalizeAccessibilityString(node.description);
+  const text = node.sensitive || node.hidden ? undefined : normalizeAccessibilityString(node.text, 200);
 
   if (name !== undefined) {
     result.name = name;
@@ -437,12 +901,12 @@ function redactNode(node: RawAccessibilityNode | undefined): AccessibilityTreeNo
 function redactCandidate(candidate: RawAccessibilityCandidate): AccessibilityElementCandidate {
   const result: AccessibilityElementCandidate = {
     id: candidate.id,
-    role: candidate.role,
+    role: normalizeAccessibilityStringOrFallback(candidate.role, "unknown", 100),
     confidence: candidate.confidence,
-    reason: candidate.reason
+    reason: normalizeAccessibilityStringOrFallback(candidate.reason, "Matched accessibility query.", 200)
   };
-  const name = redactUiString(candidate.name);
-  const text = candidate.sensitive || candidate.hidden ? undefined : redactUiString(candidate.text);
+  const name = normalizeAccessibilityString(candidate.name);
+  const text = candidate.sensitive || candidate.hidden ? undefined : normalizeAccessibilityString(candidate.text, 200);
 
   if (name !== undefined) {
     result.name = name;
@@ -459,22 +923,125 @@ function redactCandidate(candidate: RawAccessibilityCandidate): AccessibilityEle
   return result;
 }
 
+function classifyElementSensitivity(element: RawAccessibilityElement): DataSensitivity {
+  if (element.hidden === true || element.sensitive === true) {
+    return "secret";
+  }
+
+  if (element.valueMetadata !== undefined) {
+    return "low";
+  }
+
+  return "none";
+}
+
+function redactValueMetadata(
+  valueMetadata: RawAccessibilityValueMetadata | null | undefined,
+  dataSensitivity: DataSensitivity
+): AccessibilityValueMetadata | undefined {
+  if (valueMetadata === undefined || valueMetadata === null) {
+    return undefined;
+  }
+
+  const result: AccessibilityValueMetadata = {
+    supportsText: valueMetadata.supportsText,
+    supportsValue: valueMetadata.supportsValue,
+    editable: valueMetadata.editable,
+    readOnly: valueMetadata.readOnly
+  };
+
+  if (dataSensitivity !== "secret") {
+    if (valueMetadata.textLength !== undefined) {
+      result.textLength = valueMetadata.textLength;
+    }
+
+    if (valueMetadata.minimum !== undefined) {
+      result.minimum = valueMetadata.minimum;
+    }
+
+    if (valueMetadata.maximum !== undefined) {
+      result.maximum = valueMetadata.maximum;
+    }
+
+    if (valueMetadata.step !== undefined) {
+      result.step = valueMetadata.step;
+    }
+  }
+
+  return result;
+}
+
+function redactElement(element: RawAccessibilityElement | undefined): AccessibilityElementDetails | undefined {
+  if (element === undefined) {
+    return undefined;
+  }
+
+  const dataSensitivity = classifyElementSensitivity(element);
+  const result: AccessibilityElementDetails = {
+    elementId: element.id,
+    role: normalizeAccessibilityStringOrFallback(element.role, "unknown", 100),
+    states: (element.states ?? []).map((state) => truncateString(state, 100)).slice(0, 20),
+    availableActions: (element.availableActions ?? []).map((action) => truncateString(action, 100)).slice(0, 20),
+    dataSensitivity
+  };
+
+  const name = normalizeAccessibilityString(element.name);
+  const description = dataSensitivity === "secret" ? undefined : normalizeAccessibilityString(element.description);
+  const appName = normalizeAccessibilityString(element.appName, 120);
+  const windowId = normalizeAccessibilityString(element.windowId, 120);
+  const windowTitle = normalizeAccessibilityString(element.windowTitle, 160);
+
+  if (name !== undefined) {
+    result.name = name;
+  }
+
+  if (description !== undefined) {
+    result.description = description;
+  }
+
+  if (element.bounds !== undefined) {
+    result.bounds = element.bounds;
+  }
+
+  const valueMetadata = redactValueMetadata(element.valueMetadata, dataSensitivity);
+
+  if (valueMetadata !== undefined) {
+    result.valueMetadata = valueMetadata;
+  }
+
+  if (appName !== undefined) {
+    result.appName = appName;
+    const appSensitivity: AppSensitivity = classifyAppSensitivity({ appName });
+    result.appSensitivity = appSensitivity;
+  }
+
+  if (windowId !== undefined) {
+    result.windowId = windowId;
+  }
+
+  if (windowTitle !== undefined) {
+    result.windowTitle = windowTitle;
+  }
+
+  if (element.pid !== undefined) {
+    result.pid = element.pid;
+  }
+
+  if (element.hidden === true) {
+    result.hidden = true;
+  }
+
+  return result;
+}
+
 async function pythonAccessibilityResult(
   payload: Record<string, unknown>,
   context: LinuxAccessibilityContext = {}
-): Promise<
-  | { supported: false; backend: string; reason: string }
-  | {
-      supported: true;
-      backend: string;
-      reason: string;
-      root?: RawAccessibilityNode;
-      nodeCount?: number;
-      truncated?: boolean;
-      redacted?: boolean;
-      candidates?: RawAccessibilityCandidate[];
-    }
-> {
+): Promise<AccessibilityBackendResult> {
+  if (context.runAccessibilityQuery !== undefined) {
+    return context.runAccessibilityQuery(payload);
+  }
+
   const pythonPath = await findCommandPath("python3", context);
 
   if (pythonPath === undefined) {
@@ -496,9 +1063,7 @@ async function pythonAccessibilityResult(
   }
 
   try {
-    return JSON.parse(result.stdout) as ReturnType<typeof pythonAccessibilityResult> extends Promise<infer TValue>
-      ? Exclude<TValue, Promise<unknown>>
-      : never;
+    return JSON.parse(result.stdout) as AccessibilityBackendResult;
   } catch {
     return {
       supported: false,
@@ -546,8 +1111,9 @@ export async function getLinuxAccessibilityTree(
   const result = await pythonAccessibilityResult(
     {
       mode: "tree",
-      appName: input.appName,
-      pid: input.pid,
+      ...(input.appName === undefined ? {} : { appName: input.appName }),
+      ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+      ...(input.pid === undefined ? {} : { pid: input.pid }),
       maxDepth: Math.min(Math.max(input.maxDepth ?? 3, 1), 6),
       maxNodes: Math.min(Math.max(input.maxNodes ?? 200, 1), 1000),
       includeText: input.includeText ?? true
@@ -602,10 +1168,11 @@ export async function findLinuxAccessibilityElements(
   const result = await pythonAccessibilityResult(
     {
       mode: "find",
-      appName: input.appName,
-      pid: input.pid,
+      ...(input.appName === undefined ? {} : { appName: input.appName }),
+      ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+      ...(input.pid === undefined ? {} : { pid: input.pid }),
       query: input.query,
-      role: input.role,
+      ...(input.role === undefined ? {} : { role: input.role }),
       limit: Math.min(Math.max(input.limit ?? 10, 1), 50),
       maxDepth: 6,
       maxNodes: 1000,
@@ -629,4 +1196,263 @@ export async function findLinuxAccessibilityElements(
     candidates: (result.candidates ?? []).map(redactCandidate),
     reason: result.reason
   };
+}
+
+function unsupportedInspectResult(backend: string, reason: string): AccessibilityInspectElementResult {
+  return {
+    supported: false,
+    backend,
+    matched: false,
+    ambiguous: false,
+    redacted: false,
+    reason
+  };
+}
+
+function unsupportedInvokeResult(backend: string, reason: string, actionName?: string): AccessibilityInvokeActionResult {
+  const result: AccessibilityInvokeActionResult = {
+    supported: false,
+    backend,
+    matched: false,
+    ambiguous: false,
+    performed: false,
+    redacted: false,
+    reason
+  };
+
+  if (actionName !== undefined) {
+    result.actionName = actionName;
+  }
+
+  return result;
+}
+
+function unsupportedSetValueResult(backend: string, reason: string): AccessibilitySetValueResult {
+  return {
+    supported: false,
+    backend,
+    matched: false,
+    ambiguous: false,
+    changed: false,
+    redacted: true,
+    redactedValue: true,
+    reason
+  };
+}
+
+function unsupportedFocusResult(backend: string, reason: string): AccessibilityFocusElementResult {
+  return {
+    supported: false,
+    backend,
+    matched: false,
+    ambiguous: false,
+    focused: false,
+    redacted: false,
+    reason
+  };
+}
+
+export async function inspectLinuxAccessibilityElement(
+  input: LinuxAccessibilityInspectElementInput,
+  context: LinuxAccessibilityContext = {}
+): Promise<AccessibilityInspectElementResult> {
+  const session = sessionInfo(context);
+
+  if (!session.displayAvailable) {
+    return unsupportedInspectResult("unavailable", "No Linux desktop display session is available.");
+  }
+
+  const result = await pythonAccessibilityResult(
+    {
+      mode: "inspect",
+      ...(input.appName === undefined ? {} : { appName: input.appName }),
+      ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+      ...(input.pid === undefined ? {} : { pid: input.pid }),
+      ...(input.elementId === undefined ? {} : { elementId: input.elementId }),
+      ...(input.query === undefined ? {} : { query: input.query }),
+      ...(input.role === undefined ? {} : { role: input.role }),
+      maxDepth: 6,
+      maxNodes: 1000,
+      includeText: true
+    },
+    context
+  );
+
+  if (!result.supported) {
+    return unsupportedInspectResult(result.backend, result.reason);
+  }
+
+  const inspectResult: AccessibilityInspectElementResult = {
+    supported: true,
+    backend: result.backend,
+    matched: result.matched ?? false,
+    ambiguous: result.ambiguous ?? false,
+    redacted: result.redacted ?? false,
+    reason: result.reason
+  };
+
+  const element = redactElement(result.element);
+
+  if (element !== undefined) {
+    inspectResult.element = element;
+  }
+
+  return inspectResult;
+}
+
+export async function invokeLinuxAccessibilityAction(
+  input: LinuxAccessibilityInvokeActionInput,
+  context: LinuxAccessibilityContext = {}
+): Promise<AccessibilityInvokeActionResult> {
+  const session = sessionInfo(context);
+
+  if (!session.displayAvailable) {
+    return unsupportedInvokeResult("unavailable", "No Linux desktop display session is available.", input.actionName);
+  }
+
+  const result = await pythonAccessibilityResult(
+    {
+      mode: "invoke_action",
+      ...(input.appName === undefined ? {} : { appName: input.appName }),
+      ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+      ...(input.pid === undefined ? {} : { pid: input.pid }),
+      ...(input.elementId === undefined ? {} : { elementId: input.elementId }),
+      ...(input.query === undefined ? {} : { query: input.query }),
+      ...(input.role === undefined ? {} : { role: input.role }),
+      actionName: input.actionName,
+      requireExactMatch: input.requireExactMatch ?? false,
+      maxDepth: 6,
+      maxNodes: 1000,
+      includeText: true
+    },
+    context
+  );
+
+  if (!result.supported) {
+    return unsupportedInvokeResult(result.backend, result.reason, input.actionName);
+  }
+
+  const actionResult: AccessibilityInvokeActionResult = {
+    supported: true,
+    backend: result.backend,
+    matched: result.matched ?? false,
+    ambiguous: result.ambiguous ?? false,
+    performed: result.performed ?? false,
+    redacted: result.redacted ?? false,
+    reason: result.reason
+  };
+
+  if (result.actionName !== undefined) {
+    actionResult.actionName = result.actionName;
+  } else {
+    actionResult.actionName = input.actionName;
+  }
+
+  const target = redactElement(result.element);
+
+  if (target !== undefined) {
+    actionResult.target = target;
+  }
+
+  return actionResult;
+}
+
+export async function setLinuxAccessibilityValue(
+  input: LinuxAccessibilitySetValueInput,
+  context: LinuxAccessibilityContext = {}
+): Promise<AccessibilitySetValueResult> {
+  const session = sessionInfo(context);
+
+  if (!session.displayAvailable) {
+    return unsupportedSetValueResult("unavailable", "No Linux desktop display session is available.");
+  }
+
+  const result = await pythonAccessibilityResult(
+    {
+      mode: "set_value",
+      ...(input.appName === undefined ? {} : { appName: input.appName }),
+      ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+      ...(input.pid === undefined ? {} : { pid: input.pid }),
+      ...(input.elementId === undefined ? {} : { elementId: input.elementId }),
+      ...(input.query === undefined ? {} : { query: input.query }),
+      ...(input.role === undefined ? {} : { role: input.role }),
+      value: input.value,
+      maxDepth: 6,
+      maxNodes: 1000,
+      includeText: false
+    },
+    context
+  );
+
+  if (!result.supported) {
+    return unsupportedSetValueResult(result.backend, result.reason);
+  }
+
+  const setResult: AccessibilitySetValueResult = {
+    supported: true,
+    backend: result.backend,
+    matched: result.matched ?? false,
+    ambiguous: result.ambiguous ?? false,
+    changed: result.changed ?? false,
+    redacted: true,
+    redactedValue: true,
+    reason: result.reason
+  };
+
+  const target = redactElement(result.element);
+
+  if (target !== undefined) {
+    setResult.target = target;
+  }
+
+  return setResult;
+}
+
+export async function focusLinuxAccessibilityElement(
+  input: LinuxAccessibilityFocusElementInput,
+  context: LinuxAccessibilityContext = {}
+): Promise<AccessibilityFocusElementResult> {
+  const session = sessionInfo(context);
+
+  if (!session.displayAvailable) {
+    return unsupportedFocusResult("unavailable", "No Linux desktop display session is available.");
+  }
+
+  const result = await pythonAccessibilityResult(
+    {
+      mode: "focus_element",
+      ...(input.appName === undefined ? {} : { appName: input.appName }),
+      ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+      ...(input.pid === undefined ? {} : { pid: input.pid }),
+      ...(input.elementId === undefined ? {} : { elementId: input.elementId }),
+      ...(input.query === undefined ? {} : { query: input.query }),
+      ...(input.role === undefined ? {} : { role: input.role }),
+      maxDepth: 6,
+      maxNodes: 1000,
+      includeText: false
+    },
+    context
+  );
+
+  if (!result.supported) {
+    return unsupportedFocusResult(result.backend, result.reason);
+  }
+
+  const focusResult: AccessibilityFocusElementResult = {
+    supported: true,
+    backend: result.backend,
+    matched: result.matched ?? false,
+    ambiguous: result.ambiguous ?? false,
+    focused: result.focused ?? false,
+    redacted: result.redacted ?? false,
+    reason: result.reason
+  };
+
+  const target = redactElement(result.element);
+
+  if (target !== undefined) {
+    focusResult.target = target;
+  }
+
+  return focusResult;
 }
