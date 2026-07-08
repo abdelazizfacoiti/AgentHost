@@ -109,6 +109,7 @@ function buildWrappedScript(userScript: string, outputDir: string, expectedOutpu
   return `
 import bpy
 import math
+import os
 
 AGENTHOST_OUTPUT_DIR = ${JSON.stringify(outputDir)}
 AGENTHOST_PRIMARY_OUTPUT = ${JSON.stringify(primaryOutput)}
@@ -118,6 +119,7 @@ bpy.ops.wm.read_factory_settings(use_empty=True)
 
 ${userScript.trim()}
 
+os.makedirs(AGENTHOST_OUTPUT_DIR, exist_ok=True)
 bpy.ops.wm.save_as_mainfile(filepath=AGENTHOST_PRIMARY_OUTPUT)
 `;
 }
