@@ -1,3 +1,5 @@
+import { fileURLToPath, pathToFileURL } from "node:url";
+import path from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -32,6 +34,7 @@ import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { runTool } from "./tool-runner.js";
 import { createAdapterTools } from "./tools/adapter.js";
 import { createAppTools } from "./tools/app.js";
+import { BLENDER_RUN_PYTHON_TOOL, createBlenderTools } from "./tools/blender.js";
 import { createFileTools } from "./tools/file.js";
 import { createGuideTools } from "./tools/guide.js";
 import { createShellTools } from "./tools/shell.js";
@@ -41,6 +44,35 @@ const SERVER_VERSION = "0.1.0";
 
 const SERVER_INSTRUCTIONS =
   "AgentHost is a universal local automation host. It can help operate many apps through layered strategies: app adapters, official APIs, CLI/scripts, browser automation, accessibility, GUI fallback, and guide mode. Prefer reliable app APIs and adapters over GUI clicking. Use GUI click/type only as fallback and only when policy allows. High-risk actions require approval.";
+
+function blenderModuleSpecifier(): string {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const isSource = currentDir.includes(`${path.sep}src`);
+  const target = isSource ? "../../app-blender/src/index.js" : "../../app-blender/dist/index.js";
+
+  return pathToFileURL(path.resolve(currentDir, target)).href;
+}
+
+async function registerOptionalBlenderRuntime(registry: CapabilityRegistry, adapters: AdapterRegistry): Promise<void> {
+  if (adapters.get("blender") === undefined) {
+    const blenderModule = (await import(blenderModuleSpecifier())) as {
+      createBlenderAdapter?: () => { id: string };
+    };
+
+    if (typeof blenderModule.createBlenderAdapter === "function") {
+      adapters.register(blenderModule.createBlenderAdapter() as never);
+    }
+  }
+
+  if (!registry.listTools().some((tool) => tool.name === BLENDER_RUN_PYTHON_TOOL.name)) {
+    registry.registerTool({
+      name: BLENDER_RUN_PYTHON_TOOL.name,
+      riskLevel: BLENDER_RUN_PYTHON_TOOL.riskLevel,
+      strategy: BLENDER_RUN_PYTHON_TOOL.strategy,
+      description: BLENDER_RUN_PYTHON_TOOL.description
+    });
+  }
+}
 
 export interface AgentHostServerOptions {
   config?: AgentHostConfig;
@@ -74,6 +106,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const config = options.config ?? (await loadAgentHostConfig());
   const registry = options.registry ?? createBaseCapabilityRegistry();
   const adapters = options.adapters ?? createAdapterRegistry();
+  await registerOptionalBlenderRuntime(registry, adapters);
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
   const policy = options.policy ?? config.policy;
   const linux: LinuxAutomation =
@@ -103,6 +136,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const tools = [
     ...createSystemTools(),
     ...createAdapterTools(),
+    ...createBlenderTools(),
     ...createAppTools(),
     ...createShellTools(),
     ...createFileTools(),
