@@ -18,8 +18,11 @@ import {
 } from "@agenthost/core";
 import {
   checkLinuxDependency,
+  captureLinuxScreenshot,
+  clickLinuxDesktop,
   detectLinuxApp,
   ensureLinuxDir,
+  getLinuxActiveWindow,
   getLinuxAppStrategy,
   getLinuxSystemInfo,
   linuxFileExists,
@@ -28,6 +31,8 @@ import {
   openLinuxApp,
   readLinuxFile,
   runSafeLinuxCommand,
+  sendLinuxHotkey,
+  typeLinuxText,
   writeLinuxFile
 } from "@agenthost/os-linux";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
@@ -35,6 +40,7 @@ import { runTool } from "./tool-runner.js";
 import { createAdapterTools } from "./tools/adapter.js";
 import { createAppTools } from "./tools/app.js";
 import { BLENDER_RUN_PYTHON_TOOL, createBlenderTools } from "./tools/blender.js";
+import { createDesktopTools } from "./tools/desktop.js";
 import { createFileTools } from "./tools/file.js";
 import { createGuideTools } from "./tools/guide.js";
 import { createShellTools } from "./tools/shell.js";
@@ -122,7 +128,12 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       readFile: (input) => readLinuxFile(input, { agentHostDir: config.agentHostDir }),
       fileExists: (input) => linuxFileExists(input, { agentHostDir: config.agentHostDir }),
       listDirectory: (input) => listLinuxDirectory(input, { agentHostDir: config.agentHostDir }),
-      ensureDir: (input) => ensureLinuxDir(input, { agentHostDir: config.agentHostDir })
+      ensureDir: (input) => ensureLinuxDir(input, { agentHostDir: config.agentHostDir }),
+      getActiveWindow: () => getLinuxActiveWindow({ agentHostDir: config.agentHostDir }),
+      screenshot: (input) => captureLinuxScreenshot(input, { agentHostDir: config.agentHostDir }),
+      hotkey: (input) => sendLinuxHotkey(input, { agentHostDir: config.agentHostDir }),
+      typeText: (input) => typeLinuxText(input, { agentHostDir: config.agentHostDir }),
+      click: (input) => clickLinuxDesktop(input, { agentHostDir: config.agentHostDir })
     };
   const context: AgentHostMcpContext = {
     sessionId: options.sessionId ?? createSessionId(),
@@ -140,6 +151,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createAppTools(),
     ...createShellTools(),
     ...createFileTools(),
+    ...createDesktopTools(),
     ...createGuideTools()
   ];
 

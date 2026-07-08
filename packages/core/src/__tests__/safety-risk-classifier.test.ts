@@ -124,6 +124,44 @@ describe("evaluateSafety", () => {
     expect(typeResult.matchedRules).toContain("policy.gui_type.disabled");
   });
 
+  it("treats communication clicks as high-risk when generic GUI control is enabled", () => {
+    const policy = {
+      ...getPolicyProfile("dev"),
+      allowGenericClick: true
+    };
+    const result = evaluateSafety(
+      {
+        tool: "desktop.click",
+        actionType: "gui_click",
+        appName: "Gmail"
+      },
+      policy,
+      { homeDir }
+    );
+
+    expect(result.riskLevel).toBe("high");
+    expect(result.matchedRules).toContain("app.communication.high_risk");
+  });
+
+  it("blocks screenshots when the policy disables them", () => {
+    const policy = {
+      ...getPolicyProfile("dev"),
+      allowScreenshots: false
+    };
+    const result = evaluateSafety(
+      {
+        tool: "desktop.screenshot",
+        actionType: "file_write",
+        filePath: "/tmp/agenthost-shot.png"
+      },
+      policy,
+      { homeDir }
+    );
+
+    expect(result.riskLevel).toBe("blocked");
+    expect(result.matchedRules).toContain("policy.screenshot.disabled");
+  });
+
   it("defaults unknown actions conservatively", () => {
     const result = evaluateSafety(
       {

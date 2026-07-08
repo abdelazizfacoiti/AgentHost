@@ -8,7 +8,7 @@ describe("CapabilityRegistry", () => {
     expect(registry.listStrategies()).toEqual([...AUTOMATION_STRATEGIES]);
   });
 
-  it("registers Phase 0 through Phase 3 tools", () => {
+  it("registers base AgentHost tools through Phase 7", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
@@ -25,6 +25,11 @@ describe("CapabilityRegistry", () => {
       "file.exists",
       "file.list",
       "file.ensure_dir",
+      "desktop.get_active_window",
+      "desktop.screenshot",
+      "desktop.hotkey",
+      "desktop.type_text",
+      "desktop.click",
       "guide.create_steps",
       "guide.explain_strategy",
       "adapter.list",

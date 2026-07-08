@@ -85,7 +85,13 @@ function applyAppSensitivityRisk(
   }
 
   if (appSensitivity === "communication") {
-    if (input.communicative || input.externalEffect || input.actionType === "communication_send" || input.actionType === "gui_type") {
+    if (
+      input.communicative ||
+      input.externalEffect ||
+      input.actionType === "communication_send" ||
+      input.actionType === "gui_type" ||
+      input.actionType === "gui_click"
+    ) {
       reasons.push("Communication actions that type, send, post, or affect external recipients are high-risk.");
       matchedRules.push("app.communication.high_risk");
       return maxRiskLevel(riskLevel, "high");
@@ -171,6 +177,12 @@ export function classifyRisk(
     riskLevel = "blocked";
     reasons.push("Generic GUI typing is disabled by this policy profile.");
     matchedRules.push("policy.gui_type.disabled");
+  }
+
+  if (input.tool === "desktop.screenshot" && !policy.allowScreenshots) {
+    riskLevel = "blocked";
+    reasons.push("Screenshots are disabled by this policy profile.");
+    matchedRules.push("policy.screenshot.disabled");
   }
 
   if (input.actionType === "communication_send" && !policy.allowEmailSend) {

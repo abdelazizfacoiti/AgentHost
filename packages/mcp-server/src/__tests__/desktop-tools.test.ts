@@ -1,0 +1,299 @@
+import {
+  createAdapterRegistry,
+  createBaseCapabilityRegistry,
+  getPolicyProfile,
+  type AgentHostConfig,
+  type AuditLogEntry,
+  type AuditLogger,
+  type PolicyProfile
+} from "@agenthost/core";
+import { describe, expect, it } from "vitest";
+import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
+import { runTool } from "../tool-runner.js";
+import { createDesktopTools } from "../tools/desktop.js";
+
+class MemoryLogger implements AuditLogger {
+  readonly entries: AuditLogEntry[] = [];
+
+  async log(entry: AuditLogEntry): Promise<void> {
+    this.entries.push(entry);
+  }
+}
+
+function createContext(
+  policyOverride?: Partial<PolicyProfile>
+): AgentHostMcpContext & { calls: string[]; logger: MemoryLogger } {
+  const registry = createBaseCapabilityRegistry();
+  const basePolicy = getPolicyProfile("dev");
+  const policy = {
+    ...basePolicy,
+    ...policyOverride
+  };
+  const config: AgentHostConfig = {
+    agentHostDir: "/tmp/agenthost-desktop-test",
+    configPath: "/tmp/agenthost-desktop-test/config.json",
+    logFile: "/tmp/agenthost-desktop-test/logs/agenthost.jsonl",
+    profile: "dev",
+    policy
+  };
+  const calls: string[] = [];
+  const logger = new MemoryLogger();
+  const linux: LinuxAutomation = {
+    getSystemInfo: () => ({
+      platform: "linux",
+      arch: "x64",
+      nodeVersion: "v20.0.0",
+      agentHostDir: config.agentHostDir,
+      profile: "dev",
+      strategies: registry.listStrategies(),
+      tools: registry.listTools().map((tool) => tool.name)
+    }),
+    checkDependency: async () => ({ found: false, kind: "any", name: "noop", reason: "unused" }),
+    detectApp: async () => ({
+      found: false,
+      appId: "unused",
+      adapterAvailable: false,
+      availableStrategies: ["guide_only"],
+      recommendedStrategy: "guide_only",
+      appSensitivity: "unknown",
+      reason: "unused"
+    }),
+    listInstalledApps: async () => ({ apps: [], truncated: false }),
+    openApp: async () => ({ opened: false, appId: "unused", strategy: "guide_only", reason: "unused" }),
+    getAppStrategy: async () => ({
+      found: false,
+      appId: "unused",
+      adapterAvailable: false,
+      availableStrategies: ["guide_only"],
+      recommendedStrategy: "guide_only",
+      appSensitivity: "unknown",
+      taskType: "unknown",
+      reason: "unused"
+    }),
+    runSafeCommand: async () => ({
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 1,
+      timedOut: false,
+      truncated: false
+    }),
+    writeFile: async (input) => ({ path: input.path, bytesWritten: input.content.length, created: true }),
+    readFile: async (input) => ({
+      path: input.path,
+      content: "",
+      encoding: input.encoding ?? "utf8",
+      bytesRead: 0,
+      truncated: false
+    }),
+    fileExists: async (input) => ({ path: input.path, exists: false }),
+    listDirectory: async (input) => ({ path: input.path, entries: [], truncated: false }),
+    ensureDir: async (input) => ({ path: input.path, exists: true, created: true }),
+    getActiveWindow: async () => {
+      calls.push("desktop.get_active_window");
+      return {
+        supported: true,
+        backend: "xdotool",
+        activeWindow: {
+          windowId: "42",
+          appName: "Notes",
+          title: "Notes - Draft"
+        },
+        reason: "Fake active window."
+      };
+    },
+    screenshot: async (input) => {
+      calls.push("desktop.screenshot");
+      return {
+        supported: true,
+        backend: "gnome-screenshot",
+        path: input.path,
+        bytesWritten: 128,
+        reason: "Fake screenshot."
+      };
+    },
+    hotkey: async (input) => {
+      calls.push("desktop.hotkey");
+      return {
+        supported: true,
+        backend: "xdotool",
+        sent: true,
+        keys: input.keys,
+        activeWindow: input.activeWindow,
+        reason: "Fake hotkey."
+      };
+    },
+    typeText: async (input) => {
+      calls.push("desktop.type_text");
+      return {
+        supported: true,
+        backend: "xdotool",
+        typed: true,
+        characterCount: input.text.length,
+        activeWindow: input.activeWindow,
+        reason: "Fake typed text."
+      };
+    },
+    click: async (input) => {
+      calls.push("desktop.click");
+      return {
+        supported: true,
+        backend: "xdotool",
+        clicked: true,
+        x: input.x,
+        y: input.y,
+        button: input.button ?? "left",
+        activeWindow: input.activeWindow,
+        reason: "Fake click."
+      };
+    }
+  };
+
+  return {
+    sessionId: "session_desktop",
+    config,
+    policy,
+    registry,
+    adapters: createAdapterRegistry({ platform: "linux" }),
+    logger,
+    linux,
+    calls
+  };
+}
+
+function allTools() {
+  return [...createDesktopTools()];
+}
+
+async function callTool(context: AgentHostMcpContext, name: string, input: unknown) {
+  const tool = allTools().find((candidate) => candidate.name === name);
+  expect(tool).toBeDefined();
+  expect(tool?.safety).toBeDefined();
+  return runTool(tool!, input, context);
+}
+
+describe("Phase 7 desktop MCP tools", () => {
+  it("declares safety metadata for every desktop tool", () => {
+    expect(allTools().map((tool) => tool.name).sort()).toEqual([
+      "desktop.click",
+      "desktop.get_active_window",
+      "desktop.hotkey",
+      "desktop.screenshot",
+      "desktop.type_text"
+    ]);
+    expect(allTools().every((tool) => tool.safety !== undefined)).toBe(true);
+  });
+
+  it("runs allowed inspect and screenshot tools", async () => {
+    const context = createContext();
+
+    await expect(callTool(context, "desktop.get_active_window", {})).resolves.toMatchObject({
+      ok: true,
+      data: {
+        supported: true,
+        activeWindow: {
+          appName: "Notes"
+        }
+      }
+    });
+    await expect(callTool(context, "desktop.screenshot", { filename: "screen.png" })).resolves.toMatchObject({
+      ok: true,
+      data: {
+        supported: true,
+        path: "/tmp/agenthost-desktop-test/screenshots/screen.png"
+      }
+    });
+
+    expect(context.calls).toEqual(["desktop.get_active_window", "desktop.screenshot"]);
+    expect(context.logger.entries).toHaveLength(2);
+  });
+
+  it("does not execute click or type when generic GUI control is disabled by policy", async () => {
+    const context = createContext();
+    const activeWindow = { appName: "Notes" };
+
+    await expect(callTool(context, "desktop.hotkey", { keys: ["ctrl+l"], activeWindow })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "safety_blocked"
+      }
+    });
+    await expect(callTool(context, "desktop.type_text", { text: "hello", activeWindow })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "safety_blocked"
+      }
+    });
+    await expect(callTool(context, "desktop.click", { x: 10, y: 20, activeWindow })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "safety_blocked"
+      }
+    });
+
+    expect(context.calls).toEqual([]);
+  });
+
+  it("does not execute approval-required screenshots in strict-like policy", async () => {
+    const context = createContext({
+      requireApprovalForMediumRisk: true
+    });
+    const result = await callTool(context, "desktop.screenshot", { filename: "screen.png" });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("approval_required");
+    expect(context.calls).toEqual([]);
+  });
+
+  it("blocks sensitive GUI typing and clicking even when generic GUI control is enabled", async () => {
+    const context = createContext({
+      allowGenericClick: true,
+      allowGenericType: true
+    });
+
+    await expect(
+      callTool(context, "desktop.type_text", {
+        text: "secret",
+        activeWindow: { appName: "Bitwarden" }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "safety_blocked"
+      }
+    });
+
+    await expect(
+      callTool(context, "desktop.click", {
+        x: 1,
+        y: 2,
+        activeWindow: { appName: "Gmail" }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "safety_blocked"
+      }
+    });
+
+    expect(context.calls).toEqual([]);
+  });
+
+  it("returns structured unsupported results from the Linux backend", async () => {
+    const context = createContext();
+    context.linux.getActiveWindow = async () => ({
+      supported: false,
+      backend: "wayland",
+      reason: "Unsupported backend."
+    });
+
+    const result = await callTool(context, "desktop.get_active_window", {});
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toMatchObject({
+      supported: false,
+      backend: "wayland"
+    });
+  });
+});
