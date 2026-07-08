@@ -21,11 +21,17 @@ import {
   captureLinuxScreenshot,
   clickLinuxDesktop,
   detectLinuxApp,
+  detectLinuxAccessibilitySupport,
   ensureLinuxDir,
+  findLinuxAccessibilityElements,
+  focusLinuxWindow,
   getLinuxActiveWindow,
+  getLinuxAccessibilityTree,
   getLinuxAppStrategy,
+  getLinuxDesktopCapabilities,
   getLinuxSystemInfo,
   linuxFileExists,
+  listLinuxWindows,
   listInstalledLinuxApps,
   listLinuxDirectory,
   openLinuxApp,
@@ -38,6 +44,7 @@ import {
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { runTool } from "./tool-runner.js";
 import { createAdapterTools } from "./tools/adapter.js";
+import { createAccessibilityTools } from "./tools/accessibility.js";
 import { createAppTools } from "./tools/app.js";
 import { BLENDER_RUN_PYTHON_TOOL, createBlenderTools } from "./tools/blender.js";
 import { createDesktopTools } from "./tools/desktop.js";
@@ -45,6 +52,7 @@ import { createFileTools } from "./tools/file.js";
 import { createGuideTools } from "./tools/guide.js";
 import { createShellTools } from "./tools/shell.js";
 import { createSystemTools } from "./tools/system.js";
+import { createWindowTools } from "./tools/window.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -129,11 +137,16 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       fileExists: (input) => linuxFileExists(input, { agentHostDir: config.agentHostDir }),
       listDirectory: (input) => listLinuxDirectory(input, { agentHostDir: config.agentHostDir }),
       ensureDir: (input) => ensureLinuxDir(input, { agentHostDir: config.agentHostDir }),
+      getDesktopCapabilities: () => getLinuxDesktopCapabilities({ agentHostDir: config.agentHostDir }),
       getActiveWindow: () => getLinuxActiveWindow({ agentHostDir: config.agentHostDir }),
       screenshot: (input) => captureLinuxScreenshot(input, { agentHostDir: config.agentHostDir }),
+      listWindows: (input) => listLinuxWindows(input, { agentHostDir: config.agentHostDir }),
+      focusWindow: (input) => focusLinuxWindow(input, { agentHostDir: config.agentHostDir }),
       hotkey: (input) => sendLinuxHotkey(input, { agentHostDir: config.agentHostDir }),
       typeText: (input) => typeLinuxText(input, { agentHostDir: config.agentHostDir }),
-      click: (input) => clickLinuxDesktop(input, { agentHostDir: config.agentHostDir })
+      click: (input) => clickLinuxDesktop(input, { agentHostDir: config.agentHostDir }),
+      getAccessibilityTree: (input) => getLinuxAccessibilityTree(input, { agentHostDir: config.agentHostDir }),
+      findAccessibilityElement: (input) => findLinuxAccessibilityElements(input, { agentHostDir: config.agentHostDir })
     };
   const context: AgentHostMcpContext = {
     sessionId: options.sessionId ?? createSessionId(),
@@ -152,6 +165,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createShellTools(),
     ...createFileTools(),
     ...createDesktopTools(),
+    ...createWindowTools(),
+    ...createAccessibilityTools(),
     ...createGuideTools()
   ];
 

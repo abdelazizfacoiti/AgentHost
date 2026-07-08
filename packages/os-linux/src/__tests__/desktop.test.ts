@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 import {
   captureLinuxScreenshot,
   clickLinuxDesktop,
+  focusLinuxWindow,
   getLinuxActiveWindow,
+  getLinuxDesktopCapabilities,
+  listLinuxWindows,
   sendLinuxHotkey,
   typeLinuxText
 } from "../index.js";
@@ -32,6 +35,62 @@ describe("Linux desktop helpers", () => {
       )
     ).resolves.toMatchObject({
       supported: false
+    });
+  });
+
+  it("reports structured desktop capabilities for Wayland without safe backends", async () => {
+    await expect(
+      getLinuxDesktopCapabilities({
+        env: { PATH: "", WAYLAND_DISPLAY: "wayland-0", XDG_SESSION_TYPE: "wayland" }
+      })
+    ).resolves.toMatchObject({
+      platform: "linux",
+      sessionType: "wayland",
+      displayAvailable: true,
+      backend: "wayland",
+      activeWindow: {
+        supported: false,
+        backend: "wayland"
+      },
+      windowList: {
+        supported: false,
+        backend: "wayland"
+      },
+      accessibility: {
+        supported: false
+      }
+    });
+  });
+
+  it("returns clean unsupported results for window listing on Wayland", async () => {
+    await expect(
+      listLinuxWindows(
+        { includeTitles: true },
+        {
+          env: { PATH: "", WAYLAND_DISPLAY: "wayland-0", XDG_SESSION_TYPE: "wayland" }
+        }
+      )
+    ).resolves.toMatchObject({
+      supported: false,
+      backend: "wayland",
+      windows: [],
+      reason: "Wayland window listing is unavailable with the current safe backends."
+    });
+  });
+
+  it("returns clean unsupported results for window focus on Wayland", async () => {
+    await expect(
+      focusLinuxWindow(
+        { appName: "Notes" },
+        {
+          env: { PATH: "", WAYLAND_DISPLAY: "wayland-0", XDG_SESSION_TYPE: "wayland" }
+        }
+      )
+    ).resolves.toMatchObject({
+      supported: false,
+      backend: "wayland",
+      focused: false,
+      reason: "Wayland window listing is unavailable with the current safe backends."
     });
   });
 

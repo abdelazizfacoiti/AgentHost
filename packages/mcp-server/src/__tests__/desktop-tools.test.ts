@@ -90,6 +90,21 @@ function createContext(
     fileExists: async (input) => ({ path: input.path, exists: false }),
     listDirectory: async (input) => ({ path: input.path, entries: [], truncated: false }),
     ensureDir: async (input) => ({ path: input.path, exists: true, created: true }),
+    getDesktopCapabilities: async () => {
+      calls.push("desktop.get_capabilities");
+      return {
+        platform: "linux",
+        sessionType: "x11",
+        displayAvailable: true,
+        backend: "x11",
+        activeWindow: { supported: true, backend: "xdotool", reason: "Fake active window support." },
+        screenshot: { supported: true, backend: "gnome-screenshot", reason: "Fake screenshot support." },
+        windowList: { supported: true, backend: "wmctrl", reason: "Fake window listing support." },
+        windowFocus: { supported: true, backend: "wmctrl", reason: "Fake window focus support." },
+        accessibility: { supported: false, backend: "unavailable", reason: "Fake accessibility support." },
+        guiInput: { supported: true, backend: "xdotool", reason: "Fake GUI input support." }
+      };
+    },
     getActiveWindow: async () => {
       calls.push("desktop.get_active_window");
       return {
@@ -113,6 +128,25 @@ function createContext(
         reason: "Fake screenshot."
       };
     },
+    listWindows: async () => ({
+      supported: true,
+      backend: "wmctrl",
+      windows: [],
+      truncated: false,
+      reason: "Fake windows."
+    }),
+    focusWindow: async (input) => ({
+      supported: true,
+      backend: "wmctrl",
+      focused: true,
+      window: {
+        ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+        ...(input.appName === undefined ? {} : { appName: input.appName }),
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.pid === undefined ? {} : { pid: input.pid })
+      },
+      reason: "Fake focus."
+    }),
     hotkey: async (input) => {
       calls.push("desktop.hotkey");
       return {
@@ -147,7 +181,21 @@ function createContext(
         activeWindow: input.activeWindow,
         reason: "Fake click."
       };
-    }
+    },
+    getAccessibilityTree: async () => ({
+      supported: false,
+      backend: "unavailable",
+      nodeCount: 0,
+      truncated: false,
+      redacted: false,
+      reason: "Fake tree."
+    }),
+    findAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      candidates: [],
+      reason: "Fake candidates."
+    })
   };
 
   return {
@@ -173,11 +221,12 @@ async function callTool(context: AgentHostMcpContext, name: string, input: unkno
   return runTool(tool!, input, context);
 }
 
-describe("Phase 7 desktop MCP tools", () => {
+describe("desktop MCP tools", () => {
   it("declares safety metadata for every desktop tool", () => {
     expect(allTools().map((tool) => tool.name).sort()).toEqual([
       "desktop.click",
       "desktop.get_active_window",
+      "desktop.get_capabilities",
       "desktop.hotkey",
       "desktop.screenshot",
       "desktop.type_text"
@@ -188,6 +237,15 @@ describe("Phase 7 desktop MCP tools", () => {
   it("runs allowed inspect and screenshot tools", async () => {
     const context = createContext();
 
+    await expect(callTool(context, "desktop.get_capabilities", {})).resolves.toMatchObject({
+      ok: true,
+      data: {
+        backend: "x11",
+        activeWindow: {
+          supported: true
+        }
+      }
+    });
     await expect(callTool(context, "desktop.get_active_window", {})).resolves.toMatchObject({
       ok: true,
       data: {
@@ -205,8 +263,8 @@ describe("Phase 7 desktop MCP tools", () => {
       }
     });
 
-    expect(context.calls).toEqual(["desktop.get_active_window", "desktop.screenshot"]);
-    expect(context.logger.entries).toHaveLength(2);
+    expect(context.calls).toEqual(["desktop.get_capabilities", "desktop.get_active_window", "desktop.screenshot"]);
+    expect(context.logger.entries).toHaveLength(3);
   });
 
   it("does not execute click or type when generic GUI control is disabled by policy", async () => {

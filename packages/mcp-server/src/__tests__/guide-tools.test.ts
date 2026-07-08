@@ -91,11 +91,37 @@ function createContext(profile: "strict" | "dev" = "strict"): AgentHostMcpContex
     fileExists: async (input) => ({ path: input.path, exists: false }),
     listDirectory: async (input) => ({ path: input.path, entries: [], truncated: false }),
     ensureDir: async (input) => ({ path: input.path, exists: true, created: true }),
+    getDesktopCapabilities: async () => ({
+      platform: "linux",
+      sessionType: "unknown",
+      displayAvailable: false,
+      backend: "unavailable",
+      activeWindow: { supported: false, backend: "unavailable", reason: "Not used in guide tests." },
+      screenshot: { supported: false, backend: "unavailable", reason: "Not used in guide tests." },
+      windowList: { supported: false, backend: "unavailable", reason: "Not used in guide tests." },
+      windowFocus: { supported: false, backend: "unavailable", reason: "Not used in guide tests." },
+      accessibility: { supported: false, backend: "unavailable", reason: "Not used in guide tests." },
+      guiInput: { supported: false, backend: "unavailable", reason: "Not used in guide tests." }
+    }),
     getActiveWindow: async () => ({ supported: false, backend: "unavailable", reason: "Not used in guide tests." }),
     screenshot: async (input) => ({
       supported: false,
       backend: "unavailable",
       path: input.path,
+      reason: "Not used in guide tests."
+    }),
+    listWindows: async () => ({
+      supported: false,
+      backend: "unavailable",
+      windows: [],
+      truncated: false,
+      reason: "Not used in guide tests."
+    }),
+    focusWindow: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      focused: false,
+      window: input,
       reason: "Not used in guide tests."
     }),
     hotkey: async (input) => ({
@@ -122,6 +148,20 @@ function createContext(profile: "strict" | "dev" = "strict"): AgentHostMcpContex
       y: input.y,
       button: input.button ?? "left",
       activeWindow: input.activeWindow,
+      reason: "Not used in guide tests."
+    }),
+    getAccessibilityTree: async () => ({
+      supported: false,
+      backend: "unavailable",
+      nodeCount: 0,
+      truncated: false,
+      redacted: false,
+      reason: "Not used in guide tests."
+    }),
+    findAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      candidates: [],
       reason: "Not used in guide tests."
     })
   };

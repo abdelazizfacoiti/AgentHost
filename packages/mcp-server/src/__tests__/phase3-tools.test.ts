@@ -129,6 +129,18 @@ function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext &
       calls.push("file.ensure_dir");
       return { path: input.path, exists: true, created: true };
     },
+    getDesktopCapabilities: async () => ({
+      platform: "linux",
+      sessionType: "unknown",
+      displayAvailable: false,
+      backend: "unavailable",
+      activeWindow: { supported: false, backend: "unavailable", reason: "unused" },
+      screenshot: { supported: false, backend: "unavailable", reason: "unused" },
+      windowList: { supported: false, backend: "unavailable", reason: "unused" },
+      windowFocus: { supported: false, backend: "unavailable", reason: "unused" },
+      accessibility: { supported: false, backend: "unavailable", reason: "unused" },
+      guiInput: { supported: false, backend: "unavailable", reason: "unused" }
+    }),
     getActiveWindow: async () => ({
       supported: false,
       backend: "unavailable",
@@ -138,6 +150,25 @@ function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext &
       supported: false,
       backend: "unavailable",
       path: input.path,
+      reason: "unused"
+    }),
+    listWindows: async () => ({
+      supported: false,
+      backend: "unavailable",
+      windows: [],
+      truncated: false,
+      reason: "unused"
+    }),
+    focusWindow: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      focused: false,
+      window: {
+        ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+        ...(input.appName === undefined ? {} : { appName: input.appName }),
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.pid === undefined ? {} : { pid: input.pid })
+      },
       reason: "unused"
     }),
     hotkey: async (input) => ({
@@ -164,6 +195,20 @@ function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext &
       y: input.y,
       button: input.button ?? "left",
       activeWindow: input.activeWindow,
+      reason: "unused"
+    }),
+    getAccessibilityTree: async () => ({
+      supported: false,
+      backend: "unavailable",
+      nodeCount: 0,
+      truncated: false,
+      redacted: false,
+      reason: "unused"
+    }),
+    findAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      candidates: [],
       reason: "unused"
     })
   };

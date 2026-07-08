@@ -92,11 +92,37 @@ function createContext(logger: MemoryLogger): AgentHostMcpContext {
     fileExists: async (input) => ({ path: input.path, exists: false }),
     listDirectory: async (input) => ({ path: input.path, entries: [], truncated: false }),
     ensureDir: async (input) => ({ path: input.path, exists: true, created: true }),
+    getDesktopCapabilities: async () => ({
+      platform: "linux",
+      sessionType: "unknown",
+      displayAvailable: false,
+      backend: "unavailable",
+      activeWindow: { supported: false, backend: "unavailable", reason: "Not used in system tests." },
+      screenshot: { supported: false, backend: "unavailable", reason: "Not used in system tests." },
+      windowList: { supported: false, backend: "unavailable", reason: "Not used in system tests." },
+      windowFocus: { supported: false, backend: "unavailable", reason: "Not used in system tests." },
+      accessibility: { supported: false, backend: "unavailable", reason: "Not used in system tests." },
+      guiInput: { supported: false, backend: "unavailable", reason: "Not used in system tests." }
+    }),
     getActiveWindow: async () => ({ supported: false, backend: "unavailable", reason: "Not used in system tests." }),
     screenshot: async (input) => ({
       supported: false,
       backend: "unavailable",
       path: input.path,
+      reason: "Not used in system tests."
+    }),
+    listWindows: async () => ({
+      supported: false,
+      backend: "unavailable",
+      windows: [],
+      truncated: false,
+      reason: "Not used in system tests."
+    }),
+    focusWindow: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      focused: false,
+      window: input,
       reason: "Not used in system tests."
     }),
     hotkey: async (input) => ({
@@ -123,6 +149,20 @@ function createContext(logger: MemoryLogger): AgentHostMcpContext {
       y: input.y,
       button: input.button ?? "left",
       activeWindow: input.activeWindow,
+      reason: "Not used in system tests."
+    }),
+    getAccessibilityTree: async () => ({
+      supported: false,
+      backend: "unavailable",
+      nodeCount: 0,
+      truncated: false,
+      redacted: false,
+      reason: "Not used in system tests."
+    }),
+    findAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      candidates: [],
       reason: "Not used in system tests."
     })
   };
