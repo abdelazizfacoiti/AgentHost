@@ -8,6 +8,7 @@ import {
   type PolicyProfile
 } from "@agenthost/core";
 import { describe, expect, it } from "vitest";
+import { ConfirmationManager } from "../confirmation.js";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
 import { runTool } from "../tool-runner.js";
 import { createDesktopTools } from "../tools/desktop.js";
@@ -241,6 +242,7 @@ function createContext(
     policy,
     registry,
     adapters: createAdapterRegistry({ platform: "linux" }),
+    confirmations: new ConfirmationManager(),
     logger,
     linux,
     calls
@@ -256,6 +258,15 @@ async function callTool(context: AgentHostMcpContext, name: string, input: unkno
   expect(tool).toBeDefined();
   expect(tool?.safety).toBeDefined();
   return runTool(tool!, input, context);
+}
+
+function confirmationTokenOf(result: Awaited<ReturnType<typeof callTool>>): string {
+  expect(result.ok).toBe(true);
+  expect(result.preview).toBe(true);
+  expect(result.data).not.toBeNull();
+  const preview = result.data as { confirmationToken?: string };
+  expect(preview.confirmationToken).toEqual(expect.any(String));
+  return preview.confirmationToken!;
 }
 
 describe("desktop MCP tools", () => {
@@ -348,7 +359,9 @@ describe("desktop MCP tools", () => {
         preview: true,
         wouldExecute: true,
         wouldBeBlocked: false,
-        targetSummary: 'Notes "Notes - Draft"'
+        targetSummary: 'Notes "Notes - Draft"',
+        confirmationAvailable: true,
+        confirmationRequired: true
       }
     });
     expect(context.calls).toEqual(["desktop.get_active_window"]);
@@ -374,6 +387,7 @@ describe("desktop MCP tools", () => {
         preview: true,
         wouldExecute: false,
         wouldBeBlocked: true,
+        confirmationAvailable: false,
         dataSensitivity: "secret"
       }
     });
@@ -441,6 +455,49 @@ describe("desktop MCP tools", () => {
     expect(result.data).toMatchObject({
       supported: false,
       backend: "wayland"
+    });
+  });
+
+  it("requires confirmation tokens for desktop click and never logs the raw token", async () => {
+    const context = createContext({
+      allowGenericClick: true
+    });
+
+    await expect(
+      callTool(context, "desktop.click", {
+        x: 10,
+        y: 20,
+        activeWindow: { appName: "Notes" }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "confirmation_required"
+      }
+    });
+
+    const preview = await callTool(context, "desktop.click", {
+      x: 10,
+      y: 20,
+      activeWindow: { appName: "Notes" },
+      dryRun: true
+    });
+    const token = confirmationTokenOf(preview);
+
+    expect(JSON.stringify(context.logger.entries[1])).not.toContain(token);
+
+    await expect(
+      callTool(context, "desktop.click", {
+        x: 10,
+        y: 20,
+        activeWindow: { appName: "Notes" },
+        confirmationToken: token
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      confirmation: {
+        accepted: true
+      }
     });
   });
 });

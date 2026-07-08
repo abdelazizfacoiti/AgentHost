@@ -1,8 +1,8 @@
 const SENSITIVE_KEY_PATTERN =
-  /^(api[_-]?key|authorization|auth|cookie|password|passwd|private[_-]?key|refresh[_-]?token|secret|token)$/i;
+  /^(api[_-]?key|authorization|auth|cookie|password|passwd|private[_-]?key|refresh[_-]?token|confirmation[_-]?token|secret|token)$/i;
 
 const SENSITIVE_ASSIGNMENT_PATTERN =
-  /\b(api[_-]?key|auth|cookie|password|passwd|private[_-]?key|refresh[_-]?token|secret|token)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}\]]+)/gi;
+  /\b(api[_-]?key|auth|cookie|password|passwd|private[_-]?key|refresh[_-]?token|confirmation[_-]?token|secret|token)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}\]]+)/gi;
 
 const AUTH_HEADER_PATTERN = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
 const PRIVATE_KEY_PATTERN = /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi;

@@ -7,11 +7,18 @@ import type {
   InstalledAppSummary,
   ToolResult
 } from "@agenthost/core";
-import { applyAdapterDetectionToAppResult, evaluateSafety, toolSuccess } from "@agenthost/core";
+import { applyAdapterDetectionToAppResult, evaluateSafety, toolFailure, toolSuccess } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
-import { buildPreviewResult, guideAlternative, toAppPreviewTarget } from "./preview.js";
+import {
+  acceptedConfirmation,
+  buildPreviewResult,
+  confirmationRequired,
+  guideAlternative,
+  rejectedConfirmation,
+  toAppPreviewTarget
+} from "./preview.js";
 
 const appNameSchema = z.string().trim().min(1).max(200);
 
@@ -31,7 +38,8 @@ const strategyInputSchema = z
 const openInputSchema = z
   .object({
     appName: appNameSchema,
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .strict();
 
@@ -149,6 +157,11 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
         },
         dryRun: {
           type: "boolean"
+        },
+        confirmationToken: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500
         }
       },
       required: ["appName"],
@@ -189,6 +202,20 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
           targetSummary: data.displayName ?? data.appId,
           target: toAppPreviewTarget(input.appName, data.displayName ?? data.appId),
           supported: data.found,
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: {
+              appId: data.appId,
+              displayName: data.displayName,
+              appSensitivity: data.appSensitivity,
+              recommendedStrategy: data.recommendedStrategy
+            },
+            explanation: "Use this token to open the exact previewed app before it expires.",
+            riskLevel: safetyDecision.riskLevel,
+            appSensitivity: safetyDecision.appSensitivity
+          },
           reasons: previewReasons(data.reason, safetyDecision.reasons),
           saferAlternative: !safetyDecision.allowed || data.recommendedStrategy === "guide_only"
             ? guideAlternative("Use guide mode when direct app launch is blocked or unsupported.")
@@ -197,11 +224,57 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
         });
       }
 
+      const previewData = await context.linux.detectApp({ appName: input.appName });
+      const resolvedData = applyAdapterDetectionToAppResult(
+        previewData,
+        context.adapters.detectForApp({ appName: input.appName, appId: previewData.appId })
+      );
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "app.open",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "app.open",
+        input,
+        target: {
+          appId: resolvedData.appId,
+          displayName: resolvedData.displayName,
+          appSensitivity: resolvedData.appSensitivity,
+          recommendedStrategy: resolvedData.recommendedStrategy
+        },
+        riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium"
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "app.open",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
       const data = await context.linux.openApp({ appName: input.appName });
       return toolSuccess({
         tool: "app.open",
         riskLevel: "medium",
         strategy: data.strategy,
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and app open executed."),
         data,
         observations: [data.reason]
       });

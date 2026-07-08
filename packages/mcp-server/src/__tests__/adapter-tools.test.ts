@@ -8,6 +8,7 @@ import {
   type AuditLogger
 } from "@agenthost/core";
 import { describe, expect, it } from "vitest";
+import { ConfirmationManager } from "../confirmation.js";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
 import { runTool } from "../tool-runner.js";
 import { createAdapterTools } from "../tools/adapter.js";
@@ -293,6 +294,7 @@ function createContext(withAdapter: boolean): AgentHostMcpContext & { logger: Me
     policy,
     registry,
     adapters,
+    confirmations: new ConfirmationManager(),
     logger,
     linux: createLinuxAutomation(config),
     executeCalls

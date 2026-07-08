@@ -75,10 +75,27 @@ export interface ToolResult<T = unknown> {
   riskLevel: RiskLevel;
   strategy?: AutomationStrategy;
   preview?: boolean;
+  confirmation?: ToolConfirmationInfo;
   approval: ApprovalInfo;
   data: T | null;
   observations: string[];
   error: ToolError | null;
+}
+
+export type ConfirmationStatus =
+  | "previewGenerated"
+  | "tokenUsed"
+  | "tokenAccepted"
+  | "tokenRejected";
+
+export interface ToolConfirmationInfo {
+  status: ConfirmationStatus;
+  used: boolean;
+  accepted: boolean;
+  executed: boolean;
+  reason: string;
+  tokenId?: string;
+  expiresAt?: string;
 }
 
 export interface ToolCapability {
@@ -712,6 +729,14 @@ export interface ActionPreviewResult {
   saferAlternative?: ActionPreviewAlternative;
   supported?: boolean;
   backend?: string;
+  confirmationAvailable?: boolean;
+  confirmationRequired?: boolean;
+  confirmationToken?: string;
+  tokenId?: string;
+  expiresAt?: string;
+  inputFingerprint?: string;
+  targetFingerprint?: string;
+  confirmationExplanation?: string;
 }
 
 export interface SystemInfo {
@@ -737,6 +762,9 @@ export interface AuditLogEntry {
   riskLevel: RiskLevel;
   strategy?: AutomationStrategy;
   preview?: boolean;
+  confirmationStatus?: ConfirmationStatus;
+  confirmationTokenId?: string;
+  confirmationReason?: string;
   inputSummary: string;
   approvalStatus: ApprovalStatus;
   ok: boolean;

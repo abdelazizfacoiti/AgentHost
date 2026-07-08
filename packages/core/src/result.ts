@@ -1,4 +1,11 @@
-import type { ApprovalInfo, AutomationStrategy, RiskLevel, ToolError, ToolResult } from "./types.js";
+import type {
+  ApprovalInfo,
+  AutomationStrategy,
+  RiskLevel,
+  ToolConfirmationInfo,
+  ToolError,
+  ToolResult
+} from "./types.js";
 
 export function noApprovalRequired(): ApprovalInfo {
   return {
@@ -13,6 +20,7 @@ export interface ToolSuccessInput<T> {
   data: T;
   strategy?: AutomationStrategy;
   preview?: boolean;
+  confirmation?: ToolConfirmationInfo;
   approval?: ApprovalInfo;
   observations?: string[];
 }
@@ -23,6 +31,7 @@ export function toolSuccess<T>(input: ToolSuccessInput<T>): ToolResult<T> {
     tool: input.tool,
     riskLevel: input.riskLevel,
     ...(input.preview === true ? { preview: true } : {}),
+    ...(input.confirmation === undefined ? {} : { confirmation: input.confirmation }),
     approval: input.approval ?? noApprovalRequired(),
     data: input.data,
     observations: input.observations ?? [],
@@ -42,6 +51,7 @@ export interface ToolFailureInput {
   error: ToolError;
   strategy?: AutomationStrategy;
   preview?: boolean;
+  confirmation?: ToolConfirmationInfo;
   approval?: ApprovalInfo;
   observations?: string[];
 }
@@ -52,6 +62,7 @@ export function toolFailure<T = never>(input: ToolFailureInput): ToolResult<T> {
     tool: input.tool,
     riskLevel: input.riskLevel,
     ...(input.preview === true ? { preview: true } : {}),
+    ...(input.confirmation === undefined ? {} : { confirmation: input.confirmation }),
     approval: input.approval ?? noApprovalRequired(),
     data: null,
     observations: input.observations ?? [],

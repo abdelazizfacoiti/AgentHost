@@ -20,9 +20,12 @@ import type {
   ToolExecutionRuntime
 } from "../tool-runner.js";
 import {
+  acceptedConfirmation,
   buildPreviewResult,
+  confirmationRequired,
   guideAlternative,
   inspectElementAlternative,
+  rejectedConfirmation,
   summarizeAccessibilityElement,
   toAccessibilityPreviewTarget
 } from "./preview.js";
@@ -82,7 +85,8 @@ const invokeActionInputSchema = targetInputObject
   .extend({
     actionName: z.string().trim().min(1).max(100),
     requireExactMatch: z.boolean().optional(),
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .superRefine(requireElementTarget);
 
@@ -90,13 +94,15 @@ const setValueInputSchema = targetInputObject
   .extend({
     value: z.string().min(1).max(10_000),
     dataSensitivity: z.enum(["none", "low", "sensitive", "secret"]).optional(),
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .superRefine(requireElementTarget);
 
 const focusElementInputSchema = targetInputObject
   .extend({
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .superRefine(requireElementTarget);
 
@@ -327,7 +333,8 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         role: { type: "string", minLength: 1, maxLength: 100 },
         actionName: { type: "string", minLength: 1, maxLength: 100 },
         requireExactMatch: { type: "boolean" },
-        dryRun: { type: "boolean" }
+        dryRun: { type: "boolean" },
+        confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
       },
       required: ["actionName"],
       additionalProperties: false
@@ -401,6 +408,16 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
           supported: inspected.supported,
           backend: inspected.backend,
           wouldExecute: actionAvailable && postResolutionSafety.allowed,
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: inspected.element,
+            explanation: "Use this token to invoke the exact previewed accessibility action before it expires.",
+            riskLevel: postResolutionSafety.riskLevel,
+            appSensitivity: postResolutionSafety.appSensitivity,
+            dataSensitivity: inspected.element.dataSensitivity
+          },
           reasons: previewReasons(availabilityReason, postResolutionSafety.reasons),
           saferAlternative: postResolutionSafety.blocked
             ? guideAlternative("Sensitive or blocked accessibility actions should stay in guide mode.")
@@ -445,10 +462,48 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         return safetyFailure("accessibility.invoke_action", postResolutionSafety);
       }
 
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "accessibility.invoke_action",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "accessibility",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "accessibility.invoke_action",
+        input,
+        target: inspected.element,
+        riskLevel: postResolutionSafety.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "accessibility.invoke_action",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "accessibility",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
       return toolSuccess({
         tool: "accessibility.invoke_action",
         riskLevel: "medium",
         strategy: "accessibility",
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and accessibility action executed."),
         data: await context.linux.invokeAccessibilityAction({
           ...(inspected.element.appName === undefined ? {} : { appName: inspected.element.appName }),
           ...(inspected.element.pid === undefined ? {} : { pid: inspected.element.pid }),
@@ -481,7 +536,8 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         role: { type: "string", minLength: 1, maxLength: 100 },
         value: { type: "string", minLength: 1, maxLength: 10000 },
         dataSensitivity: { type: "string", enum: ["none", "low", "sensitive", "secret"] },
-        dryRun: { type: "boolean" }
+        dryRun: { type: "boolean" },
+        confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
       },
       required: ["value"],
       additionalProperties: false
@@ -565,6 +621,16 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
           supported: inspected.supported,
           backend: inspected.backend,
           wouldExecute: canSetValue && postResolutionSafety.allowed,
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: inspected.element,
+            explanation: "Use this token to set the exact previewed accessibility value before it expires.",
+            riskLevel: postResolutionSafety.riskLevel,
+            appSensitivity: postResolutionSafety.appSensitivity,
+            dataSensitivity: combinedDataSensitivity
+          },
           reasons: previewReasons(capabilityReason, postResolutionSafety.reasons),
           saferAlternative: postResolutionSafety.blocked
             ? guideAlternative("Sensitive value changes should stay blocked or guide-only until approved.")
@@ -610,10 +676,48 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         return safetyFailure("accessibility.set_value", postResolutionSafety);
       }
 
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "accessibility.set_value",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "accessibility",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "accessibility.set_value",
+        input,
+        target: inspected.element,
+        riskLevel: postResolutionSafety.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "accessibility.set_value",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "accessibility",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
       return toolSuccess({
         tool: "accessibility.set_value",
         riskLevel: "medium",
         strategy: "accessibility",
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and accessibility value set executed."),
         data: await context.linux.setAccessibilityValue({
           ...(inspected.element.appName === undefined ? {} : { appName: inspected.element.appName }),
           ...(inspected.element.pid === undefined ? {} : { pid: inspected.element.pid }),
@@ -644,7 +748,8 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         elementId: { type: "string", minLength: 1, maxLength: 200 },
         query: { type: "string", minLength: 1, maxLength: 500 },
         role: { type: "string", minLength: 1, maxLength: 100 },
-        dryRun: { type: "boolean" }
+        dryRun: { type: "boolean" },
+        confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
       },
       additionalProperties: false
     },
@@ -713,6 +818,16 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
           dataSensitivity: inspected.element.dataSensitivity,
           supported: inspected.supported,
           backend: inspected.backend,
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: inspected.element,
+            explanation: "Use this token to focus the exact previewed accessibility element before it expires.",
+            riskLevel: postResolutionSafety.riskLevel,
+            appSensitivity: postResolutionSafety.appSensitivity,
+            dataSensitivity: inspected.element.dataSensitivity
+          },
           saferAlternative: postResolutionSafety.blocked
             ? guideAlternative("Sensitive app focus changes should stay blocked or guide-only.")
             : undefined,
@@ -755,10 +870,48 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         return safetyFailure("accessibility.focus_element", postResolutionSafety);
       }
 
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "accessibility.focus_element",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "accessibility",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "accessibility.focus_element",
+        input,
+        target: inspected.element,
+        riskLevel: postResolutionSafety.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "accessibility.focus_element",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "accessibility",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
       return toolSuccess({
         tool: "accessibility.focus_element",
         riskLevel: "medium",
         strategy: "accessibility",
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and accessibility focus executed."),
         data: await context.linux.focusAccessibilityElement({
           ...(inspected.element.appName === undefined ? {} : { appName: inspected.element.appName }),
           ...(inspected.element.pid === undefined ? {} : { pid: inspected.element.pid }),

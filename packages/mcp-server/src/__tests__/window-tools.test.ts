@@ -8,6 +8,7 @@ import {
   type PolicyProfile
 } from "@agenthost/core";
 import { describe, expect, it } from "vitest";
+import { ConfirmationManager } from "../confirmation.js";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
 import { runTool } from "../tool-runner.js";
 import { createWindowTools } from "../tools/window.js";
@@ -232,6 +233,7 @@ function createContext(
     policy,
     registry,
     adapters: createAdapterRegistry({ platform: "linux" }),
+    confirmations: new ConfirmationManager(),
     logger,
     linux,
     calls
@@ -243,6 +245,15 @@ async function callTool(context: AgentHostMcpContext, name: string, input: unkno
   expect(tool).toBeDefined();
   expect(tool?.safety).toBeDefined();
   return runTool(tool!, input, context);
+}
+
+function confirmationTokenOf(result: Awaited<ReturnType<typeof callTool>>): string {
+  expect(result.ok).toBe(true);
+  expect(result.preview).toBe(true);
+  expect(result.data).not.toBeNull();
+  const preview = result.data as { confirmationToken?: string };
+  expect(preview.confirmationToken).toEqual(expect.any(String));
+  return preview.confirmationToken!;
 }
 
 describe("window MCP tools", () => {
@@ -286,14 +297,19 @@ describe("window MCP tools", () => {
     expect(context.calls).toEqual([]);
   });
 
-  it("focuses a normal app when policy allows generic GUI control", async () => {
+  it("focuses a normal app when policy allows generic GUI control after preview confirmation", async () => {
     const context = createContext({
       allowGenericClick: true
     });
-    const result = await callTool(context, "window.focus", { appName: "Notes" });
+    const preview = await callTool(context, "window.focus", { appName: "Notes", dryRun: true });
+    const token = confirmationTokenOf(preview);
+    const result = await callTool(context, "window.focus", { appName: "Notes", confirmationToken: token });
 
     expect(result).toMatchObject({
       ok: true,
+      confirmation: {
+        accepted: true
+      },
       data: {
         supported: true,
         focused: true,
@@ -302,7 +318,7 @@ describe("window MCP tools", () => {
         }
       }
     });
-    expect(context.calls).toEqual(["window.list", "window.focus"]);
+    expect(context.calls).toEqual(["window.list", "window.list", "window.focus"]);
   });
 
   it("previews window focus without focusing the window", async () => {
@@ -318,10 +334,51 @@ describe("window MCP tools", () => {
         preview: true,
         wouldExecute: true,
         wouldBeBlocked: false,
-        targetSummary: 'Notes "Draft"'
+        targetSummary: 'Notes "Draft"',
+        confirmationAvailable: true,
+        confirmationRequired: true
       }
     });
     expect(context.calls).toEqual(["window.list"]);
     expect(context.logger.entries[0]?.preview).toBe(true);
+  });
+
+  it("requires confirmation tokens and rejects changed resolved window targets", async () => {
+    const context = createContext({
+      allowGenericClick: true
+    });
+
+    await expect(callTool(context, "window.focus", { appName: "Notes" })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "confirmation_required"
+      }
+    });
+
+    const preview = await callTool(context, "window.focus", { appName: "Notes", dryRun: true });
+    const token = confirmationTokenOf(preview);
+
+    context.linux.listWindows = async () => ({
+      supported: true,
+      backend: "wmctrl",
+      windows: [
+        {
+          windowId: "99",
+          appName: "Notes",
+          title: "Changed",
+          pid: 9900
+        }
+      ],
+      truncated: false,
+      reason: "Changed window list."
+    });
+
+    await expect(callTool(context, "window.focus", { appName: "Notes", confirmationToken: token })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "confirmation_rejected",
+        message: "Confirmation token target does not match the current resolved target."
+      }
+    });
   });
 });
