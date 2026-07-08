@@ -434,6 +434,61 @@ export interface FileEnsureDirResult {
   created: boolean;
 }
 
+export type DesktopMouseButton = "left" | "middle" | "right";
+
+export interface DesktopWindowContext {
+  windowId?: string;
+  appName?: string;
+  title?: string;
+  pid?: number;
+  appSensitivity?: AppSensitivity;
+}
+
+export interface DesktopGetActiveWindowResult {
+  supported: boolean;
+  backend: string;
+  activeWindow?: DesktopWindowContext;
+  reason: string;
+}
+
+export interface DesktopScreenshotResult {
+  supported: boolean;
+  backend: string;
+  path?: string;
+  bytesWritten?: number;
+  activeWindow?: DesktopWindowContext;
+  reason: string;
+}
+
+export interface DesktopHotkeyResult {
+  supported: boolean;
+  backend: string;
+  sent: boolean;
+  keys: string[];
+  activeWindow: DesktopWindowContext;
+  reason: string;
+}
+
+export interface DesktopTypeTextResult {
+  supported: boolean;
+  backend: string;
+  typed: boolean;
+  characterCount: number;
+  activeWindow: DesktopWindowContext;
+  reason: string;
+}
+
+export interface DesktopClickResult {
+  supported: boolean;
+  backend: string;
+  clicked: boolean;
+  x: number;
+  y: number;
+  button: DesktopMouseButton;
+  activeWindow: DesktopWindowContext;
+  reason: string;
+}
+
 export interface SystemInfo {
   platform: string;
   arch: string;

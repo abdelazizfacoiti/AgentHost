@@ -91,7 +91,40 @@ function createContext(logger: MemoryLogger): AgentHostMcpContext {
     }),
     fileExists: async (input) => ({ path: input.path, exists: false }),
     listDirectory: async (input) => ({ path: input.path, entries: [], truncated: false }),
-    ensureDir: async (input) => ({ path: input.path, exists: true, created: true })
+    ensureDir: async (input) => ({ path: input.path, exists: true, created: true }),
+    getActiveWindow: async () => ({ supported: false, backend: "unavailable", reason: "Not used in system tests." }),
+    screenshot: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      path: input.path,
+      reason: "Not used in system tests."
+    }),
+    hotkey: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      sent: false,
+      keys: input.keys,
+      activeWindow: input.activeWindow,
+      reason: "Not used in system tests."
+    }),
+    typeText: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      typed: false,
+      characterCount: input.text.length,
+      activeWindow: input.activeWindow,
+      reason: "Not used in system tests."
+    }),
+    click: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      clicked: false,
+      x: input.x,
+      y: input.y,
+      button: input.button ?? "left",
+      activeWindow: input.activeWindow,
+      reason: "Not used in system tests."
+    })
   };
 
   return {

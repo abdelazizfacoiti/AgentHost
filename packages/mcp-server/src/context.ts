@@ -7,6 +7,12 @@ import type {
   AdapterRegistrySnapshot,
   AuditLogger,
   CapabilityRegistrySnapshot,
+  DesktopClickResult,
+  DesktopGetActiveWindowResult,
+  DesktopHotkeyResult,
+  DesktopScreenshotResult,
+  DesktopTypeTextResult,
+  DesktopWindowContext,
   DependencyCheckResult,
   DependencyKind,
   FileEnsureDirResult,
@@ -39,6 +45,16 @@ export interface LinuxAutomation {
   fileExists(input: { path: string }): Promise<FileExistsResult>;
   listDirectory(input: { path: string; limit?: number }): Promise<FileListResult>;
   ensureDir(input: { path: string }): Promise<FileEnsureDirResult>;
+  getActiveWindow(): Promise<DesktopGetActiveWindowResult>;
+  screenshot(input: { path: string; includeActiveWindowOnly?: boolean }): Promise<DesktopScreenshotResult>;
+  hotkey(input: { keys: string[]; activeWindow: DesktopWindowContext }): Promise<DesktopHotkeyResult>;
+  typeText(input: { text: string; activeWindow: DesktopWindowContext }): Promise<DesktopTypeTextResult>;
+  click(input: {
+    x: number;
+    y: number;
+    button?: "left" | "middle" | "right";
+    activeWindow: DesktopWindowContext;
+  }): Promise<DesktopClickResult>;
 }
 
 export interface AgentHostMcpContext {

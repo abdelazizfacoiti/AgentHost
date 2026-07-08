@@ -109,6 +109,36 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Creates an approved directory if needed."
     },
     {
+      name: "desktop.get_active_window",
+      riskLevel: "low" as const,
+      strategy: "gui_control" as const,
+      description: "Returns best-effort metadata about the current active window."
+    },
+    {
+      name: "desktop.screenshot",
+      riskLevel: "medium" as const,
+      strategy: "gui_control" as const,
+      description: "Captures a screenshot into an approved local AgentHost folder."
+    },
+    {
+      name: "desktop.hotkey",
+      riskLevel: "medium" as const,
+      strategy: "gui_control" as const,
+      description: "Sends a desktop hotkey when policy and active-window context allow it."
+    },
+    {
+      name: "desktop.type_text",
+      riskLevel: "medium" as const,
+      strategy: "gui_control" as const,
+      description: "Types text into the active window when policy and safety allow it."
+    },
+    {
+      name: "desktop.click",
+      riskLevel: "medium" as const,
+      strategy: "gui_control" as const,
+      description: "Clicks screen coordinates when policy and active-window context allow it."
+    },
+    {
       name: "guide.create_steps",
       riskLevel: "observe" as const,
       strategy: "guide_only" as const,

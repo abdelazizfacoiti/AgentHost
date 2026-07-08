@@ -128,7 +128,44 @@ function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext &
     ensureDir: async (input) => {
       calls.push("file.ensure_dir");
       return { path: input.path, exists: true, created: true };
-    }
+    },
+    getActiveWindow: async () => ({
+      supported: false,
+      backend: "unavailable",
+      reason: "unused"
+    }),
+    screenshot: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      path: input.path,
+      reason: "unused"
+    }),
+    hotkey: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      sent: false,
+      keys: input.keys,
+      activeWindow: input.activeWindow,
+      reason: "unused"
+    }),
+    typeText: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      typed: false,
+      characterCount: input.text.length,
+      activeWindow: input.activeWindow,
+      reason: "unused"
+    }),
+    click: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      clicked: false,
+      x: input.x,
+      y: input.y,
+      button: input.button ?? "left",
+      activeWindow: input.activeWindow,
+      reason: "unused"
+    })
   };
 
   return {
