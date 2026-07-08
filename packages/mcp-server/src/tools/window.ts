@@ -14,7 +14,15 @@ import type {
   AnyAgentHostToolDefinition,
   ToolExecutionRuntime
 } from "../tool-runner.js";
-import { buildPreviewResult, guideAlternative, summarizeWindow, toWindowPreviewTarget } from "./preview.js";
+import {
+  acceptedConfirmation,
+  buildPreviewResult,
+  confirmationRequired,
+  guideAlternative,
+  rejectedConfirmation,
+  summarizeWindow,
+  toWindowPreviewTarget
+} from "./preview.js";
 
 const nonEmptyString = z.string().trim().min(1).max(500);
 
@@ -31,7 +39,8 @@ const focusInputSchema = z
     appName: z.string().trim().min(1).max(200).optional(),
     title: nonEmptyString.optional(),
     pid: z.number().int().min(1).optional(),
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .strict()
   .superRefine((input, ctx) => {
@@ -152,7 +161,8 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
         appName: { type: "string", minLength: 1, maxLength: 200 },
         title: { type: "string", minLength: 1, maxLength: 500 },
         pid: { type: "integer", minimum: 1 },
-        dryRun: { type: "boolean" }
+        dryRun: { type: "boolean" },
+        confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
       },
       additionalProperties: false
     },
@@ -268,6 +278,15 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
           target: toWindowPreviewTarget(target),
           supported: true,
           backend: windows.backend,
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target,
+            explanation: "Use this token to focus the exact previewed window before it expires.",
+            riskLevel: postResolutionSafety.riskLevel,
+            appSensitivity: postResolutionSafety.appSensitivity
+          },
           reasons: previewReasons("Would focus the resolved visible window.", postResolutionSafety.reasons),
           saferAlternative: postResolutionSafety.blocked
             ? guideAlternative("Sensitive app window focus should stay blocked or guide-only.")
@@ -360,10 +379,48 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
         return safetyFailure("window.focus", postResolutionSafety);
       }
 
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "window.focus",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "gui_control",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "window.focus",
+        input,
+        target,
+        riskLevel: postResolutionSafety.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "window.focus",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "gui_control",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
       return toolSuccess({
         tool: "window.focus",
         riskLevel: "medium",
         strategy: "gui_control",
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and window focus executed."),
         data: await context.linux.focusWindow({
           windowId: target.windowId,
           ...(target.appName === undefined ? {} : { appName: target.appName }),

@@ -7,11 +7,17 @@ import type {
   FileWriteResult,
   ToolResult
 } from "@agenthost/core";
-import { evaluateSafety, normalizePathForPolicy, toolSuccess } from "@agenthost/core";
+import { evaluateSafety, normalizePathForPolicy, toolFailure, toolSuccess } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
-import { buildPreviewResult, toFilePreviewTarget } from "./preview.js";
+import {
+  acceptedConfirmation,
+  buildPreviewResult,
+  confirmationRequired,
+  rejectedConfirmation,
+  toFilePreviewTarget
+} from "./preview.js";
 
 const pathSchema = z.string().trim().min(1).max(1000);
 const encodingSchema = z.enum(["utf8", "base64"]);
@@ -22,7 +28,8 @@ const writeInputSchema = z
     content: z.string(),
     encoding: encodingSchema.optional(),
     createParents: z.boolean().optional(),
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .strict();
 const readInputSchema = z
@@ -33,7 +40,13 @@ const readInputSchema = z
   })
   .strict();
 const pathOnlyInputSchema = z.object({ path: pathSchema }).strict();
-const ensureDirInputSchema = z.object({ path: pathSchema, dryRun: z.boolean().optional() }).strict();
+const ensureDirInputSchema = z
+  .object({
+    path: pathSchema,
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
+  })
+  .strict();
 const listInputSchema = z
   .object({
     path: pathSchema,
@@ -70,6 +83,11 @@ const ensureDirMcpInputSchema = {
     },
     dryRun: {
       type: "boolean"
+    },
+    confirmationToken: {
+      type: "string",
+      minLength: 1,
+      maxLength: 500
     }
   },
   required: ["path"],
@@ -110,6 +128,11 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
         },
         dryRun: {
           type: "boolean"
+        },
+        confirmationToken: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500
         }
       },
       required: ["path", "content"],
@@ -144,8 +167,53 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
           safety: safetyDecision,
           targetSummary: `Write ${input.content.length} bytes to ${normalizedPath}`,
           target: toFilePreviewTarget(normalizedPath, normalizedPath),
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: { path: normalizedPath },
+            explanation: "Use this token to write the exact previewed file before it expires.",
+            riskLevel: safetyDecision.riskLevel,
+            appSensitivity: safetyDecision.appSensitivity
+          },
           reasons: previewReasons("Classified the file path without writing any content.", safetyDecision.reasons),
           observations: ["Previewed file creation without writing the file."]
+        });
+      }
+
+      const normalizedPath = normalizePreviewPath(input.path, context);
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "file.write",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "file.write",
+        input,
+        target: { path: normalizedPath },
+        riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium"
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "file.write",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
         });
       }
 
@@ -170,6 +238,7 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
       return toolSuccess({
         tool: "file.write",
         riskLevel: "medium",
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and file write executed."),
         data: await context.linux.writeFile(writeInput),
         observations: ["Wrote a new file inside approved roots."]
       });
@@ -330,14 +399,64 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
           safety: safetyDecision,
           targetSummary: `Ensure directory ${normalizedPath}`,
           target: toFilePreviewTarget(normalizedPath, normalizedPath),
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: { path: normalizedPath },
+            explanation: "Use this token to create the exact previewed directory before it expires.",
+            riskLevel: safetyDecision.riskLevel,
+            appSensitivity: safetyDecision.appSensitivity
+          },
           reasons: previewReasons("Classified the directory path without creating it.", safetyDecision.reasons),
           observations: ["Previewed directory creation without creating the directory."]
+        });
+      }
+
+      const normalizedPath = normalizePreviewPath(input.path, context);
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "file.ensure_dir",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "file.ensure_dir",
+        input,
+        target: { path: normalizedPath },
+        riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium"
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "file.ensure_dir",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
         });
       }
 
       return toolSuccess({
         tool: "file.ensure_dir",
         riskLevel: "medium",
+        confirmation: acceptedConfirmation(
+          verification.tokenId,
+          true,
+          "Confirmation token accepted and directory ensure executed."
+        ),
         data: await context.linux.ensureDir({ path: input.path }),
         observations: ["Ensured directory inside approved roots."]
       });

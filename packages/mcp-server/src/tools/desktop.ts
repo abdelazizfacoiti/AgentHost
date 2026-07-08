@@ -23,7 +23,15 @@ import type {
   AnyAgentHostToolDefinition,
   ToolExecutionRuntime
 } from "../tool-runner.js";
-import { buildPreviewResult, guideAlternative, summarizeWindow, toWindowPreviewTarget } from "./preview.js";
+import {
+  acceptedConfirmation,
+  buildPreviewResult,
+  confirmationRequired,
+  guideAlternative,
+  rejectedConfirmation,
+  summarizeWindow,
+  toWindowPreviewTarget
+} from "./preview.js";
 
 const nonEmptyString = z.string().trim().min(1).max(1000);
 
@@ -56,7 +64,8 @@ const hotkeyInputSchema = z
   .object({
     keys: z.array(z.string().trim().min(1).max(100)).min(1).max(10),
     activeWindow: activeWindowSchema,
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .strict();
 const typeTextInputSchema = z
@@ -64,7 +73,8 @@ const typeTextInputSchema = z
     text: z.string().min(1).max(10_000),
     activeWindow: activeWindowSchema,
     dataSensitivity: z.enum(["none", "low", "sensitive", "secret"]).optional(),
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .strict();
 const clickInputSchema = z
@@ -73,7 +83,8 @@ const clickInputSchema = z
     y: z.number().int().min(0),
     button: z.enum(["left", "middle", "right"]).optional(),
     activeWindow: activeWindowSchema,
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .strict();
 
@@ -366,7 +377,8 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           maxItems: 10
         },
         activeWindow: activeWindowMcpSchema,
-        dryRun: { type: "boolean" }
+        dryRun: { type: "boolean" },
+        confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
       },
       required: ["keys", "activeWindow"],
       additionalProperties: false
@@ -429,6 +441,15 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           target: toWindowPreviewTarget(validation.activeWindow),
           supported: true,
           backend: validation.backend,
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: validation.activeWindow,
+            explanation: "Use this token to send the exact previewed hotkey to the same active window before it expires.",
+            riskLevel: postResolutionSafety.riskLevel,
+            appSensitivity: postResolutionSafety.appSensitivity
+          },
           reasons: previewReasons(`Would send hotkey ${input.keys.join("+")} to the active window.`, postResolutionSafety.reasons),
           saferAlternative: postResolutionSafety.blocked
             ? guideAlternative("Sensitive app hotkeys should stay blocked or guide-only.")
@@ -441,11 +462,75 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         keys: input.keys,
         activeWindow
       };
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "desktop.hotkey",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          strategy: "gui_control",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const validation = await validateActiveWindowForPreview(context, activeWindow);
+
+        if (!validation.supported || !("matched" in validation) || !validation.matched) {
+          return toolFailure({
+            tool: "desktop.hotkey",
+            riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+            strategy: "gui_control",
+            confirmation: rejectedConfirmation(undefined, validation.reason),
+            error: {
+              code: "confirmation_rejected",
+              message: validation.reason
+            },
+            observations: [validation.reason]
+          });
+        }
+
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "desktop.hotkey",
+            actionType: "gui_click",
+            strategy: "gui_control",
+            ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "desktop.hotkey",
+        input,
+        target: validation.activeWindow,
+        riskLevel: postResolutionSafety.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "desktop.hotkey",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "gui_control",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
 
       return toolSuccess({
         tool: "desktop.hotkey",
         riskLevel: "medium",
         strategy: "gui_control",
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and desktop hotkey executed."),
         data: await context.linux.hotkey(hotkeyInput),
         observations: ["Sent a desktop hotkey using the generic GUI fallback backend."]
       });
@@ -466,7 +551,8 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           type: "string",
           enum: ["none", "low", "sensitive", "secret"]
         },
-        dryRun: { type: "boolean" }
+        dryRun: { type: "boolean" },
+        confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
       },
       required: ["text", "activeWindow"],
       additionalProperties: false
@@ -553,6 +639,16 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           dataSensitivity: input.dataSensitivity,
           supported: true,
           backend: validation.backend,
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: validation.activeWindow,
+            explanation: "Use this token to type the exact previewed text into the same active window before it expires.",
+            riskLevel: postResolutionSafety.riskLevel,
+            appSensitivity: postResolutionSafety.appSensitivity,
+            dataSensitivity: input.dataSensitivity
+          },
           reasons: previewReasons(`Would type ${input.text.length} characters into the active window.`, postResolutionSafety.reasons),
           saferAlternative: postResolutionSafety.blocked
             ? guideAlternative("Sensitive app text entry should stay blocked or guide-only.")
@@ -561,10 +657,75 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         });
       }
 
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "desktop.type_text",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          strategy: "gui_control",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const validation = await validateActiveWindowForPreview(context, activeWindow);
+
+        if (!validation.supported || !("matched" in validation) || !validation.matched) {
+          return toolFailure({
+            tool: "desktop.type_text",
+            riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+            strategy: "gui_control",
+            confirmation: rejectedConfirmation(undefined, validation.reason),
+            error: {
+              code: "confirmation_rejected",
+              message: validation.reason
+            },
+            observations: [validation.reason]
+          });
+        }
+
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "desktop.type_text",
+            actionType: "gui_type",
+            strategy: "gui_control",
+            ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName }),
+            ...(input.dataSensitivity === undefined ? {} : { dataSensitivity: input.dataSensitivity })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "desktop.type_text",
+        input,
+        target: validation.activeWindow,
+        riskLevel: postResolutionSafety.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "desktop.type_text",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "gui_control",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
       return toolSuccess({
         tool: "desktop.type_text",
         riskLevel: "medium",
         strategy: "gui_control",
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and desktop typing executed."),
         data: await context.linux.typeText({
           text: input.text,
           activeWindow
@@ -586,7 +747,8 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         y: { type: "integer", minimum: 0 },
         button: { type: "string", enum: ["left", "middle", "right"] },
         activeWindow: activeWindowMcpSchema,
-        dryRun: { type: "boolean" }
+        dryRun: { type: "boolean" },
+        confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
       },
       required: ["x", "y", "activeWindow"],
       additionalProperties: false
@@ -649,6 +811,15 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           target: toWindowPreviewTarget(validation.activeWindow),
           supported: true,
           backend: validation.backend,
+          confirmation: {
+            manager: context.confirmations,
+            sessionId: context.sessionId,
+            input,
+            target: validation.activeWindow,
+            explanation: "Use this token to click the exact previewed coordinates in the same active window before it expires.",
+            riskLevel: postResolutionSafety.riskLevel,
+            appSensitivity: postResolutionSafety.appSensitivity
+          },
           reasons: previewReasons(
             `Would click (${input.x}, ${input.y}) with ${input.button ?? "left"} button in the active window.`,
             postResolutionSafety.reasons
@@ -675,10 +846,74 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         clickInput.button = input.button;
       }
 
+      if (input.confirmationToken === undefined) {
+        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        return toolFailure({
+          tool: "desktop.click",
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+          strategy: "gui_control",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code: "confirmation_required",
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const validation = await validateActiveWindowForPreview(context, activeWindow);
+
+        if (!validation.supported || !("matched" in validation) || !validation.matched) {
+          return toolFailure({
+            tool: "desktop.click",
+            riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+            strategy: "gui_control",
+            confirmation: rejectedConfirmation(undefined, validation.reason),
+            error: {
+              code: "confirmation_rejected",
+              message: validation.reason
+            },
+            observations: [validation.reason]
+          });
+        }
+
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "desktop.click",
+            actionType: "gui_click",
+            strategy: "gui_control",
+            ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "desktop.click",
+        input,
+        target: validation.activeWindow,
+        riskLevel: postResolutionSafety.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "desktop.click",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "gui_control",
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
       return toolSuccess({
         tool: "desktop.click",
         riskLevel: "medium",
         strategy: "gui_control",
+        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and desktop click executed."),
         data: await context.linux.click(clickInput),
         observations: ["Clicked desktop coordinates using the generic GUI fallback backend."]
       });

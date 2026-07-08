@@ -35,6 +35,7 @@ import type {
   SystemInfo
 } from "@agenthost/core";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
+import type { ConfirmationManager } from "./confirmation.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -128,5 +129,6 @@ export interface AgentHostMcpContext {
   registry: CapabilityRegistrySnapshot;
   adapters: AdapterRegistrySnapshot;
   logger: AuditLogger;
+  confirmations: ConfirmationManager;
   linux: LinuxAutomation;
 }

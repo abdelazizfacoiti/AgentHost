@@ -2,7 +2,7 @@
 
 ## 1. Security goal
 
-AgentHost gives AI agents access to real local capabilities. That makes safety central to the product.
+AgentHost gives AI agents access to real local capabilities. Safety is the product.
 
 The system must be:
 
@@ -10,6 +10,8 @@ The system must be:
 - visible
 - permissioned
 - logged
+- previewable
+- confirmation-bound
 - reversible where possible
 - conservative by default
 
@@ -25,6 +27,10 @@ schema validation
 risk classification
   ↓
 policy check
+  ↓
+dry-run preview if requested
+  ↓
+confirmation token check if required
   ↓
 approval request if needed
   ↓
@@ -45,8 +51,8 @@ Examples:
 
 - get OS info
 - list capabilities
-- read current AgentHost profile
-- get recent logs
+- inspect current profile
+- read recent logs
 
 ### `low`
 
@@ -57,6 +63,8 @@ Examples:
 - check if command exists
 - check if file exists in approved output folder
 - list AgentHost output directory
+- list visible windows
+- inspect accessibility metadata
 
 ### `medium`
 
@@ -69,6 +77,7 @@ Examples:
 - focus a window
 - run a safe local command
 - generate local output
+- accessibility action on normal app
 - prepare a draft without sending
 
 ### `high`
@@ -104,10 +113,9 @@ Examples:
 - disabling security tools
 - destructive actions without explicit user intent
 - exfiltrating private files
+- typing/sending secret data by default
 
 ## 4. App sensitivity categories
-
-AgentHost should classify apps and sites.
 
 ### Normal apps
 
@@ -117,6 +125,7 @@ Examples:
 - GIMP
 - LibreOffice
 - VS Code
+- terminal
 
 Medium-risk automation may be allowed with profile permissions.
 
@@ -130,7 +139,7 @@ Examples:
 - Discord
 - WhatsApp Web
 
-Typing, sending, attaching, or posting is high risk unless reviewed.
+Reading private data requires explicit user intent. Typing, sending, attaching, posting, or submitting is high risk unless reviewed.
 
 ### Financial/payment apps
 
@@ -140,7 +149,7 @@ Examples:
 - checkout pages
 - crypto wallets
 
-Autonomous execution should be blocked by default. Guide mode only.
+Autonomous execution should be blocked by default. Guide mode only unless a very explicit future policy says otherwise.
 
 ### Credential/security apps
 
@@ -174,7 +183,8 @@ For normal users.
   "allowEmailSend": false,
   "allowUploads": false,
   "requireApprovalForMediumRisk": true,
-  "blockHighRiskByDefault": true
+  "blockHighRiskByDefault": true,
+  "requireConfirmationForStateChanging": true
 }
 ```
 
@@ -193,13 +203,14 @@ For development.
   "allowEmailSend": false,
   "allowUploads": false,
   "requireApprovalForMediumRisk": false,
-  "blockHighRiskByDefault": true
+  "blockHighRiskByDefault": true,
+  "requireConfirmationForStateChanging": true
 }
 ```
 
-### autopilot
+### gui-dev
 
-Future profile only. Do not use in MVP.
+For local GUI testing only.
 
 ```json
 {
@@ -208,12 +219,76 @@ Future profile only. Do not use in MVP.
   "allowShell": true,
   "allowGenericClick": true,
   "allowGenericType": true,
-  "requireApprovalForHighRisk": true,
-  "blockHighRiskByDefault": false
+  "requireDryRunForGuiActions": true,
+  "requireConfirmationForStateChanging": true,
+  "blockHighRiskByDefault": true
 }
 ```
 
-## 6. Shell safety
+### autopilot
+
+Future profile only. Do not use in MVP.
+
+Autopilot must still preserve blocked categories and confirmation for high-risk actions.
+
+## 6. Dry-run previews
+
+State-changing tools should support:
+
+```json
+{
+  "dryRun": true
+}
+```
+
+Dry-run previews must:
+
+- never execute side effects
+- still validate schema
+- still run safety preflight
+- resolve targets where possible
+- detect ambiguity
+- redact secrets
+- return whether the action would execute
+- return whether approval or confirmation would be required
+- mint a confirmation token only when exact, unambiguous, allowed, and eligible
+
+## 7. Confirmation tokens
+
+Phase 11 adds confirmation tokens.
+
+Tokens are:
+
+- in-memory
+- session-bound
+- short-lived, currently 3 minutes by default
+- single-use
+- bound to tool name
+- bound to normalized input fingerprint
+- bound to target fingerprint when applicable
+- bound to risk level
+- not logged raw
+- not allowed to contain secrets
+
+Execution with token must verify:
+
+- token exists
+- token not expired
+- token not reused
+- same session
+- same tool
+- same normalized input
+- same target fingerprint
+- risk did not increase
+
+A token does **not** bypass:
+
+- schema validation
+- safety engine
+- approval prompts
+- Codex approval layer
+
+## 8. Shell safety
 
 Dangerous patterns must be high-risk or blocked.
 
@@ -242,10 +317,12 @@ Shell commands should have:
 - stdout/stderr capture
 - structured errors
 - risk classification before execution
+- dry-run classification
+- confirmation token when required
 
-Prefer `spawn(command, args)` over raw shell strings when possible.
+Prefer `spawn(command, args)` or `execFile` over raw shell strings.
 
-## 7. File safety
+## 9. File safety
 
 Default writable roots:
 
@@ -269,9 +346,9 @@ browser profile folders
 system folders
 ```
 
-Do not read arbitrary personal files unless the user explicitly asks and policy allows it.
+File writes should support dry-run and confirmation.
 
-## 8. Communication safety
+## 10. Communication safety
 
 MVP must not send communications automatically.
 
@@ -284,12 +361,13 @@ This includes:
 - comments
 - support replies
 
-Allowed in MVP:
+Allowed near-term:
 
 - prepare draft text
 - open compose page
 - show recipient/subject/body
-- show attachment path
+- read user-approved email data through official API
+- summarize user-approved private data
 - guide user manually
 
 Blocked by default:
@@ -299,8 +377,9 @@ Blocked by default:
 - submitting
 - silent file upload
 - silent attachment
+- deleting/archiving email without explicit confirmation
 
-## 9. GUI automation safety
+## 11. GUI automation safety
 
 GUI automation includes:
 
@@ -308,20 +387,35 @@ GUI automation includes:
 - click
 - type
 - hotkey
+- focus window
 
-This should not be implemented in Phase 0 + Phase 1.
+Rules:
 
-When added later:
-
-- screenshots require permission
+- screenshots are privacy-sensitive
 - clicks require active window context
-- typing passwords is forbidden
+- typing passwords/secrets is forbidden
 - communication apps are high-risk
 - financial apps are guide-only
 - generic GUI control is disabled in strict profile
-- guide mode is preferred for unsupported apps
+- accessibility is preferred before raw GUI
+- dry-run preview is required for state-changing GUI actions
+- confirmation token should be required where configured
 
-## 10. Approval requests
+## 12. Accessibility safety
+
+Accessibility is safer than raw coordinates but still powerful.
+
+Rules:
+
+- read-only tree/element inspection is low risk
+- state-changing actions are medium/high depending on app/action/data
+- ambiguous targets must be rejected
+- hidden/password/secret fields must not expose values
+- secret set_value is blocked by default
+- no fallback to raw click/type unless explicitly requested and policy allows
+- action previews should include element summary and ambiguity status
+
+## 13. Approval requests
 
 Approval prompts must include:
 
@@ -331,25 +425,14 @@ Approval prompts must include:
 - exact command if shell
 - files affected
 - data sent or changed
+- target window/element if UI action
 - risk level
 - consequence
+- dry-run preview if available
+- confirmation token status
 - approve/deny/edit options
 
-Example:
-
-```text
-Approval required
-
-Action: Attach file to email draft
-App: Gmail
-Recipient: example@gmail.com
-Attachment: ~/.agenthost/outputs/result.blend
-Risk: high
-
-This may expose the file to the recipient.
-```
-
-## 11. Audit logging
+## 14. Audit logging
 
 All tool calls must be logged locally as JSONL.
 
@@ -363,16 +446,22 @@ Each log entry should include:
 
 ```json
 {
-  "timestamp": "2026-07-07T21:00:00.000Z",
+  "timestamp": "2026-07-08T21:00:00.000Z",
   "sessionId": "session_123",
-  "tool": "system.get_info",
-  "riskLevel": "observe",
-  "strategy": "guide_only",
-  "inputSummary": "Get system info",
+  "tool": "shell.run_safe",
+  "riskLevel": "medium",
+  "strategy": "cli_or_script",
+  "inputSummary": "Run node --version",
   "approvalStatus": "not_required",
+  "preview": false,
+  "confirmation": {
+    "used": true,
+    "accepted": true,
+    "tokenId": "token_abcd"
+  },
   "ok": true,
   "durationMs": 12,
-  "outputSummary": "Returned platform and capabilities"
+  "outputSummary": "Command exited 0"
 }
 ```
 
@@ -383,23 +472,41 @@ Do not log:
 - auth tokens
 - cookies
 - private keys
+- raw confirmation tokens
 - full sensitive files
 - full private email/message content
 - screenshots by default
+- raw secret values
 
-## 12. Emergency stop
+## 15. Emergency stop
 
-Future control room UI must include an emergency stop.
+Future Control Room UI must include emergency stop.
 
 Emergency stop should:
 
 - cancel queued actions
 - kill child processes started by AgentHost
 - disable further tool calls in the session
-- write a stop entry to logs
+- write stop entry to logs
 - return cancelled errors to Codex
 
-## 13. Security non-negotiables
+## 16. Tool Forge security
+
+Future generated tools must require:
+
+- manifest
+- permission declaration
+- allowed domains
+- allowed file roots
+- declared risk levels
+- tests
+- dry-run support for state-changing actions
+- confirmation support where needed
+- user approval before registration
+
+Generated tools must not run with arbitrary unrestricted access.
+
+## 17. Security non-negotiables
 
 AgentHost must never:
 
@@ -412,3 +519,4 @@ AgentHost must never:
 - install hidden persistence
 - disable security tools
 - control another person’s computer without consent
+- use generated tools to bypass safety policy

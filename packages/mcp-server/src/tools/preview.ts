@@ -10,8 +10,10 @@ import {
   type DesktopWindowSummary,
   type RiskLevel,
   type SafetyDecision,
+  type ToolConfirmationInfo,
   type ToolResult
 } from "@agenthost/core";
+import type { ConfirmationManager } from "../confirmation.js";
 
 interface PreviewResultInput {
   tool: string;
@@ -29,6 +31,16 @@ interface PreviewResultInput {
   saferAlternative?: ActionPreviewAlternative | undefined;
   wouldExecute?: boolean | undefined;
   observations?: string[] | undefined;
+  confirmation?: {
+    manager: ConfirmationManager;
+    sessionId: string;
+    input: unknown;
+    target?: unknown;
+    explanation: string;
+    riskLevel: RiskLevel;
+    appSensitivity?: ActionPreviewResult["appSensitivity"];
+    dataSensitivity?: DataSensitivity | undefined;
+  } | undefined;
 }
 
 export function buildPreviewResult(input: PreviewResultInput): ToolResult<ActionPreviewResult> {
@@ -37,12 +49,41 @@ export function buildPreviewResult(input: PreviewResultInput): ToolResult<Action
   const wouldExecute =
     input.wouldExecute ??
     (supported !== false && !ambiguous && input.safety.allowed);
+  const confirmationAvailable = wouldExecute && input.confirmation !== undefined;
+  const confirmationToken = confirmationAvailable
+    ? input.confirmation!.manager.createPreviewToken({
+        sessionId: input.confirmation!.sessionId,
+        tool: input.tool,
+        input: input.confirmation!.input,
+        ...(input.confirmation!.target === undefined ? {} : { target: input.confirmation!.target }),
+        riskLevel: input.confirmation!.riskLevel,
+        ...(input.confirmation!.appSensitivity === undefined
+          ? {}
+          : { appSensitivity: input.confirmation!.appSensitivity }),
+        ...(input.confirmation!.dataSensitivity === undefined
+          ? {}
+          : { dataSensitivity: input.confirmation!.dataSensitivity }),
+        targetSummary: input.targetSummary
+      })
+    : undefined;
+  const confirmationInfo: ToolConfirmationInfo | undefined = confirmationToken === undefined
+    ? undefined
+    : {
+        status: "previewGenerated",
+        used: false,
+        accepted: false,
+        executed: false,
+        reason: input.confirmation!.explanation,
+        tokenId: confirmationToken.tokenId,
+        expiresAt: confirmationToken.expiresAt
+      };
 
   return toolSuccess<ActionPreviewResult>({
     tool: input.tool,
     riskLevel: input.safety.riskLevel,
     ...(input.strategy === undefined ? {} : { strategy: input.strategy }),
     preview: true,
+    ...(confirmationInfo === undefined ? {} : { confirmation: confirmationInfo }),
     data: {
       preview: true,
       wouldExecute,
@@ -58,7 +99,19 @@ export function buildPreviewResult(input: PreviewResultInput): ToolResult<Action
       matchedRules: input.matchedRules ?? input.safety.matchedRules,
       ...(input.saferAlternative === undefined ? {} : { saferAlternative: input.saferAlternative }),
       ...(supported === undefined ? {} : { supported }),
-      ...(input.backend === undefined ? {} : { backend: input.backend })
+      ...(input.backend === undefined ? {} : { backend: input.backend }),
+      confirmationAvailable,
+      confirmationRequired: input.confirmation !== undefined,
+      ...(confirmationToken === undefined ? {} : { confirmationToken: confirmationToken.confirmationToken }),
+      ...(confirmationToken === undefined ? {} : { tokenId: confirmationToken.tokenId }),
+      ...(confirmationToken === undefined ? {} : { expiresAt: confirmationToken.expiresAt }),
+      ...(confirmationToken === undefined ? {} : { inputFingerprint: confirmationToken.inputFingerprint }),
+      ...(confirmationToken?.targetFingerprint === undefined
+        ? {}
+        : { targetFingerprint: confirmationToken.targetFingerprint }),
+      ...(input.confirmation === undefined
+        ? {}
+        : { confirmationExplanation: input.confirmation.explanation })
     },
     approval: input.safety.approval,
     observations:
@@ -96,6 +149,49 @@ export function toAccessibilityPreviewTarget(element: AccessibilityElementDetail
     role: element.role,
     ...(element.name === undefined ? {} : { name: element.name }),
     ...(element.availableActions.length === 0 ? {} : { availableActions: element.availableActions })
+  };
+}
+
+export function acceptedConfirmation(tokenId: string | undefined, executed: boolean, reason: string): ToolConfirmationInfo {
+  return {
+    status: "tokenAccepted",
+    used: true,
+    accepted: true,
+    executed,
+    reason,
+    ...(tokenId === undefined ? {} : { tokenId })
+  };
+}
+
+export function rejectedConfirmation(tokenId: string | undefined, reason: string): ToolConfirmationInfo {
+  return {
+    status: "tokenRejected",
+    used: tokenId !== undefined,
+    accepted: false,
+    executed: false,
+    reason,
+    ...(tokenId === undefined ? {} : { tokenId })
+  };
+}
+
+export function confirmationRequired(reason: string): ToolConfirmationInfo {
+  return {
+    status: "tokenRejected",
+    used: false,
+    accepted: false,
+    executed: false,
+    reason
+  };
+}
+
+export function usedConfirmation(tokenId: string | undefined, reason: string): ToolConfirmationInfo {
+  return {
+    status: "tokenUsed",
+    used: true,
+    accepted: false,
+    executed: false,
+    reason,
+    ...(tokenId === undefined ? {} : { tokenId })
   };
 }
 

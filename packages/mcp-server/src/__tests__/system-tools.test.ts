@@ -11,6 +11,7 @@ import { runTool, type ToolExecutionContext } from "../tool-runner.js";
 import { createSystemTools } from "../tools/system.js";
 import { z } from "zod";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
+import { ConfirmationManager } from "../confirmation.js";
 
 class MemoryLogger implements AuditLogger {
   readonly entries: AuditLogEntry[] = [];
@@ -211,6 +212,7 @@ function createContext(logger: MemoryLogger): AgentHostMcpContext {
     registry,
     adapters: createAdapterRegistry({ platform: "linux" }),
     logger,
+    confirmations: new ConfirmationManager(),
     linux
   };
 }

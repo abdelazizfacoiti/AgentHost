@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
 import { runTool } from "../tool-runner.js";
 import { createAccessibilityTools } from "../tools/accessibility.js";
+import { ConfirmationManager } from "../confirmation.js";
 
 class MemoryLogger implements AuditLogger {
   readonly entries: AuditLogEntry[] = [];
@@ -279,6 +280,7 @@ function createContext(options: ContextOptions = {}): AgentHostMcpContext & { ca
     registry,
     adapters: createAdapterRegistry({ platform: "linux" }),
     logger,
+    confirmations: new ConfirmationManager(),
     linux,
     calls
   };
@@ -303,6 +305,15 @@ async function callTool(context: AgentHostMcpContext, name: string, input: unkno
   expect(tool).toBeDefined();
   expect(tool?.safety).toBeDefined();
   return runTool(tool!, input, context);
+}
+
+function confirmationTokenOf(result: Awaited<ReturnType<typeof callTool>>): string {
+  expect(result.ok).toBe(true);
+  expect(result.preview).toBe(true);
+  expect(result.data).not.toBeNull();
+  const preview = result.data as { confirmationToken?: string };
+  expect(preview.confirmationToken).toEqual(expect.any(String));
+  return preview.confirmationToken!;
 }
 
 describe("accessibility MCP tools", () => {
@@ -374,7 +385,9 @@ describe("accessibility MCP tools", () => {
         preview: true,
         wouldExecute: true,
         wouldBeBlocked: false,
-        targetSummary: 'push button "Save" in GIMP'
+        targetSummary: 'push button "Save" in GIMP',
+        confirmationAvailable: true,
+        confirmationRequired: true
       }
     });
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
@@ -421,7 +434,8 @@ describe("accessibility MCP tools", () => {
       data: {
         preview: true,
         ambiguous: true,
-        wouldExecute: false
+        wouldExecute: false,
+        confirmationAvailable: false
       }
     });
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
@@ -534,7 +548,17 @@ describe("accessibility MCP tools", () => {
         })
       }
     });
-    const result = await callTool(context, "accessibility.set_value", { query: "Name", value: secretValue });
+    const preview = await callTool(context, "accessibility.set_value", {
+      query: "Name",
+      value: secretValue,
+      dryRun: true
+    });
+    const token = confirmationTokenOf(preview);
+    const result = await callTool(context, "accessibility.set_value", {
+      query: "Name",
+      value: secretValue,
+      confirmationToken: token
+    });
 
     expect(result).toMatchObject({
       ok: true,
@@ -544,9 +568,10 @@ describe("accessibility MCP tools", () => {
       }
     });
     expect(JSON.stringify(result.data)).not.toContain(secretValue);
-    expect(context.logger.entries).toHaveLength(1);
-    expect(context.logger.entries[0]?.outputSummary).not.toContain(secretValue);
-    expect(context.calls).toEqual(["accessibility.inspect_element", "accessibility.set_value"]);
+    expect(context.logger.entries).toHaveLength(2);
+    expect(context.logger.entries[1]?.outputSummary).not.toContain(secretValue);
+    expect(JSON.stringify(context.logger.entries[0])).not.toContain(token);
+    expect(context.calls).toEqual(["accessibility.inspect_element", "accessibility.inspect_element", "accessibility.set_value"]);
   });
 
   it("previews secret set_value requests without leaking the secret", async () => {
@@ -585,6 +610,7 @@ describe("accessibility MCP tools", () => {
         preview: true,
         wouldExecute: false,
         wouldBeBlocked: true,
+        confirmationAvailable: false,
         dataSensitivity: "secret"
       }
     });
@@ -592,5 +618,70 @@ describe("accessibility MCP tools", () => {
     expect(context.logger.entries[0]?.outputSummary).not.toContain(secretValue);
     expect(context.logger.entries[0]?.preview).toBe(true);
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
+  });
+
+  it("requires confirmation tokens for real accessibility actions and rejects reused tokens", async () => {
+    const context = createContext({
+      inspectResult: {
+        supported: true,
+        backend: "atspi",
+        matched: true,
+        ambiguous: false,
+        redacted: false,
+        reason: "Resolved one accessibility element through AT-SPI.",
+        element: normalElement()
+      },
+      invokeResult: {
+        supported: true,
+        backend: "atspi",
+        matched: true,
+        ambiguous: false,
+        performed: true,
+        redacted: false,
+        actionName: "click",
+        reason: "Invoked the accessibility action."
+      }
+    });
+
+    await expect(callTool(context, "accessibility.invoke_action", { query: "Save", actionName: "click" })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "confirmation_required"
+      }
+    });
+
+    const preview = await callTool(context, "accessibility.invoke_action", {
+      query: "Save",
+      actionName: "click",
+      dryRun: true
+    });
+    const token = confirmationTokenOf(preview);
+
+    await expect(
+      callTool(context, "accessibility.invoke_action", {
+        query: "Save",
+        actionName: "click",
+        confirmationToken: token
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      confirmation: {
+        accepted: true
+      }
+    });
+
+    await expect(
+      callTool(context, "accessibility.invoke_action", {
+        query: "Save",
+        actionName: "click",
+        confirmationToken: token
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "confirmation_rejected",
+        message: "Confirmation token was already used."
+      }
+    });
   });
 });

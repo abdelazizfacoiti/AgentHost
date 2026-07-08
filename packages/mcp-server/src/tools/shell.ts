@@ -1,5 +1,6 @@
 import {
   evaluateSafety,
+  toolFailure,
   toolSuccess,
   type ActionPreviewResult,
   type ShellRunResult,
@@ -9,7 +10,13 @@ import { formatCommandForSafety } from "@agenthost/os-linux";
 import { z } from "zod";
 import type { AgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
-import { buildPreviewResult, toShellPreviewTarget } from "./preview.js";
+import {
+  acceptedConfirmation,
+  buildPreviewResult,
+  confirmationRequired,
+  rejectedConfirmation,
+  toShellPreviewTarget
+} from "./preview.js";
 
 const shellInputSchema = z
   .object({
@@ -18,7 +25,8 @@ const shellInputSchema = z
     cwd: z.string().trim().min(1).max(1000).optional(),
     timeoutMs: z.number().int().min(1).max(60_000).optional(),
     maxOutputBytes: z.number().int().min(1).max(1024 * 1024).optional(),
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
   })
   .strict();
 
@@ -84,6 +92,11 @@ export function createShellTools(): AgentHostToolDefinition<
           },
           dryRun: {
             type: "boolean"
+          },
+          confirmationToken: {
+            type: "string",
+            minLength: 1,
+            maxLength: 500
           }
         },
         required: ["command"],
@@ -124,8 +137,54 @@ export function createShellTools(): AgentHostToolDefinition<
             safety: safetyDecision,
             targetSummary: formattedCommand,
             target: toShellPreviewTarget(formattedCommand),
+            confirmation: {
+              manager: context.confirmations,
+              sessionId: context.sessionId,
+              input,
+              target: { command: formattedCommand },
+              explanation: "Use this token to execute the exact previewed shell command before it expires.",
+              riskLevel: safetyDecision.riskLevel,
+              appSensitivity: safetyDecision.appSensitivity
+            },
             reasons: previewReasons("Classified the command without executing it.", safetyDecision.reasons),
             observations: ["Previewed shell execution without running the command."]
+          });
+        }
+
+        if (input.confirmationToken === undefined) {
+          const reason = "Execution requires a fresh dry-run preview confirmation token.";
+          return toolFailure({
+            tool: "shell.run_safe",
+            riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+            strategy: "cli_or_script",
+            confirmation: confirmationRequired(reason),
+            error: {
+              code: "confirmation_required",
+              message: reason
+            },
+            observations: [reason]
+          });
+        }
+
+        const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+          sessionId: context.sessionId,
+          tool: "shell.run_safe",
+          input,
+          target: { command: formattedCommand },
+          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium"
+        });
+
+        if (!verification.ok) {
+          return toolFailure({
+            tool: "shell.run_safe",
+            riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+            strategy: "cli_or_script",
+            confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+            error: {
+              code: "confirmation_rejected",
+              message: verification.reason
+            },
+            observations: [verification.reason]
           });
         }
 
@@ -159,6 +218,11 @@ export function createShellTools(): AgentHostToolDefinition<
           tool: "shell.run_safe",
           riskLevel: "medium",
           strategy: "cli_or_script",
+          confirmation: acceptedConfirmation(
+            verification.tokenId,
+            true,
+            "Confirmation token accepted and command executed."
+          ),
           data: await context.linux.runSafeCommand(commandInput),
           observations: ["Ran command with shell disabled after safety classification."]
         });

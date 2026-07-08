@@ -66,6 +66,13 @@ function createAuditLogEntry(
     tool: result.tool,
     riskLevel: result.riskLevel,
     ...(result.preview === true ? { preview: true } : {}),
+    ...(result.confirmation === undefined
+      ? {}
+      : {
+          confirmationStatus: result.confirmation.status,
+          ...(result.confirmation.tokenId === undefined ? {} : { confirmationTokenId: result.confirmation.tokenId }),
+          confirmationReason: result.confirmation.reason
+        }),
     inputSummary,
     approvalStatus: result.approval.status,
     ok: result.ok,

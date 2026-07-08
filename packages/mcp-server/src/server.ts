@@ -46,6 +46,7 @@ import {
   writeLinuxFile
 } from "@agenthost/os-linux";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
+import { ConfirmationManager } from "./confirmation.js";
 import { runTool } from "./tool-runner.js";
 import { createAdapterTools } from "./tools/adapter.js";
 import { createAccessibilityTools } from "./tools/accessibility.js";
@@ -127,6 +128,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   await registerOptionalBlenderRuntime(registry, adapters);
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
   const policy = options.policy ?? config.policy;
+  const confirmations = new ConfirmationManager();
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -166,6 +168,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     registry,
     adapters,
     logger,
+    confirmations,
     linux
   };
   const tools = [

@@ -13,6 +13,7 @@ import { createAppTools } from "../tools/app.js";
 import { createFileTools } from "../tools/file.js";
 import { createShellTools } from "../tools/shell.js";
 import { createSystemTools } from "../tools/system.js";
+import { ConfirmationManager } from "../confirmation.js";
 
 class MemoryLogger implements AuditLogger {
   readonly entries: AuditLogEntry[] = [];
@@ -22,7 +23,7 @@ class MemoryLogger implements AuditLogger {
   }
 }
 
-function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext & { calls: string[] } {
+function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext & { calls: string[]; logger: MemoryLogger } {
   const registry = createBaseCapabilityRegistry();
   const policy = getPolicyProfile(profile);
   const config: AgentHostConfig = {
@@ -54,6 +55,19 @@ function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext &
     },
     detectApp: async (input) => {
       calls.push("app.detect");
+      if (input.appName === "Calculator") {
+        return {
+          found: true,
+          appId: "calculator",
+          displayName: "Calculator",
+          adapterAvailable: false,
+          availableStrategies: ["cli_or_script", "guide_only"],
+          recommendedStrategy: "cli_or_script",
+          appSensitivity: "normal",
+          reason: "Fake calculator app."
+        };
+      }
+
       return {
         found: false,
         appId: `unknown:${input.appName}`,
@@ -257,6 +271,7 @@ function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext &
     registry,
     adapters: createAdapterRegistry({ platform: "linux" }),
     logger: new MemoryLogger(),
+    confirmations: new ConfirmationManager(),
     linux,
     calls
   };
@@ -271,6 +286,15 @@ async function callTool(context: AgentHostMcpContext, name: string, input: unkno
   expect(tool).toBeDefined();
   expect(tool?.safety).toBeDefined();
   return runTool(tool!, input, context);
+}
+
+function confirmationTokenOf(result: Awaited<ReturnType<typeof callTool>>): string {
+  expect(result.ok).toBe(true);
+  expect(result.preview).toBe(true);
+  expect(result.data).not.toBeNull();
+  const preview = result.data as { confirmationToken?: string };
+  expect(preview.confirmationToken).toEqual(expect.any(String));
+  return preview.confirmationToken!;
 }
 
 describe("Phase 3 MCP tools", () => {
@@ -319,23 +343,50 @@ describe("Phase 3 MCP tools", () => {
     ]);
   });
 
-  it("runs safe dev shell and file tools inside approved roots", async () => {
+  it("runs safe dev shell and file tools inside approved roots after preview confirmation", async () => {
     const context = createContext("dev");
     const safePath = "/tmp/agenthost-phase3-test/output.txt";
+    const shellToken = confirmationTokenOf(
+      await callTool(context, "shell.run_safe", { command: "node", args: ["--version"], dryRun: true })
+    );
+    const writeToken = confirmationTokenOf(
+      await callTool(context, "file.write", { path: safePath, content: "ok", dryRun: true })
+    );
+    const ensureDirToken = confirmationTokenOf(
+      await callTool(context, "file.ensure_dir", { path: "/tmp/agenthost-phase3-test/subdir", dryRun: true })
+    );
 
-    await expect(callTool(context, "shell.run_safe", { command: "node", args: ["--version"] })).resolves.toMatchObject({
-      ok: true
+    await expect(
+      callTool(context, "shell.run_safe", { command: "node", args: ["--version"], confirmationToken: shellToken })
+    ).resolves.toMatchObject({
+      ok: true,
+      confirmation: {
+        accepted: true
+      }
     });
-    await expect(callTool(context, "file.write", { path: safePath, content: "ok" })).resolves.toMatchObject({
-      ok: true
+    await expect(
+      callTool(context, "file.write", { path: safePath, content: "ok", confirmationToken: writeToken })
+    ).resolves.toMatchObject({
+      ok: true,
+      confirmation: {
+        accepted: true
+      }
     });
     await expect(callTool(context, "file.read", { path: safePath })).resolves.toMatchObject({ ok: true });
     await expect(callTool(context, "file.exists", { path: safePath })).resolves.toMatchObject({ ok: true });
     await expect(callTool(context, "file.list", { path: "/tmp/agenthost-phase3-test" })).resolves.toMatchObject({
       ok: true
     });
-    await expect(callTool(context, "file.ensure_dir", { path: "/tmp/agenthost-phase3-test/subdir" })).resolves.toMatchObject({
-      ok: true
+    await expect(
+      callTool(context, "file.ensure_dir", {
+        path: "/tmp/agenthost-phase3-test/subdir",
+        confirmationToken: ensureDirToken
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      confirmation: {
+        accepted: true
+      }
     });
 
     expect(context.calls).toEqual([
@@ -366,7 +417,9 @@ describe("Phase 3 MCP tools", () => {
       preview: true,
       data: {
         preview: true,
-        wouldExecute: true
+        wouldExecute: true,
+        confirmationAvailable: true,
+        confirmationRequired: true
       }
     });
     await expect(callTool(context, "file.write", { path: safePath, content: "ok", dryRun: true })).resolves.toMatchObject({
@@ -374,7 +427,9 @@ describe("Phase 3 MCP tools", () => {
       preview: true,
       data: {
         preview: true,
-        wouldExecute: true
+        wouldExecute: true,
+        confirmationAvailable: true,
+        confirmationRequired: true
       }
     });
     await expect(callTool(context, "file.ensure_dir", { path: "/tmp/agenthost-phase3-test/subdir", dryRun: true })).resolves.toMatchObject({
@@ -382,7 +437,9 @@ describe("Phase 3 MCP tools", () => {
       preview: true,
       data: {
         preview: true,
-        wouldExecute: true
+        wouldExecute: true,
+        confirmationAvailable: true,
+        confirmationRequired: true
       }
     });
     await expect(callTool(context, "app.open", { appName: "Mystery", dryRun: true })).resolves.toMatchObject({
@@ -390,11 +447,137 @@ describe("Phase 3 MCP tools", () => {
       preview: true,
       data: {
         preview: true,
-        wouldExecute: false
+        wouldExecute: false,
+        confirmationAvailable: false
       }
     });
 
     expect(context.calls).toEqual(["app.detect"]);
+  });
+
+  it("requires a confirmation token before executing state-changing phase 3 tools", async () => {
+    const context = createContext("dev");
+
+    await expect(callTool(context, "shell.run_safe", { command: "node", args: ["--version"] })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "confirmation_required" }
+    });
+    await expect(callTool(context, "file.write", { path: "/tmp/agenthost-phase3-test/no-token.txt", content: "ok" })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "confirmation_required" }
+    });
+  });
+
+  it("does not generate a token for blocked secret set_value previews or unsupported app.open previews", async () => {
+    const context = createContext("dev");
+
+    const appPreview = await callTool(context, "app.open", { appName: "Mystery", dryRun: true });
+    expect(appPreview).toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        confirmationAvailable: false
+      }
+    });
+  });
+
+  it("supports preview then execute for app.open on a safe known app", async () => {
+    const context = createContext("dev");
+    const preview = await callTool(context, "app.open", { appName: "Calculator", dryRun: true });
+    const token = confirmationTokenOf(preview);
+
+    await expect(callTool(context, "app.open", { appName: "Calculator", confirmationToken: token })).resolves.toMatchObject({
+      ok: true,
+      confirmation: {
+        accepted: true
+      },
+      data: {
+        opened: true
+      }
+    });
+  });
+
+  it("rejects expired, reused, wrong-tool, and changed-input confirmation tokens", async () => {
+    const expiredContext = createContext("dev");
+    expiredContext.confirmations = new ConfirmationManager(0);
+    const expiredToken = confirmationTokenOf(
+      await callTool(expiredContext, "shell.run_safe", { command: "node", args: ["--version"], dryRun: true })
+    );
+    await expect(
+      callTool(expiredContext, "shell.run_safe", {
+        command: "node",
+        args: ["--version"],
+        confirmationToken: expiredToken
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "confirmation_rejected", message: "Confirmation token expired." }
+    });
+
+    const context = createContext("dev");
+    const shellToken = confirmationTokenOf(
+      await callTool(context, "shell.run_safe", { command: "node", args: ["--version"], dryRun: true })
+    );
+
+    await expect(
+      callTool(context, "shell.run_safe", { command: "node", args: ["--version"], confirmationToken: shellToken })
+    ).resolves.toMatchObject({
+      ok: true,
+      confirmation: { accepted: true }
+    });
+    await expect(
+      callTool(context, "shell.run_safe", { command: "node", args: ["--version"], confirmationToken: shellToken })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "confirmation_rejected", message: "Confirmation token was already used." }
+    });
+
+    const wrongToolToken = confirmationTokenOf(
+      await callTool(context, "file.ensure_dir", { path: "/tmp/agenthost-phase3-test/token-dir", dryRun: true })
+    );
+    await expect(
+      callTool(context, "shell.run_safe", { command: "node", args: ["--version"], confirmationToken: wrongToolToken })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "confirmation_rejected", message: "Confirmation token was generated for a different tool." }
+    });
+
+    const changedInputToken = confirmationTokenOf(
+      await callTool(context, "file.write", { path: "/tmp/agenthost-phase3-test/original.txt", content: "ok", dryRun: true })
+    );
+    await expect(
+      callTool(context, "file.write", {
+        path: "/tmp/agenthost-phase3-test/original.txt",
+        content: "changed",
+        confirmationToken: changedInputToken
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "confirmation_rejected",
+        message: "Confirmation token input does not match the current request."
+      }
+    });
+  });
+
+  it("does not log raw confirmation tokens and safety still blocks dangerous commands", async () => {
+    const context = createContext("dev");
+    const preview = await callTool(context, "shell.run_safe", { command: "node", args: ["--version"], dryRun: true });
+    const token = confirmationTokenOf(preview);
+
+    expect(JSON.stringify(context.logger.entries[0])).not.toContain(token);
+    expect(context.logger.entries[0]?.confirmationStatus).toBe("previewGenerated");
+
+    await expect(
+      callTool(context, "shell.run_safe", {
+        command: "rm",
+        args: ["-rf", "/tmp/example"],
+        confirmationToken: token
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "safety_blocked" }
+    });
   });
 
   it("does not execute dangerous shell commands", async () => {
