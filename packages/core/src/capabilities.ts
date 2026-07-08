@@ -79,6 +79,21 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Explains how the active profile and grants classify a potential action."
     },
     {
+      name: "forge.validate_manifest",
+      riskLevel: "low" as const,
+      description: "Validates a Tool Forge manifest for future generated tools, adapters, skills, or workflows."
+    },
+    {
+      name: "forge.review_manifest",
+      riskLevel: "low" as const,
+      description: "Reviews a Tool Forge manifest against the active profile and grants without applying anything."
+    },
+    {
+      name: "forge.propose_grants",
+      riskLevel: "low" as const,
+      description: "Maps a Tool Forge manifest to proposed grants without saving or applying them."
+    },
+    {
       name: "app.detect",
       riskLevel: "low" as const,
       description: "Detects a Linux app generically and reports available automation strategies."
