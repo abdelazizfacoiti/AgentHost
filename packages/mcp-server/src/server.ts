@@ -55,6 +55,7 @@ import { createAppTools } from "./tools/app.js";
 import { BLENDER_RUN_PYTHON_TOOL, createBlenderTools } from "./tools/blender.js";
 import { createDesktopTools } from "./tools/desktop.js";
 import { createFileTools } from "./tools/file.js";
+import { createForgeTools } from "./tools/forge.js";
 import { createGuideTools } from "./tools/guide.js";
 import { createPolicyTools } from "./tools/policy.js";
 import { createShellTools } from "./tools/shell.js";
@@ -181,6 +182,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   };
   const tools = [
     ...createSystemTools(),
+    ...createForgeTools(),
     ...createAdapterTools(),
     ...createBlenderTools(),
     ...createAppTools(),

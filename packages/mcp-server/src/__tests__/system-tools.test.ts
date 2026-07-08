@@ -253,7 +253,10 @@ describe("system tools", () => {
         "policy.get_profile",
         "policy.list_profiles",
         "policy.list_grants",
-        "policy.explain_decision"
+        "policy.explain_decision",
+        "forge.validate_manifest",
+        "forge.review_manifest",
+        "forge.propose_grants"
       ])
     );
   });

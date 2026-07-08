@@ -55,6 +55,12 @@ export type ActionType = (typeof ACTION_TYPES)[number];
 export const DATA_SENSITIVITIES = ["none", "low", "sensitive", "secret"] as const;
 export type DataSensitivity = (typeof DATA_SENSITIVITIES)[number];
 
+export const TOOL_FORGE_MANIFEST_KINDS = ["tool", "adapter", "skill", "workflow"] as const;
+export type ToolForgeManifestKind = (typeof TOOL_FORGE_MANIFEST_KINDS)[number];
+
+export const TOOL_FORGE_MANIFEST_SOURCES = ["generated", "user", "built-in"] as const;
+export type ToolForgeManifestSource = (typeof TOOL_FORGE_MANIFEST_SOURCES)[number];
+
 export const PERMISSION_DEFAULTS = ["allow", "approval_required", "deny", "guide_only"] as const;
 export type PermissionDefault = (typeof PERMISSION_DEFAULTS)[number];
 
@@ -888,6 +894,120 @@ export interface PolicyExplainDecisionResult {
   profile: PolicyProfileName;
   input: SafetyInput;
   decision: SafetyDecision;
+}
+
+export interface ToolForgeRequirements {
+  requiresDryRun?: boolean | undefined;
+  requiresConfirmationToken?: boolean | undefined;
+  requiresApproval?: boolean | undefined;
+}
+
+export interface ToolForgeToolDeclaration {
+  name: string;
+  description: string;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+  riskLevel: RiskLevel;
+  actionType: ActionType;
+  strategy?: AutomationStrategy | undefined;
+}
+
+export interface ToolForgePermissionRequest {
+  id: string;
+  description?: string | undefined;
+  generatedToolId?: string | undefined;
+  tools?: string[] | undefined;
+  strategies?: AutomationStrategy[] | undefined;
+  actionTypes?: ActionType[] | undefined;
+  appNames?: string[] | undefined;
+  appSensitivities?: AppSensitivity[] | undefined;
+  fileRoots?: string[] | undefined;
+  commandAllowlist?: string[] | undefined;
+  networkDomains?: string[] | undefined;
+  oauthScopes?: string[] | undefined;
+  dataSensitivity?: DataSensitivity | undefined;
+  canReadPrivateData?: boolean | undefined;
+  canWriteFiles?: boolean | undefined;
+  canRunShell?: boolean | undefined;
+  canUseGui?: boolean | undefined;
+  canSendMessages?: boolean | undefined;
+  canDeleteData?: boolean | undefined;
+  canUploadFiles?: boolean | undefined;
+  requiresDryRun?: boolean | undefined;
+  requiresConfirmationToken?: boolean | undefined;
+  requiresApproval?: boolean | undefined;
+}
+
+export interface ToolForgeManifest {
+  schemaVersion: "agenthost.forge.v1";
+  id: string;
+  displayName: string;
+  version: string;
+  description: string;
+  kind: ToolForgeManifestKind;
+  source: ToolForgeManifestSource;
+  tools: ToolForgeToolDeclaration[];
+  requestedPermissions: ToolForgePermissionRequest[];
+  riskDeclaration: RiskLevel;
+  dataSensitivityDeclaration: DataSensitivity;
+  requirements: ToolForgeRequirements;
+}
+
+export interface ToolForgeValidationIssue {
+  code: string;
+  message: string;
+  path?: string;
+}
+
+export interface ToolForgeValidationResult {
+  valid: boolean;
+  manifest?: ToolForgeManifest;
+  errors: ToolForgeValidationIssue[];
+  warnings: ToolForgeValidationIssue[];
+  dangerousPermissions: string[];
+  blockedPermissions: string[];
+}
+
+export interface ToolForgePermissionReview {
+  permissionId: string;
+  summary: string;
+  riskLevel: RiskLevel;
+  dangerous: boolean;
+  blocked: boolean;
+  matchedGrantIds: string[];
+  missingGrant: boolean;
+  reasons: string[];
+  proposedGrant?: CapabilityGrant;
+}
+
+export interface ToolForgeReviewResult {
+  valid: boolean;
+  manifestId?: string;
+  displayName?: string;
+  kind?: ToolForgeManifestKind;
+  riskLevel: RiskLevel;
+  dataSensitivity: DataSensitivity;
+  requestedCapabilities: ToolForgePermissionReview[];
+  dangerousPermissions: string[];
+  missingGrants: string[];
+  matchedGrantIds: string[];
+  sessionApprovalPossible: boolean;
+  persistentApprovalAllowed: boolean;
+  blockedReasons: string[];
+  warnings: string[];
+  saferAlternatives: string[];
+}
+
+export interface ToolForgeGrantProposal {
+  grant: CapabilityGrant;
+  permissionId: string;
+  reasons: string[];
+}
+
+export interface ToolForgeGrantProposalResult {
+  manifestId: string;
+  proposals: ToolForgeGrantProposal[];
+  warnings: string[];
 }
 
 export interface AuditLogEntry {
