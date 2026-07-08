@@ -349,6 +349,38 @@ describe("accessibility MCP tools", () => {
     expect(context.logger.entries).toHaveLength(1);
   });
 
+  it("previews a safe accessibility action without invoking it", async () => {
+    const context = createContext({
+      inspectResult: {
+        supported: true,
+        backend: "atspi",
+        matched: true,
+        ambiguous: false,
+        redacted: false,
+        reason: "Resolved one accessibility element through AT-SPI.",
+        element: normalElement()
+      }
+    });
+    const result = await callTool(context, "accessibility.invoke_action", {
+      query: "Save",
+      actionName: "click",
+      dryRun: true
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: true,
+        wouldBeBlocked: false,
+        targetSummary: 'push button "Save" in GIMP'
+      }
+    });
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
+    expect(context.logger.entries[0]?.preview).toBe(true);
+  });
+
   it("returns unsupported set_value results cleanly and logs the call", async () => {
     const context = createContext();
     const result = await callTool(context, "accessibility.set_value", { query: "Name", value: "hello" });
@@ -364,6 +396,35 @@ describe("accessibility MCP tools", () => {
     });
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
     expect(context.logger.entries).toHaveLength(1);
+  });
+
+  it("previews ambiguous accessibility targets without invoking actions", async () => {
+    const context = createContext({
+      inspectResult: {
+        supported: true,
+        backend: "atspi",
+        matched: false,
+        ambiguous: true,
+        redacted: false,
+        reason: "The requested accessibility target matched multiple elements."
+      }
+    });
+    const result = await callTool(context, "accessibility.invoke_action", {
+      query: "Save",
+      actionName: "click",
+      dryRun: true
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        ambiguous: true,
+        wouldExecute: false
+      }
+    });
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
   });
 
   it("returns unsupported focus results cleanly and logs the call", async () => {
@@ -486,5 +547,50 @@ describe("accessibility MCP tools", () => {
     expect(context.logger.entries).toHaveLength(1);
     expect(context.logger.entries[0]?.outputSummary).not.toContain(secretValue);
     expect(context.calls).toEqual(["accessibility.inspect_element", "accessibility.set_value"]);
+  });
+
+  it("previews secret set_value requests without leaking the secret", async () => {
+    const secretValue = "preview-secret-value";
+    const context = createContext({
+      inspectResult: {
+        supported: true,
+        backend: "atspi",
+        matched: true,
+        ambiguous: false,
+        redacted: false,
+        reason: "Resolved one accessibility element through AT-SPI.",
+        element: normalElement({
+          role: "entry",
+          dataSensitivity: "low",
+          valueMetadata: {
+            supportsText: true,
+            supportsValue: false,
+            editable: true,
+            readOnly: false
+          }
+        })
+      }
+    });
+    const result = await callTool(context, "accessibility.set_value", {
+      query: "Name",
+      value: secretValue,
+      dataSensitivity: "secret",
+      dryRun: true
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: false,
+        wouldBeBlocked: true,
+        dataSensitivity: "secret"
+      }
+    });
+    expect(JSON.stringify(result.data)).not.toContain(secretValue);
+    expect(context.logger.entries[0]?.outputSummary).not.toContain(secretValue);
+    expect(context.logger.entries[0]?.preview).toBe(true);
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
   });
 });

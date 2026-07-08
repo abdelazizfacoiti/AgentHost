@@ -330,6 +330,58 @@ describe("desktop MCP tools", () => {
     expect(context.calls).toEqual([]);
   });
 
+  it("previews a desktop click by validating the active window without clicking", async () => {
+    const context = createContext({
+      allowGenericClick: true
+    });
+    const result = await callTool(context, "desktop.click", {
+      x: 10,
+      y: 20,
+      activeWindow: { appName: "Notes" },
+      dryRun: true
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: true,
+        wouldBeBlocked: false,
+        targetSummary: 'Notes "Notes - Draft"'
+      }
+    });
+    expect(context.calls).toEqual(["desktop.get_active_window"]);
+    expect(context.logger.entries[0]?.preview).toBe(true);
+  });
+
+  it("previews desktop typing without sending sensitive text", async () => {
+    const context = createContext({
+      allowGenericType: true
+    });
+    const secret = "my-preview-secret";
+    const result = await callTool(context, "desktop.type_text", {
+      text: secret,
+      activeWindow: { appName: "Notes" },
+      dataSensitivity: "secret",
+      dryRun: true
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: false,
+        wouldBeBlocked: true,
+        dataSensitivity: "secret"
+      }
+    });
+    expect(JSON.stringify(result.data)).not.toContain(secret);
+    expect(context.calls).toEqual(["desktop.get_active_window"]);
+    expect(context.logger.entries[0]?.outputSummary).not.toContain(secret);
+  });
+
   it("does not execute approval-required screenshots in strict-like policy", async () => {
     const context = createContext({
       requireApprovalForMediumRisk: true

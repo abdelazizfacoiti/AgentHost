@@ -1,4 +1,5 @@
 import type {
+  ActionPreviewResult,
   AppDetectionResult,
   AppOpenResult,
   AppStrategyResult,
@@ -6,10 +7,11 @@ import type {
   InstalledAppSummary,
   ToolResult
 } from "@agenthost/core";
-import { applyAdapterDetectionToAppResult, toolSuccess } from "@agenthost/core";
+import { applyAdapterDetectionToAppResult, evaluateSafety, toolSuccess } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
+import { buildPreviewResult, guideAlternative, toAppPreviewTarget } from "./preview.js";
 
 const appNameSchema = z.string().trim().min(1).max(200);
 
@@ -24,6 +26,12 @@ const strategyInputSchema = z
   .object({
     appName: appNameSchema,
     taskType: z.enum(["open", "inspect", "automate", "unknown"]).optional()
+  })
+  .strict();
+const openInputSchema = z
+  .object({
+    appName: appNameSchema,
+    dryRun: z.boolean().optional()
   })
   .strict();
 
@@ -43,6 +51,11 @@ const appNameMcpInputSchema = {
 type DetectInput = z.infer<typeof detectInputSchema>;
 type ListInstalledInput = z.infer<typeof listInstalledInputSchema>;
 type StrategyInput = z.infer<typeof strategyInputSchema>;
+type OpenInput = z.infer<typeof openInputSchema>;
+
+function previewReasons(primaryReason: string, safetyReasons: string[]): string[] {
+  return safetyReasons.includes(primaryReason) ? safetyReasons : [primaryReason, ...safetyReasons];
+}
 
 export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
   const detect: AgentHostToolDefinition<DetectInput, AppDetectionResult, AgentHostMcpContext> = {
@@ -121,19 +134,70 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
     }
   };
 
-  const open: AgentHostToolDefinition<DetectInput, AppOpenResult, AgentHostMcpContext> = {
+  const open: AgentHostToolDefinition<OpenInput, AppOpenResult | ActionPreviewResult, AgentHostMcpContext> = {
     name: "app.open",
     description: "Opens a detected Linux app through a generic launch path.",
     riskLevel: "medium",
-    inputSchema: detectInputSchema,
-    mcpInputSchema: appNameMcpInputSchema,
+    inputSchema: openInputSchema,
+    mcpInputSchema: {
+      type: "object",
+      properties: {
+        appName: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200
+        },
+        dryRun: {
+          type: "boolean"
+        }
+      },
+      required: ["appName"],
+      additionalProperties: false
+    },
     inputSummary: "Open app",
     safety: {
       actionType: "app_launch",
       getInput: (input) => ({ appName: input.appName })
     },
-    async handler(input, context): Promise<ToolResult<AppOpenResult>> {
-      const data = await context.linux.openApp(input);
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<AppOpenResult | ActionPreviewResult>> {
+      if (runtime?.isDryRun) {
+        const safetyDecision =
+          runtime.safetyDecision ??
+          evaluateSafety(
+            {
+              tool: "app.open",
+              actionType: "app_launch",
+              appName: input.appName
+            },
+            context.policy,
+            { agentHostDir: context.config.agentHostDir }
+          );
+        const linuxResult = await context.linux.detectApp({ appName: input.appName });
+        const data = applyAdapterDetectionToAppResult(
+          linuxResult,
+          context.adapters.detectForApp({ appName: input.appName, appId: linuxResult.appId })
+        );
+
+        return buildPreviewResult({
+          tool: "app.open",
+          riskLevel: "medium",
+          strategy: data.recommendedStrategy,
+          safety: safetyDecision,
+          targetSummary: data.displayName ?? data.appId,
+          target: toAppPreviewTarget(input.appName, data.displayName ?? data.appId),
+          supported: data.found,
+          reasons: previewReasons(data.reason, safetyDecision.reasons),
+          saferAlternative: !safetyDecision.allowed || data.recommendedStrategy === "guide_only"
+            ? guideAlternative("Use guide mode when direct app launch is blocked or unsupported.")
+            : undefined,
+          observations: ["Previewed app launch without opening the app."]
+        });
+      }
+
+      const data = await context.linux.openApp({ appName: input.appName });
       return toolSuccess({
         tool: "app.open",
         riskLevel: "medium",

@@ -1,9 +1,15 @@
-import type { ShellRunResult, ToolResult } from "@agenthost/core";
-import { toolSuccess } from "@agenthost/core";
+import {
+  evaluateSafety,
+  toolSuccess,
+  type ActionPreviewResult,
+  type ShellRunResult,
+  type ToolResult
+} from "@agenthost/core";
 import { formatCommandForSafety } from "@agenthost/os-linux";
 import { z } from "zod";
 import type { AgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
+import { buildPreviewResult, toShellPreviewTarget } from "./preview.js";
 
 const shellInputSchema = z
   .object({
@@ -11,13 +17,34 @@ const shellInputSchema = z
     args: z.array(z.string().max(1000)).max(100).optional(),
     cwd: z.string().trim().min(1).max(1000).optional(),
     timeoutMs: z.number().int().min(1).max(60_000).optional(),
-    maxOutputBytes: z.number().int().min(1).max(1024 * 1024).optional()
+    maxOutputBytes: z.number().int().min(1).max(1024 * 1024).optional(),
+    dryRun: z.boolean().optional()
   })
   .strict();
 
 type ShellInput = z.infer<typeof shellInputSchema>;
 
-export function createShellTools(): AgentHostToolDefinition<ShellInput, ShellRunResult, AgentHostMcpContext>[] {
+function commandForSafety(input: ShellInput) {
+  const commandInput = {
+    command: input.command
+  } as { command: string; args?: string[] };
+
+  if (input.args !== undefined) {
+    commandInput.args = input.args;
+  }
+
+  return formatCommandForSafety(commandInput);
+}
+
+function previewReasons(primaryReason: string, safetyReasons: string[]): string[] {
+  return safetyReasons.includes(primaryReason) ? safetyReasons : [primaryReason, ...safetyReasons];
+}
+
+export function createShellTools(): AgentHostToolDefinition<
+  ShellInput,
+  ShellRunResult | ActionPreviewResult,
+  AgentHostMcpContext
+>[] {
   return [
     {
       name: "shell.run_safe",
@@ -54,6 +81,9 @@ export function createShellTools(): AgentHostToolDefinition<ShellInput, ShellRun
             type: "integer",
             minimum: 1,
             maximum: 1048576
+          },
+          dryRun: {
+            type: "boolean"
           }
         },
         required: ["command"],
@@ -62,24 +92,43 @@ export function createShellTools(): AgentHostToolDefinition<ShellInput, ShellRun
       inputSummary: "Run safe shell command",
       safety: {
         actionType: "shell_command",
-        getInput: (input) => {
-          const commandForSafety = {
-            command: input.command
-          } as { command: string; args?: string[] };
-
-          if (input.args !== undefined) {
-            commandForSafety.args = input.args;
-          }
-
-          const safetyInput = {
-            shellCommand: formatCommandForSafety(commandForSafety),
-            ...(input.cwd === undefined ? {} : { filePath: input.cwd })
-          };
-
-          return safetyInput;
-        }
+        getInput: (input) => ({
+          shellCommand: commandForSafety(input),
+          ...(input.cwd === undefined ? {} : { filePath: input.cwd })
+        })
       },
-      async handler(input, context): Promise<ToolResult<ShellRunResult>> {
+      preview: {
+        isDryRun: (input) => input.dryRun === true
+      },
+      async handler(input, context, runtime): Promise<ToolResult<ShellRunResult | ActionPreviewResult>> {
+        const formattedCommand = commandForSafety(input);
+
+        if (runtime?.isDryRun) {
+          const safetyDecision =
+            runtime.safetyDecision ??
+            evaluateSafety(
+              {
+                tool: "shell.run_safe",
+                actionType: "shell_command",
+                shellCommand: formattedCommand,
+                ...(input.cwd === undefined ? {} : { filePath: input.cwd })
+              },
+              context.policy,
+              { agentHostDir: context.config.agentHostDir }
+            );
+
+          return buildPreviewResult({
+            tool: "shell.run_safe",
+            riskLevel: "medium",
+            strategy: "cli_or_script",
+            safety: safetyDecision,
+            targetSummary: formattedCommand,
+            target: toShellPreviewTarget(formattedCommand),
+            reasons: previewReasons("Classified the command without executing it.", safetyDecision.reasons),
+            observations: ["Previewed shell execution without running the command."]
+          });
+        }
+
         const commandInput: {
           command: string;
           args?: string[];

@@ -6,6 +6,7 @@ describe("ToolResult helpers", () => {
     const result = toolSuccess({
       tool: "system.get_info",
       riskLevel: "observe",
+      preview: true,
       data: { ok: true }
     });
 
@@ -13,6 +14,7 @@ describe("ToolResult helpers", () => {
       ok: true,
       tool: "system.get_info",
       riskLevel: "observe",
+      preview: true,
       approval: {
         required: false,
         status: "not_required"
@@ -25,6 +27,7 @@ describe("ToolResult helpers", () => {
     const result = toolFailure({
       tool: "system.get_info",
       riskLevel: "observe",
+      preview: true,
       error: {
         code: "invalid_input",
         message: "Input did not match schema."
@@ -32,6 +35,7 @@ describe("ToolResult helpers", () => {
     });
 
     expect(result.ok).toBe(false);
+    expect(result.preview).toBe(true);
     expect(result.data).toBeNull();
     expect(result.error?.code).toBe("invalid_input");
   });

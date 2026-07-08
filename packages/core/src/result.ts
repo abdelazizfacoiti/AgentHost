@@ -12,6 +12,7 @@ export interface ToolSuccessInput<T> {
   riskLevel: RiskLevel;
   data: T;
   strategy?: AutomationStrategy;
+  preview?: boolean;
   approval?: ApprovalInfo;
   observations?: string[];
 }
@@ -21,6 +22,7 @@ export function toolSuccess<T>(input: ToolSuccessInput<T>): ToolResult<T> {
     ok: true,
     tool: input.tool,
     riskLevel: input.riskLevel,
+    ...(input.preview === true ? { preview: true } : {}),
     approval: input.approval ?? noApprovalRequired(),
     data: input.data,
     observations: input.observations ?? [],
@@ -39,6 +41,7 @@ export interface ToolFailureInput {
   riskLevel: RiskLevel;
   error: ToolError;
   strategy?: AutomationStrategy;
+  preview?: boolean;
   approval?: ApprovalInfo;
   observations?: string[];
 }
@@ -48,6 +51,7 @@ export function toolFailure<T = never>(input: ToolFailureInput): ToolResult<T> {
     ok: false,
     tool: input.tool,
     riskLevel: input.riskLevel,
+    ...(input.preview === true ? { preview: true } : {}),
     approval: input.approval ?? noApprovalRequired(),
     data: null,
     observations: input.observations ?? [],
