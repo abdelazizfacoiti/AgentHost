@@ -124,6 +124,68 @@ describe("evaluateSafety", () => {
     expect(typeResult.matchedRules).toContain("policy.gui_type.disabled");
   });
 
+  it("keeps read-only accessibility inspection low risk", () => {
+    const result = evaluateSafety(
+      {
+        tool: "accessibility.inspect_element",
+        actionType: "inspect",
+        appName: "Notes"
+      },
+      getPolicyProfile("strict"),
+      { homeDir }
+    );
+
+    expect(result.riskLevel).toBe("low");
+    expect(result.allowed).toBe(true);
+  });
+
+  it("requires approval for medium-risk accessibility actions in strict profile", () => {
+    const result = evaluateSafety(
+      {
+        tool: "accessibility.focus_element",
+        actionType: "accessibility_focus",
+        appName: "GIMP"
+      },
+      getPolicyProfile("strict"),
+      { homeDir }
+    );
+
+    expect(result.riskLevel).toBe("medium");
+    expect(result.allowed).toBe(false);
+    expect(result.approval.status).toBe("required");
+  });
+
+  it("treats communication accessibility actions as high-risk", () => {
+    const result = evaluateSafety(
+      {
+        tool: "accessibility.invoke_action",
+        actionType: "accessibility_action",
+        appName: "Gmail"
+      },
+      getPolicyProfile("dev"),
+      { homeDir }
+    );
+
+    expect(result.riskLevel).toBe("high");
+    expect(result.matchedRules).toContain("app.communication.high_risk");
+  });
+
+  it("blocks secret accessibility values by default", () => {
+    const result = evaluateSafety(
+      {
+        tool: "accessibility.set_value",
+        actionType: "accessibility_set_value",
+        appName: "GIMP",
+        dataSensitivity: "secret"
+      },
+      getPolicyProfile("dev"),
+      { homeDir }
+    );
+
+    expect(result.riskLevel).toBe("blocked");
+    expect(result.matchedRules).toContain("data.secret.blocked");
+  });
+
   it("treats communication clicks as high-risk when generic GUI control is enabled", () => {
     const policy = {
       ...getPolicyProfile("dev"),

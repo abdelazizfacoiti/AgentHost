@@ -2,9 +2,11 @@ import {
   createAdapterRegistry,
   createBaseCapabilityRegistry,
   getPolicyProfile,
+  type AccessibilityElementDetails,
   type AgentHostConfig,
   type AuditLogEntry,
-  type AuditLogger
+  type AuditLogger,
+  type PolicyProfile
 } from "@agenthost/core";
 import { describe, expect, it } from "vitest";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
@@ -19,9 +21,58 @@ class MemoryLogger implements AuditLogger {
   }
 }
 
-function createContext(): AgentHostMcpContext & { calls: string[]; logger: MemoryLogger } {
+interface ContextOptions {
+  policyOverride?: Partial<PolicyProfile>;
+  inspectResult?: {
+    supported: boolean;
+    backend: string;
+    matched: boolean;
+    ambiguous: boolean;
+    redacted: boolean;
+    reason: string;
+    element?: AccessibilityElementDetails;
+  };
+  invokeResult?: {
+    supported: boolean;
+    backend: string;
+    matched: boolean;
+    ambiguous: boolean;
+    performed: boolean;
+    redacted: boolean;
+    actionName?: string;
+    reason: string;
+    target?: AccessibilityElementDetails;
+  };
+  setValueResult?: {
+    supported: boolean;
+    backend: string;
+    matched: boolean;
+    ambiguous: boolean;
+    changed: boolean;
+    redacted: boolean;
+    redactedValue: boolean;
+    reason: string;
+    target?: AccessibilityElementDetails;
+  };
+  focusResult?: {
+    supported: boolean;
+    backend: string;
+    matched: boolean;
+    ambiguous: boolean;
+    focused: boolean;
+    redacted: boolean;
+    reason: string;
+    target?: AccessibilityElementDetails;
+  };
+}
+
+function createContext(options: ContextOptions = {}): AgentHostMcpContext & { calls: string[]; logger: MemoryLogger } {
   const registry = createBaseCapabilityRegistry();
-  const policy = getPolicyProfile("dev");
+  const basePolicy = getPolicyProfile("dev");
+  const policy = {
+    ...basePolicy,
+    ...options.policyOverride
+  };
   const config: AgentHostConfig = {
     agentHostDir: "/tmp/agenthost-accessibility-test",
     configPath: "/tmp/agenthost-accessibility-test/config.json",
@@ -161,6 +212,63 @@ function createContext(): AgentHostMcpContext & { calls: string[]; logger: Memor
         candidates: [],
         reason: "Accessibility is unavailable with the current safe backend."
       };
+    },
+    inspectAccessibilityElement: async () => {
+      calls.push("accessibility.inspect_element");
+      return (
+        options.inspectResult ?? {
+          supported: false,
+          backend: "wayland",
+          matched: false,
+          ambiguous: false,
+          redacted: false,
+          reason: "Accessibility is unavailable with the current safe backend."
+        }
+      );
+    },
+    invokeAccessibilityAction: async (input) => {
+      calls.push("accessibility.invoke_action");
+      return (
+        options.invokeResult ?? {
+          supported: false,
+          backend: "wayland",
+          matched: false,
+          ambiguous: false,
+          performed: false,
+          redacted: false,
+          actionName: input.actionName,
+          reason: "Accessibility is unavailable with the current safe backend."
+        }
+      );
+    },
+    setAccessibilityValue: async () => {
+      calls.push("accessibility.set_value");
+      return (
+        options.setValueResult ?? {
+          supported: false,
+          backend: "wayland",
+          matched: false,
+          ambiguous: false,
+          changed: false,
+          redacted: true,
+          redactedValue: true,
+          reason: "Accessibility is unavailable with the current safe backend."
+        }
+      );
+    },
+    focusAccessibilityElement: async () => {
+      calls.push("accessibility.focus_element");
+      return (
+        options.focusResult ?? {
+          supported: false,
+          backend: "wayland",
+          matched: false,
+          ambiguous: false,
+          focused: false,
+          redacted: false,
+          reason: "Accessibility is unavailable with the current safe backend."
+        }
+      );
     }
   };
 
@@ -176,6 +284,20 @@ function createContext(): AgentHostMcpContext & { calls: string[]; logger: Memor
   };
 }
 
+function normalElement(overrides: Partial<AccessibilityElementDetails> = {}): AccessibilityElementDetails {
+  return {
+    elementId: "123:0/1/2",
+    role: "push button",
+    name: "Save",
+    states: ["enabled", "focusable"],
+    availableActions: ["click"],
+    appName: "GIMP",
+    pid: 123,
+    dataSensitivity: "none",
+    ...overrides
+  };
+}
+
 async function callTool(context: AgentHostMcpContext, name: string, input: unknown) {
   const tool = createAccessibilityTools().find((candidate) => candidate.name === name);
   expect(tool).toBeDefined();
@@ -187,39 +309,182 @@ describe("accessibility MCP tools", () => {
   it("declares safety metadata for accessibility tools", () => {
     expect(createAccessibilityTools().map((tool) => tool.name).sort()).toEqual([
       "accessibility.find_element",
-      "accessibility.get_tree"
+      "accessibility.focus_element",
+      "accessibility.get_tree",
+      "accessibility.inspect_element",
+      "accessibility.invoke_action",
+      "accessibility.set_value"
     ]);
   });
 
-  it("returns unsupported tree results cleanly and logs the call", async () => {
+  it("returns unsupported inspect results cleanly and logs the call", async () => {
     const context = createContext();
-    const result = await callTool(context, "accessibility.get_tree", { appName: "Notes", maxDepth: 2 });
+    const result = await callTool(context, "accessibility.inspect_element", { query: "Save" });
 
     expect(result).toMatchObject({
       ok: true,
       data: {
         supported: false,
         backend: "wayland",
-        nodeCount: 0
+        matched: false
       }
     });
-    expect(context.calls).toEqual(["accessibility.get_tree"]);
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
     expect(context.logger.entries).toHaveLength(1);
   });
 
-  it("returns unsupported find results cleanly and logs the call", async () => {
+  it("returns unsupported invoke results cleanly and logs the call", async () => {
     const context = createContext();
-    const result = await callTool(context, "accessibility.find_element", { appName: "Notes", query: "Save" });
+    const result = await callTool(context, "accessibility.invoke_action", { query: "Save", actionName: "click" });
 
     expect(result).toMatchObject({
       ok: true,
       data: {
         supported: false,
         backend: "wayland",
-        candidates: []
+        performed: false
       }
     });
-    expect(context.calls).toEqual(["accessibility.find_element"]);
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
     expect(context.logger.entries).toHaveLength(1);
+  });
+
+  it("returns unsupported set_value results cleanly and logs the call", async () => {
+    const context = createContext();
+    const result = await callTool(context, "accessibility.set_value", { query: "Name", value: "hello" });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        supported: false,
+        backend: "wayland",
+        changed: false,
+        redactedValue: true
+      }
+    });
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
+    expect(context.logger.entries).toHaveLength(1);
+  });
+
+  it("returns unsupported focus results cleanly and logs the call", async () => {
+    const context = createContext();
+    const result = await callTool(context, "accessibility.focus_element", { query: "Save" });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        supported: false,
+        backend: "wayland",
+        focused: false
+      }
+    });
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
+    expect(context.logger.entries).toHaveLength(1);
+  });
+
+  it("rejects ambiguous targets without performing accessibility actions", async () => {
+    const context = createContext({
+      inspectResult: {
+        supported: true,
+        backend: "atspi",
+        matched: false,
+        ambiguous: true,
+        redacted: false,
+        reason: "The requested accessibility target matched multiple elements."
+      }
+    });
+    const result = await callTool(context, "accessibility.invoke_action", { query: "Save", actionName: "click" });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        supported: true,
+        ambiguous: true,
+        performed: false
+      }
+    });
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
+  });
+
+  it("blocks sensitive app actions before execution", async () => {
+    const context = createContext({
+      inspectResult: {
+        supported: true,
+        backend: "atspi",
+        matched: true,
+        ambiguous: false,
+        redacted: false,
+        reason: "Resolved one accessibility element through AT-SPI.",
+        element: normalElement({
+          appName: "Bitwarden",
+          appSensitivity: "credential_or_security"
+        })
+      }
+    });
+    const result = await callTool(context, "accessibility.focus_element", { query: "Vault" });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("safety_blocked");
+    expect(context.calls).toEqual(["accessibility.inspect_element"]);
+  });
+
+  it("redacts set_value results and audit summaries", async () => {
+    const secretValue = "super-secret-value";
+    const context = createContext({
+      policyOverride: {
+        requireApprovalForMediumRisk: false
+      },
+      inspectResult: {
+        supported: true,
+        backend: "atspi",
+        matched: true,
+        ambiguous: false,
+        redacted: false,
+        reason: "Resolved one accessibility element through AT-SPI.",
+        element: normalElement({
+          role: "entry",
+          dataSensitivity: "low",
+          valueMetadata: {
+            supportsText: true,
+            supportsValue: false,
+            editable: true,
+            readOnly: false
+          }
+        })
+      },
+      setValueResult: {
+        supported: true,
+        backend: "atspi",
+        matched: true,
+        ambiguous: false,
+        changed: true,
+        redacted: true,
+        redactedValue: true,
+        reason: "Set the accessibility text value.",
+        target: normalElement({
+          role: "entry",
+          dataSensitivity: "low",
+          valueMetadata: {
+            supportsText: true,
+            supportsValue: false,
+            editable: true,
+            readOnly: false
+          }
+        })
+      }
+    });
+    const result = await callTool(context, "accessibility.set_value", { query: "Name", value: secretValue });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        changed: true,
+        redactedValue: true
+      }
+    });
+    expect(JSON.stringify(result.data)).not.toContain(secretValue);
+    expect(context.logger.entries).toHaveLength(1);
+    expect(context.logger.entries[0]?.outputSummary).not.toContain(secretValue);
+    expect(context.calls).toEqual(["accessibility.inspect_element", "accessibility.set_value"]);
   });
 });

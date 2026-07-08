@@ -24,12 +24,15 @@ import {
   detectLinuxAccessibilitySupport,
   ensureLinuxDir,
   findLinuxAccessibilityElements,
+  focusLinuxAccessibilityElement,
   focusLinuxWindow,
   getLinuxActiveWindow,
   getLinuxAccessibilityTree,
   getLinuxAppStrategy,
   getLinuxDesktopCapabilities,
   getLinuxSystemInfo,
+  inspectLinuxAccessibilityElement,
+  invokeLinuxAccessibilityAction,
   linuxFileExists,
   listLinuxWindows,
   listInstalledLinuxApps,
@@ -38,6 +41,7 @@ import {
   readLinuxFile,
   runSafeLinuxCommand,
   sendLinuxHotkey,
+  setLinuxAccessibilityValue,
   typeLinuxText,
   writeLinuxFile
 } from "@agenthost/os-linux";
@@ -146,7 +150,14 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       typeText: (input) => typeLinuxText(input, { agentHostDir: config.agentHostDir }),
       click: (input) => clickLinuxDesktop(input, { agentHostDir: config.agentHostDir }),
       getAccessibilityTree: (input) => getLinuxAccessibilityTree(input, { agentHostDir: config.agentHostDir }),
-      findAccessibilityElement: (input) => findLinuxAccessibilityElements(input, { agentHostDir: config.agentHostDir })
+      findAccessibilityElement: (input) => findLinuxAccessibilityElements(input, { agentHostDir: config.agentHostDir }),
+      inspectAccessibilityElement: (input) =>
+        inspectLinuxAccessibilityElement(input, { agentHostDir: config.agentHostDir }),
+      invokeAccessibilityAction: (input) =>
+        invokeLinuxAccessibilityAction(input, { agentHostDir: config.agentHostDir }),
+      setAccessibilityValue: (input) => setLinuxAccessibilityValue(input, { agentHostDir: config.agentHostDir }),
+      focusAccessibilityElement: (input) =>
+        focusLinuxAccessibilityElement(input, { agentHostDir: config.agentHostDir })
     };
   const context: AgentHostMcpContext = {
     sessionId: options.sessionId ?? createSessionId(),

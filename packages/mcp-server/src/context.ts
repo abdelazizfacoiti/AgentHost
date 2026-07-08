@@ -7,6 +7,10 @@ import type {
   AdapterRegistrySnapshot,
   AuditLogger,
   AccessibilityFindElementResult,
+  AccessibilityFocusElementResult,
+  AccessibilityInspectElementResult,
+  AccessibilityInvokeActionResult,
+  AccessibilitySetValueResult,
   AccessibilityTreeResult,
   CapabilityRegistrySnapshot,
   DesktopCapabilitiesResult,
@@ -79,6 +83,42 @@ export interface LinuxAutomation {
     role?: string;
     limit?: number;
   }): Promise<AccessibilityFindElementResult>;
+  inspectAccessibilityElement(input: {
+    appName?: string;
+    windowId?: string;
+    pid?: number;
+    elementId?: string;
+    query?: string;
+    role?: string;
+  }): Promise<AccessibilityInspectElementResult>;
+  invokeAccessibilityAction(input: {
+    appName?: string;
+    windowId?: string;
+    pid?: number;
+    elementId?: string;
+    query?: string;
+    role?: string;
+    actionName: string;
+    requireExactMatch?: boolean;
+  }): Promise<AccessibilityInvokeActionResult>;
+  setAccessibilityValue(input: {
+    appName?: string;
+    windowId?: string;
+    pid?: number;
+    elementId?: string;
+    query?: string;
+    role?: string;
+    value: string;
+    dataSensitivity?: "none" | "low" | "sensitive" | "secret";
+  }): Promise<AccessibilitySetValueResult>;
+  focusAccessibilityElement(input: {
+    appName?: string;
+    windowId?: string;
+    pid?: number;
+    elementId?: string;
+    query?: string;
+    role?: string;
+  }): Promise<AccessibilityFocusElementResult>;
 }
 
 export interface AgentHostMcpContext {

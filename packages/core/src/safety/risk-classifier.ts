@@ -30,6 +30,9 @@ function baseRiskForAction(actionType: SafetyInput["actionType"]): RiskLevel {
     case "file_write":
     case "gui_click":
     case "gui_type":
+    case "accessibility_action":
+    case "accessibility_set_value":
+    case "accessibility_focus":
     case "browser_action":
       return "medium";
     case "file_delete":
@@ -90,7 +93,10 @@ function applyAppSensitivityRisk(
       input.externalEffect ||
       input.actionType === "communication_send" ||
       input.actionType === "gui_type" ||
-      input.actionType === "gui_click"
+      input.actionType === "gui_click" ||
+      input.actionType === "accessibility_action" ||
+      input.actionType === "accessibility_set_value" ||
+      input.actionType === "accessibility_focus"
     ) {
       reasons.push("Communication actions that type, send, post, or affect external recipients are high-risk.");
       matchedRules.push("app.communication.high_risk");

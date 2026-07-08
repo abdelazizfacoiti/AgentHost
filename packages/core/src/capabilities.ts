@@ -169,6 +169,30 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Finds candidate UI elements from accessibility data without acting on them."
     },
     {
+      name: "accessibility.inspect_element",
+      riskLevel: "low" as const,
+      strategy: "accessibility" as const,
+      description: "Returns capped, redacted metadata about one resolved accessibility element."
+    },
+    {
+      name: "accessibility.invoke_action",
+      riskLevel: "medium" as const,
+      strategy: "accessibility" as const,
+      description: "Invokes a named AT-SPI accessibility action on one resolved element."
+    },
+    {
+      name: "accessibility.set_value",
+      riskLevel: "medium" as const,
+      strategy: "accessibility" as const,
+      description: "Sets an accessibility element value or text without exposing secret content."
+    },
+    {
+      name: "accessibility.focus_element",
+      riskLevel: "medium" as const,
+      strategy: "accessibility" as const,
+      description: "Focuses one resolved accessibility element without falling back to raw GUI input."
+    },
+    {
       name: "guide.create_steps",
       riskLevel: "observe" as const,
       strategy: "guide_only" as const,
