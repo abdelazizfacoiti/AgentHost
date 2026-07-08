@@ -8,12 +8,24 @@ import {
   type AccessibilityInvokeActionResult,
   type AccessibilitySetValueResult,
   type AccessibilityTreeResult,
+  type ActionPreviewResult,
   type DataSensitivity,
   type ToolResult
 } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
-import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
+import type {
+  AgentHostToolDefinition,
+  AnyAgentHostToolDefinition,
+  ToolExecutionRuntime
+} from "../tool-runner.js";
+import {
+  buildPreviewResult,
+  guideAlternative,
+  inspectElementAlternative,
+  summarizeAccessibilityElement,
+  toAccessibilityPreviewTarget
+} from "./preview.js";
 
 const appNameSchema = z.string().trim().min(1).max(200);
 const querySchema = z.string().trim().min(1).max(500);
@@ -54,43 +66,39 @@ const targetInputObject = z
   })
   .strict();
 
-const targetInputSchema = targetInputObject
-  .superRefine((input, ctx) => {
-    if (input.elementId === undefined && input.query === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Accessibility target must include either elementId or query."
-      });
-    }
-  });
+const requireElementTarget = (input: { elementId?: string | undefined; query?: string | undefined }, ctx: z.RefinementCtx) => {
+  if (input.elementId === undefined && input.query === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Accessibility target must include either elementId or query."
+    });
+  }
+};
 
+const targetInputSchema = targetInputObject.superRefine(requireElementTarget);
 const inspectInputSchema = targetInputSchema;
 
-const invokeActionInputSchema = targetInputObject.extend({
-  actionName: z.string().trim().min(1).max(100),
-  requireExactMatch: z.boolean().optional()
-}).superRefine((input, ctx) => {
-  if (input.elementId === undefined && input.query === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Accessibility target must include either elementId or query."
-    });
-  }
-});
+const invokeActionInputSchema = targetInputObject
+  .extend({
+    actionName: z.string().trim().min(1).max(100),
+    requireExactMatch: z.boolean().optional(),
+    dryRun: z.boolean().optional()
+  })
+  .superRefine(requireElementTarget);
 
-const setValueInputSchema = targetInputObject.extend({
-  value: z.string().min(1).max(10_000),
-  dataSensitivity: z.enum(["none", "low", "sensitive", "secret"]).optional()
-}).superRefine((input, ctx) => {
-  if (input.elementId === undefined && input.query === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Accessibility target must include either elementId or query."
-    });
-  }
-});
+const setValueInputSchema = targetInputObject
+  .extend({
+    value: z.string().min(1).max(10_000),
+    dataSensitivity: z.enum(["none", "low", "sensitive", "secret"]).optional(),
+    dryRun: z.boolean().optional()
+  })
+  .superRefine(requireElementTarget);
 
-const focusElementInputSchema = targetInputSchema;
+const focusElementInputSchema = targetInputObject
+  .extend({
+    dryRun: z.boolean().optional()
+  })
+  .superRefine(requireElementTarget);
 
 type GetTreeInput = z.infer<typeof getTreeInputSchema>;
 type FindElementInput = z.infer<typeof findElementInputSchema>;
@@ -101,7 +109,10 @@ type FocusElementInput = z.infer<typeof focusElementInputSchema>;
 
 const DATA_SENSITIVITY_ORDER: DataSensitivity[] = ["none", "low", "sensitive", "secret"];
 
-function strongerDataSensitivity(a: DataSensitivity | undefined, b: DataSensitivity | undefined): DataSensitivity | undefined {
+function strongerDataSensitivity(
+  a: DataSensitivity | undefined,
+  b: DataSensitivity | undefined
+): DataSensitivity | undefined {
   if (a === undefined) {
     return b;
   }
@@ -164,6 +175,35 @@ function safetyFailure(tool: string, safety: ReturnType<typeof evaluateSafety>):
 
 function inspectFromAction(input: InspectInput | InvokeActionInput | SetValueInput | FocusElementInput) {
   return toTargetInput(input);
+}
+
+function previewReasons(primaryReason: string, safetyReasons: string[]): string[] {
+  return safetyReasons.includes(primaryReason) ? safetyReasons : [primaryReason, ...safetyReasons];
+}
+
+function initialSafetyForPreview(
+  runtime: ToolExecutionRuntime | undefined,
+  tool: "accessibility.invoke_action" | "accessibility.set_value" | "accessibility.focus_element",
+  actionType: "accessibility_action" | "accessibility_set_value" | "accessibility_focus",
+  context: AgentHostMcpContext,
+  input: InvokeActionInput | SetValueInput | FocusElementInput
+) {
+  if (runtime?.safetyDecision !== undefined) {
+    return runtime.safetyDecision;
+  }
+
+  return evaluateSafety(
+    {
+      tool,
+      actionType,
+      ...(input.appName === undefined ? {} : { appName: input.appName }),
+      ...("dataSensitivity" in input && input.dataSensitivity !== undefined
+        ? { dataSensitivity: input.dataSensitivity }
+        : {})
+    },
+    context.policy,
+    { agentHostDir: context.config.agentHostDir }
+  );
 }
 
 export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
@@ -267,7 +307,11 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     }
   };
 
-  const invokeAction: AgentHostToolDefinition<InvokeActionInput, AccessibilityInvokeActionResult, AgentHostMcpContext> = {
+  const invokeAction: AgentHostToolDefinition<
+    InvokeActionInput,
+    AccessibilityInvokeActionResult | ActionPreviewResult,
+    AgentHostMcpContext
+  > = {
     name: "accessibility.invoke_action",
     description: "Invokes a named AT-SPI accessibility action on one resolved element.",
     riskLevel: "medium",
@@ -282,7 +326,8 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         query: { type: "string", minLength: 1, maxLength: 500 },
         role: { type: "string", minLength: 1, maxLength: 100 },
         actionName: { type: "string", minLength: 1, maxLength: 100 },
-        requireExactMatch: { type: "boolean" }
+        requireExactMatch: { type: "boolean" },
+        dryRun: { type: "boolean" }
       },
       required: ["actionName"],
       additionalProperties: false
@@ -292,8 +337,77 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
       actionType: "accessibility_action",
       getInput: (input) => (input.appName === undefined ? {} : { appName: input.appName })
     },
-    async handler(input, context): Promise<ToolResult<AccessibilityInvokeActionResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<AccessibilityInvokeActionResult | ActionPreviewResult>> {
       const inspected = await context.linux.inspectAccessibilityElement(inspectFromAction(input));
+
+      if (runtime?.isDryRun) {
+        const preflightSafety = initialSafetyForPreview(
+          runtime,
+          "accessibility.invoke_action",
+          "accessibility_action",
+          context,
+          input
+        );
+        const unresolvedSummary =
+          input.elementId !== undefined ? `Accessibility element ${input.elementId}` : `Accessibility query "${input.query}"`;
+
+        if (!inspected.supported || !inspected.matched || inspected.ambiguous || inspected.element === undefined) {
+          return buildPreviewResult({
+            tool: "accessibility.invoke_action",
+            riskLevel: "medium",
+            strategy: "accessibility",
+            safety: preflightSafety,
+            targetSummary: inspected.element === undefined ? unresolvedSummary : summarizeAccessibilityElement(inspected.element),
+            ...(inspected.element === undefined ? {} : { target: toAccessibilityPreviewTarget(inspected.element) }),
+            supported: inspected.supported,
+            backend: inspected.backend,
+            ambiguous: inspected.ambiguous,
+            wouldExecute: false,
+            reasons: previewReasons(inspected.reason, preflightSafety.reasons),
+            saferAlternative: inspected.ambiguous
+              ? inspectElementAlternative("Resolve the exact target with elementId before invoking an accessibility action.")
+              : undefined,
+            observations: ["Previewed accessibility action resolution without invoking the action."]
+          });
+        }
+
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "accessibility.invoke_action",
+            actionType: "accessibility_action",
+            strategy: "accessibility",
+            ...(inspected.element.appName === undefined ? {} : { appName: inspected.element.appName }),
+            ...(inspected.element.dataSensitivity === undefined ? {} : { dataSensitivity: inspected.element.dataSensitivity })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+        const actionAvailable = inspected.element.availableActions.includes(input.actionName);
+        const availabilityReason = actionAvailable
+          ? `The action "${input.actionName}" is available on the resolved element.`
+          : `The action "${input.actionName}" is not advertised by the resolved element.`;
+
+        return buildPreviewResult({
+          tool: "accessibility.invoke_action",
+          riskLevel: "medium",
+          strategy: "accessibility",
+          safety: postResolutionSafety,
+          targetSummary: summarizeAccessibilityElement(inspected.element),
+          target: toAccessibilityPreviewTarget(inspected.element),
+          dataSensitivity: inspected.element.dataSensitivity,
+          supported: inspected.supported,
+          backend: inspected.backend,
+          wouldExecute: actionAvailable && postResolutionSafety.allowed,
+          reasons: previewReasons(availabilityReason, postResolutionSafety.reasons),
+          saferAlternative: postResolutionSafety.blocked
+            ? guideAlternative("Sensitive or blocked accessibility actions should stay in guide mode.")
+            : undefined,
+          observations: ["Previewed the accessibility action without invoking it."]
+        });
+      }
 
       if (!inspected.supported || !inspected.matched || inspected.ambiguous || inspected.element === undefined) {
         return toolSuccess({
@@ -347,7 +461,11 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     }
   };
 
-  const setValue: AgentHostToolDefinition<SetValueInput, AccessibilitySetValueResult, AgentHostMcpContext> = {
+  const setValue: AgentHostToolDefinition<
+    SetValueInput,
+    AccessibilitySetValueResult | ActionPreviewResult,
+    AgentHostMcpContext
+  > = {
     name: "accessibility.set_value",
     description: "Sets an accessibility element value or text without exposing secret content.",
     riskLevel: "medium",
@@ -362,7 +480,8 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         query: { type: "string", minLength: 1, maxLength: 500 },
         role: { type: "string", minLength: 1, maxLength: 100 },
         value: { type: "string", minLength: 1, maxLength: 10000 },
-        dataSensitivity: { type: "string", enum: ["none", "low", "sensitive", "secret"] }
+        dataSensitivity: { type: "string", enum: ["none", "low", "sensitive", "secret"] },
+        dryRun: { type: "boolean" }
       },
       required: ["value"],
       additionalProperties: false
@@ -375,8 +494,84 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         ...(input.dataSensitivity === undefined ? {} : { dataSensitivity: input.dataSensitivity })
       })
     },
-    async handler(input, context): Promise<ToolResult<AccessibilitySetValueResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<AccessibilitySetValueResult | ActionPreviewResult>> {
       const inspected = await context.linux.inspectAccessibilityElement(inspectFromAction(input));
+
+      if (runtime?.isDryRun) {
+        const preflightSafety = initialSafetyForPreview(
+          runtime,
+          "accessibility.set_value",
+          "accessibility_set_value",
+          context,
+          input
+        );
+        const unresolvedSummary =
+          input.elementId !== undefined ? `Accessibility element ${input.elementId}` : `Accessibility query "${input.query}"`;
+
+        if (!inspected.supported || !inspected.matched || inspected.ambiguous || inspected.element === undefined) {
+          return buildPreviewResult({
+            tool: "accessibility.set_value",
+            riskLevel: "medium",
+            strategy: "accessibility",
+            safety: preflightSafety,
+            targetSummary: inspected.element === undefined ? unresolvedSummary : summarizeAccessibilityElement(inspected.element),
+            ...(inspected.element === undefined ? {} : { target: toAccessibilityPreviewTarget(inspected.element) }),
+            dataSensitivity: strongerDataSensitivity(input.dataSensitivity, inspected.element?.dataSensitivity),
+            supported: inspected.supported,
+            backend: inspected.backend,
+            ambiguous: inspected.ambiguous,
+            wouldExecute: false,
+            reasons: previewReasons(inspected.reason, preflightSafety.reasons),
+            saferAlternative: inspected.ambiguous
+              ? inspectElementAlternative("Resolve the exact target with elementId before previewing a value change.")
+              : undefined,
+            observations: ["Previewed accessibility value targeting without changing the value."]
+          });
+        }
+
+        const combinedDataSensitivity = strongerDataSensitivity(input.dataSensitivity, inspected.element.dataSensitivity);
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "accessibility.set_value",
+            actionType: "accessibility_set_value",
+            strategy: "accessibility",
+            ...(inspected.element.appName === undefined ? {} : { appName: inspected.element.appName }),
+            ...(combinedDataSensitivity === undefined ? {} : { dataSensitivity: combinedDataSensitivity })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+        const valueMetadata = inspected.element.valueMetadata;
+        const canSetValue =
+          valueMetadata !== undefined &&
+          valueMetadata.editable &&
+          !valueMetadata.readOnly &&
+          (valueMetadata.supportsText || valueMetadata.supportsValue);
+        const capabilityReason = canSetValue
+          ? "The resolved element advertises editable text or value support."
+          : "The resolved element does not advertise editable text or value support.";
+
+        return buildPreviewResult({
+          tool: "accessibility.set_value",
+          riskLevel: "medium",
+          strategy: "accessibility",
+          safety: postResolutionSafety,
+          targetSummary: summarizeAccessibilityElement(inspected.element),
+          target: toAccessibilityPreviewTarget(inspected.element),
+          dataSensitivity: combinedDataSensitivity,
+          supported: inspected.supported,
+          backend: inspected.backend,
+          wouldExecute: canSetValue && postResolutionSafety.allowed,
+          reasons: previewReasons(capabilityReason, postResolutionSafety.reasons),
+          saferAlternative: postResolutionSafety.blocked
+            ? guideAlternative("Sensitive value changes should stay blocked or guide-only until approved.")
+            : undefined,
+          observations: ["Previewed an accessibility value change without sending the value."]
+        });
+      }
 
       if (!inspected.supported || !inspected.matched || inspected.ambiguous || inspected.element === undefined) {
         return toolSuccess({
@@ -431,7 +626,11 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     }
   };
 
-  const focusElement: AgentHostToolDefinition<FocusElementInput, AccessibilityFocusElementResult, AgentHostMcpContext> = {
+  const focusElement: AgentHostToolDefinition<
+    FocusElementInput,
+    AccessibilityFocusElementResult | ActionPreviewResult,
+    AgentHostMcpContext
+  > = {
     name: "accessibility.focus_element",
     description: "Focuses one resolved accessibility element without falling back to raw GUI input.",
     riskLevel: "medium",
@@ -444,7 +643,8 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
         pid: { type: "integer", minimum: 1 },
         elementId: { type: "string", minLength: 1, maxLength: 200 },
         query: { type: "string", minLength: 1, maxLength: 500 },
-        role: { type: "string", minLength: 1, maxLength: 100 }
+        role: { type: "string", minLength: 1, maxLength: 100 },
+        dryRun: { type: "boolean" }
       },
       additionalProperties: false
     },
@@ -453,8 +653,72 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
       actionType: "accessibility_focus",
       getInput: (input) => (input.appName === undefined ? {} : { appName: input.appName })
     },
-    async handler(input, context): Promise<ToolResult<AccessibilityFocusElementResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<AccessibilityFocusElementResult | ActionPreviewResult>> {
       const inspected = await context.linux.inspectAccessibilityElement(inspectFromAction(input));
+
+      if (runtime?.isDryRun) {
+        const preflightSafety = initialSafetyForPreview(
+          runtime,
+          "accessibility.focus_element",
+          "accessibility_focus",
+          context,
+          input
+        );
+        const unresolvedSummary =
+          input.elementId !== undefined ? `Accessibility element ${input.elementId}` : `Accessibility query "${input.query}"`;
+
+        if (!inspected.supported || !inspected.matched || inspected.ambiguous || inspected.element === undefined) {
+          return buildPreviewResult({
+            tool: "accessibility.focus_element",
+            riskLevel: "medium",
+            strategy: "accessibility",
+            safety: preflightSafety,
+            targetSummary: inspected.element === undefined ? unresolvedSummary : summarizeAccessibilityElement(inspected.element),
+            ...(inspected.element === undefined ? {} : { target: toAccessibilityPreviewTarget(inspected.element) }),
+            dataSensitivity: inspected.element?.dataSensitivity,
+            supported: inspected.supported,
+            backend: inspected.backend,
+            ambiguous: inspected.ambiguous,
+            wouldExecute: false,
+            reasons: previewReasons(inspected.reason, preflightSafety.reasons),
+            saferAlternative: inspected.ambiguous
+              ? inspectElementAlternative("Resolve the exact target with elementId before previewing focus.")
+              : undefined,
+            observations: ["Previewed accessibility focus targeting without moving focus."]
+          });
+        }
+
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "accessibility.focus_element",
+            actionType: "accessibility_focus",
+            strategy: "accessibility",
+            ...(inspected.element.appName === undefined ? {} : { appName: inspected.element.appName }),
+            ...(inspected.element.dataSensitivity === undefined ? {} : { dataSensitivity: inspected.element.dataSensitivity })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+
+        return buildPreviewResult({
+          tool: "accessibility.focus_element",
+          riskLevel: "medium",
+          strategy: "accessibility",
+          safety: postResolutionSafety,
+          targetSummary: summarizeAccessibilityElement(inspected.element),
+          target: toAccessibilityPreviewTarget(inspected.element),
+          dataSensitivity: inspected.element.dataSensitivity,
+          supported: inspected.supported,
+          backend: inspected.backend,
+          saferAlternative: postResolutionSafety.blocked
+            ? guideAlternative("Sensitive app focus changes should stay blocked or guide-only.")
+            : undefined,
+          observations: ["Previewed accessibility focus without moving focus."]
+        });
+      }
 
       if (!inspected.supported || !inspected.matched || inspected.ambiguous || inspected.element === undefined) {
         return toolSuccess({

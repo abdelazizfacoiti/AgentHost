@@ -357,6 +357,46 @@ describe("Phase 3 MCP tools", () => {
     expect(context.calls).toEqual([]);
   });
 
+  it("previews shell, file, and app actions without executing them", async () => {
+    const context = createContext("dev");
+    const safePath = "/tmp/agenthost-phase3-test/preview.txt";
+
+    await expect(callTool(context, "shell.run_safe", { command: "node", args: ["--version"], dryRun: true })).resolves.toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: true
+      }
+    });
+    await expect(callTool(context, "file.write", { path: safePath, content: "ok", dryRun: true })).resolves.toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: true
+      }
+    });
+    await expect(callTool(context, "file.ensure_dir", { path: "/tmp/agenthost-phase3-test/subdir", dryRun: true })).resolves.toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: true
+      }
+    });
+    await expect(callTool(context, "app.open", { appName: "Mystery", dryRun: true })).resolves.toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: false
+      }
+    });
+
+    expect(context.calls).toEqual(["app.detect"]);
+  });
+
   it("does not execute dangerous shell commands", async () => {
     const context = createContext("dev");
     const result = await callTool(context, "shell.run_safe", { command: "rm", args: ["-rf", "/tmp/example"] });

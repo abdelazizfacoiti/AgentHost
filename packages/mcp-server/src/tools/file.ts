@@ -1,4 +1,5 @@
 import type {
+  ActionPreviewResult,
   FileEnsureDirResult,
   FileExistsResult,
   FileListResult,
@@ -6,10 +7,11 @@ import type {
   FileWriteResult,
   ToolResult
 } from "@agenthost/core";
-import { toolSuccess } from "@agenthost/core";
+import { evaluateSafety, normalizePathForPolicy, toolSuccess } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
+import { buildPreviewResult, toFilePreviewTarget } from "./preview.js";
 
 const pathSchema = z.string().trim().min(1).max(1000);
 const encodingSchema = z.enum(["utf8", "base64"]);
@@ -19,7 +21,8 @@ const writeInputSchema = z
     path: pathSchema,
     content: z.string(),
     encoding: encodingSchema.optional(),
-    createParents: z.boolean().optional()
+    createParents: z.boolean().optional(),
+    dryRun: z.boolean().optional()
   })
   .strict();
 const readInputSchema = z
@@ -30,6 +33,7 @@ const readInputSchema = z
   })
   .strict();
 const pathOnlyInputSchema = z.object({ path: pathSchema }).strict();
+const ensureDirInputSchema = z.object({ path: pathSchema, dryRun: z.boolean().optional() }).strict();
 const listInputSchema = z
   .object({
     path: pathSchema,
@@ -40,6 +44,7 @@ const listInputSchema = z
 type WriteInput = z.infer<typeof writeInputSchema>;
 type ReadInput = z.infer<typeof readInputSchema>;
 type PathOnlyInput = z.infer<typeof pathOnlyInputSchema>;
+type EnsureDirInput = z.infer<typeof ensureDirInputSchema>;
 type ListInput = z.infer<typeof listInputSchema>;
 
 const pathOnlyMcpInputSchema = {
@@ -55,8 +60,32 @@ const pathOnlyMcpInputSchema = {
   additionalProperties: false
 };
 
+const ensureDirMcpInputSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      minLength: 1,
+      maxLength: 1000
+    },
+    dryRun: {
+      type: "boolean"
+    }
+  },
+  required: ["path"],
+  additionalProperties: false
+};
+
+function previewReasons(primaryReason: string, safetyReasons: string[]): string[] {
+  return safetyReasons.includes(primaryReason) ? safetyReasons : [primaryReason, ...safetyReasons];
+}
+
+function normalizePreviewPath(inputPath: string, context: AgentHostMcpContext): string {
+  return normalizePathForPolicy(inputPath, { agentHostDir: context.config.agentHostDir });
+}
+
 export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
-  const write: AgentHostToolDefinition<WriteInput, FileWriteResult, AgentHostMcpContext> = {
+  const write: AgentHostToolDefinition<WriteInput, FileWriteResult | ActionPreviewResult, AgentHostMcpContext> = {
     name: "file.write",
     description: "Writes a new file inside approved roots only.",
     riskLevel: "medium",
@@ -78,6 +107,9 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
         },
         createParents: {
           type: "boolean"
+        },
+        dryRun: {
+          type: "boolean"
         }
       },
       required: ["path", "content"],
@@ -88,7 +120,35 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
       actionType: "file_write",
       getInput: (input) => ({ filePath: input.path })
     },
-    async handler(input, context): Promise<ToolResult<FileWriteResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<FileWriteResult | ActionPreviewResult>> {
+      if (runtime?.isDryRun) {
+        const normalizedPath = normalizePreviewPath(input.path, context);
+        const safetyDecision =
+          runtime.safetyDecision ??
+          evaluateSafety(
+            {
+              tool: "file.write",
+              actionType: "file_write",
+              filePath: input.path
+            },
+            context.policy,
+            { agentHostDir: context.config.agentHostDir }
+          );
+
+        return buildPreviewResult({
+          tool: "file.write",
+          riskLevel: "medium",
+          safety: safetyDecision,
+          targetSummary: `Write ${input.content.length} bytes to ${normalizedPath}`,
+          target: toFilePreviewTarget(normalizedPath, normalizedPath),
+          reasons: previewReasons("Classified the file path without writing any content.", safetyDecision.reasons),
+          observations: ["Previewed file creation without writing the file."]
+        });
+      }
+
       const writeInput: {
         path: string;
         content: string;
@@ -184,7 +244,7 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
       return toolSuccess({
         tool: "file.exists",
         riskLevel: "low",
-        data: await context.linux.fileExists(input),
+        data: await context.linux.fileExists({ path: input.path }),
         observations: ["Checked path existence after path safety classification."]
       });
     }
@@ -235,22 +295,50 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
     }
   };
 
-  const ensureDir: AgentHostToolDefinition<PathOnlyInput, FileEnsureDirResult, AgentHostMcpContext> = {
+  const ensureDir: AgentHostToolDefinition<EnsureDirInput, FileEnsureDirResult | ActionPreviewResult, AgentHostMcpContext> = {
     name: "file.ensure_dir",
     description: "Creates an approved directory if needed.",
     riskLevel: "medium",
-    inputSchema: pathOnlyInputSchema,
-    mcpInputSchema: pathOnlyMcpInputSchema,
+    inputSchema: ensureDirInputSchema,
+    mcpInputSchema: ensureDirMcpInputSchema,
     inputSummary: "Ensure directory",
     safety: {
       actionType: "file_write",
       getInput: (input) => ({ filePath: input.path })
     },
-    async handler(input, context): Promise<ToolResult<FileEnsureDirResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<FileEnsureDirResult | ActionPreviewResult>> {
+      if (runtime?.isDryRun) {
+        const normalizedPath = normalizePreviewPath(input.path, context);
+        const safetyDecision =
+          runtime.safetyDecision ??
+          evaluateSafety(
+            {
+              tool: "file.ensure_dir",
+              actionType: "file_write",
+              filePath: input.path
+            },
+            context.policy,
+            { agentHostDir: context.config.agentHostDir }
+          );
+
+        return buildPreviewResult({
+          tool: "file.ensure_dir",
+          riskLevel: "medium",
+          safety: safetyDecision,
+          targetSummary: `Ensure directory ${normalizedPath}`,
+          target: toFilePreviewTarget(normalizedPath, normalizedPath),
+          reasons: previewReasons("Classified the directory path without creating it.", safetyDecision.reasons),
+          observations: ["Previewed directory creation without creating the directory."]
+        });
+      }
+
       return toolSuccess({
         tool: "file.ensure_dir",
         riskLevel: "medium",
-        data: await context.linux.ensureDir(input),
+        data: await context.linux.ensureDir({ path: input.path }),
         observations: ["Ensured directory inside approved roots."]
       });
     }

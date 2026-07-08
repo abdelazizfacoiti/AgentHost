@@ -74,6 +74,7 @@ export interface ToolResult<T = unknown> {
   tool: string;
   riskLevel: RiskLevel;
   strategy?: AutomationStrategy;
+  preview?: boolean;
   approval: ApprovalInfo;
   data: T | null;
   observations: string[];
@@ -667,6 +668,52 @@ export interface AccessibilityFocusElementResult {
   target?: AccessibilityElementDetails;
 }
 
+export type PreviewTargetKind =
+  | "accessibility_element"
+  | "desktop_window"
+  | "shell_command"
+  | "file_path"
+  | "app";
+
+export interface ActionPreviewTarget {
+  kind: PreviewTargetKind;
+  summary: string;
+  appName?: string;
+  windowId?: string;
+  pid?: number;
+  title?: string;
+  elementId?: string;
+  role?: string;
+  name?: string;
+  availableActions?: string[];
+  path?: string;
+  command?: string;
+}
+
+export interface ActionPreviewAlternative {
+  strategy: AutomationStrategy;
+  tool?: string;
+  reason: string;
+}
+
+export interface ActionPreviewResult {
+  preview: true;
+  wouldExecute: boolean;
+  wouldRequireApproval: boolean;
+  wouldBeBlocked: boolean;
+  riskLevel: RiskLevel;
+  appSensitivity?: AppSensitivity;
+  dataSensitivity?: DataSensitivity;
+  targetSummary: string;
+  target?: ActionPreviewTarget;
+  ambiguous: boolean;
+  reasons: string[];
+  matchedRules: string[];
+  saferAlternative?: ActionPreviewAlternative;
+  supported?: boolean;
+  backend?: string;
+}
+
 export interface SystemInfo {
   platform: string;
   arch: string;
@@ -689,6 +736,7 @@ export interface AuditLogEntry {
   tool: string;
   riskLevel: RiskLevel;
   strategy?: AutomationStrategy;
+  preview?: boolean;
   inputSummary: string;
   approvalStatus: ApprovalStatus;
   ok: boolean;

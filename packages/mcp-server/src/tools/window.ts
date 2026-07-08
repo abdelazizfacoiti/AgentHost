@@ -1,7 +1,20 @@
-import { evaluateSafety, toolFailure, toolSuccess, type ToolResult, type WindowFocusResult, type WindowListResult } from "@agenthost/core";
+import {
+  evaluateSafety,
+  toolFailure,
+  toolSuccess,
+  type ActionPreviewResult,
+  type ToolResult,
+  type WindowFocusResult,
+  type WindowListResult
+} from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
-import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
+import type {
+  AgentHostToolDefinition,
+  AnyAgentHostToolDefinition,
+  ToolExecutionRuntime
+} from "../tool-runner.js";
+import { buildPreviewResult, guideAlternative, summarizeWindow, toWindowPreviewTarget } from "./preview.js";
 
 const nonEmptyString = z.string().trim().min(1).max(500);
 
@@ -17,7 +30,8 @@ const focusInputSchema = z
     windowId: z.string().trim().min(1).max(200).optional(),
     appName: z.string().trim().min(1).max(200).optional(),
     title: nonEmptyString.optional(),
-    pid: z.number().int().min(1).optional()
+    pid: z.number().int().min(1).optional(),
+    dryRun: z.boolean().optional()
   })
   .strict()
   .superRefine((input, ctx) => {
@@ -77,6 +91,26 @@ function toWindowListInput(input: ListInput) {
   };
 }
 
+function previewReasons(primaryReason: string, safetyReasons: string[]): string[] {
+  return safetyReasons.includes(primaryReason) ? safetyReasons : [primaryReason, ...safetyReasons];
+}
+
+function initialFocusSafety(runtime: ToolExecutionRuntime | undefined, context: AgentHostMcpContext, input: FocusInput) {
+  if (runtime?.safetyDecision !== undefined) {
+    return runtime.safetyDecision;
+  }
+
+  return evaluateSafety(
+    {
+      tool: "window.focus",
+      actionType: "gui_click",
+      ...(input.appName === undefined ? {} : { appName: input.appName })
+    },
+    context.policy,
+    { agentHostDir: context.config.agentHostDir }
+  );
+}
+
 export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
   const list: AgentHostToolDefinition<ListInput, WindowListResult, AgentHostMcpContext> = {
     name: "window.list",
@@ -106,7 +140,7 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     }
   };
 
-  const focus: AgentHostToolDefinition<FocusInput, WindowFocusResult, AgentHostMcpContext> = {
+  const focus: AgentHostToolDefinition<FocusInput, WindowFocusResult | ActionPreviewResult, AgentHostMcpContext> = {
     name: "window.focus",
     description: "Focuses a window when a safe backend and policy allow it.",
     riskLevel: "medium",
@@ -117,7 +151,8 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
         windowId: { type: "string", minLength: 1, maxLength: 200 },
         appName: { type: "string", minLength: 1, maxLength: 200 },
         title: { type: "string", minLength: 1, maxLength: 500 },
-        pid: { type: "integer", minimum: 1 }
+        pid: { type: "integer", minimum: 1 },
+        dryRun: { type: "boolean" }
       },
       additionalProperties: false
     },
@@ -126,11 +161,120 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
       actionType: "gui_click",
       getInput: (input) => (input.appName === undefined ? {} : { appName: input.appName })
     },
-    async handler(input, context): Promise<ToolResult<WindowFocusResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<WindowFocusResult | ActionPreviewResult>> {
       const windows = await context.linux.listWindows({
         limit: 500,
         includeTitles: true
       });
+
+      if (runtime?.isDryRun) {
+        const preflightSafety = initialFocusSafety(runtime, context, input);
+
+        if (!windows.supported) {
+          return buildPreviewResult({
+            tool: "window.focus",
+            riskLevel: "medium",
+            strategy: "gui_control",
+            safety: preflightSafety,
+            targetSummary: summarizeWindow(focusIdentity(input)),
+            target: toWindowPreviewTarget(focusIdentity(input)),
+            supported: false,
+            backend: windows.backend,
+            wouldExecute: false,
+            reasons: previewReasons(windows.reason, preflightSafety.reasons),
+            saferAlternative: guideAlternative("Use guide mode when safe window focus backends are unavailable."),
+            observations: ["Previewed window focus without moving focus."]
+          });
+        }
+
+        const matches = windows.windows.filter((window) => {
+          if (input.windowId !== undefined && window.windowId !== input.windowId) {
+            return false;
+          }
+
+          if (input.pid !== undefined && window.pid !== input.pid) {
+            return false;
+          }
+
+          if (input.appName !== undefined && window.appName?.toLowerCase() !== input.appName.toLowerCase()) {
+            return false;
+          }
+
+          if (input.title !== undefined && window.title?.toLowerCase() !== input.title.toLowerCase()) {
+            return false;
+          }
+
+          return true;
+        });
+
+        if (matches.length === 0) {
+          return buildPreviewResult({
+            tool: "window.focus",
+            riskLevel: "medium",
+            strategy: "gui_control",
+            safety: preflightSafety,
+            targetSummary: summarizeWindow(focusIdentity(input)),
+            target: toWindowPreviewTarget(focusIdentity(input)),
+            supported: true,
+            backend: windows.backend,
+            wouldExecute: false,
+            reasons: previewReasons("No visible window matched the requested identity.", preflightSafety.reasons),
+            observations: ["Previewed window focus without moving focus."]
+          });
+        }
+
+        if (matches.length > 1) {
+          return buildPreviewResult({
+            tool: "window.focus",
+            riskLevel: "medium",
+            strategy: "gui_control",
+            safety: preflightSafety,
+            targetSummary: summarizeWindow(focusIdentity(input)),
+            target: toWindowPreviewTarget(focusIdentity(input)),
+            supported: true,
+            backend: windows.backend,
+            ambiguous: true,
+            wouldExecute: false,
+            reasons: previewReasons(
+              "The requested window identity matched multiple visible windows.",
+              preflightSafety.reasons
+            ),
+            saferAlternative: guideAlternative("Narrow the window identity before using window.focus."),
+            observations: ["Previewed window focus without moving focus."]
+          });
+        }
+
+        const target = matches[0]!;
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "window.focus",
+            actionType: "gui_click",
+            strategy: "gui_control",
+            ...(target.appName === undefined ? {} : { appName: target.appName })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+
+        return buildPreviewResult({
+          tool: "window.focus",
+          riskLevel: "medium",
+          strategy: "gui_control",
+          safety: postResolutionSafety,
+          targetSummary: summarizeWindow(target),
+          target: toWindowPreviewTarget(target),
+          supported: true,
+          backend: windows.backend,
+          reasons: previewReasons("Would focus the resolved visible window.", postResolutionSafety.reasons),
+          saferAlternative: postResolutionSafety.blocked
+            ? guideAlternative("Sensitive app window focus should stay blocked or guide-only.")
+            : undefined,
+          observations: ["Previewed window focus without moving focus."]
+        });
+      }
 
       if (!windows.supported) {
         return toolSuccess({
@@ -200,24 +344,7 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
         });
       }
 
-      const target = matches[0];
-
-      if (target === undefined) {
-        return toolSuccess({
-          tool: "window.focus",
-          riskLevel: "medium",
-          strategy: "gui_control",
-          data: {
-            supported: true,
-            backend: windows.backend,
-            focused: false,
-            window: focusIdentity(input),
-            reason: "No visible window matched the requested identity."
-          },
-          observations: ["Window focus request did not match any visible window."]
-        });
-      }
-
+      const target = matches[0]!;
       const postResolutionSafety = evaluateSafety(
         {
           tool: "window.focus",

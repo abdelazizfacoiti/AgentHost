@@ -304,4 +304,24 @@ describe("window MCP tools", () => {
     });
     expect(context.calls).toEqual(["window.list", "window.focus"]);
   });
+
+  it("previews window focus without focusing the window", async () => {
+    const context = createContext({
+      allowGenericClick: true
+    });
+    const result = await callTool(context, "window.focus", { appName: "Notes", dryRun: true });
+
+    expect(result).toMatchObject({
+      ok: true,
+      preview: true,
+      data: {
+        preview: true,
+        wouldExecute: true,
+        wouldBeBlocked: false,
+        targetSummary: 'Notes "Draft"'
+      }
+    });
+    expect(context.calls).toEqual(["window.list"]);
+    expect(context.logger.entries[0]?.preview).toBe(true);
+  });
 });

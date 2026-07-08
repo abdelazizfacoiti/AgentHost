@@ -4,6 +4,7 @@ import {
   normalizePathForPolicy,
   toolFailure,
   toolSuccess,
+  type ActionPreviewResult,
   type DataSensitivity,
   type DesktopCapabilitiesResult,
   type DesktopClickResult,
@@ -17,7 +18,12 @@ import {
 } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
-import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
+import type {
+  AgentHostToolDefinition,
+  AnyAgentHostToolDefinition,
+  ToolExecutionRuntime
+} from "../tool-runner.js";
+import { buildPreviewResult, guideAlternative, summarizeWindow, toWindowPreviewTarget } from "./preview.js";
 
 const nonEmptyString = z.string().trim().min(1).max(1000);
 
@@ -49,14 +55,16 @@ const screenshotInputSchema = z
 const hotkeyInputSchema = z
   .object({
     keys: z.array(z.string().trim().min(1).max(100)).min(1).max(10),
-    activeWindow: activeWindowSchema
+    activeWindow: activeWindowSchema,
+    dryRun: z.boolean().optional()
   })
   .strict();
 const typeTextInputSchema = z
   .object({
     text: z.string().min(1).max(10_000),
     activeWindow: activeWindowSchema,
-    dataSensitivity: z.enum(["none", "low", "sensitive", "secret"]).optional()
+    dataSensitivity: z.enum(["none", "low", "sensitive", "secret"]).optional(),
+    dryRun: z.boolean().optional()
   })
   .strict();
 const clickInputSchema = z
@@ -64,7 +72,8 @@ const clickInputSchema = z
     x: z.number().int().min(0),
     y: z.number().int().min(0),
     button: z.enum(["left", "middle", "right"]).optional(),
-    activeWindow: activeWindowSchema
+    activeWindow: activeWindowSchema,
+    dryRun: z.boolean().optional()
   })
   .strict();
 
@@ -100,10 +109,7 @@ function screenshotPath(input: ScreenshotInput, context: AgentHostMcpContext): s
   return normalizePathForPolicy(path.join(outputDir, filename), { agentHostDir: context.config.agentHostDir });
 }
 
-function safetyFailure(
-  tool: string,
-  safety: ReturnType<typeof evaluateSafety>
-): ToolResult<never> {
+function safetyFailure(tool: string, safety: ReturnType<typeof evaluateSafety>): ToolResult<never> {
   return toolFailure({
     tool,
     riskLevel: safety.riskLevel,
@@ -148,6 +154,100 @@ function toActiveWindowContext(input: {
   }
 
   return activeWindow;
+}
+
+function sameText(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined) {
+    return true;
+  }
+
+  return b !== undefined && a.toLowerCase() === b.toLowerCase();
+}
+
+function matchesActiveWindow(expected: DesktopWindowContext, actual: DesktopWindowContext): boolean {
+  if (expected.windowId !== undefined && expected.windowId !== actual.windowId) {
+    return false;
+  }
+
+  if (expected.pid !== undefined && expected.pid !== actual.pid) {
+    return false;
+  }
+
+  if (!sameText(expected.appName, actual.appName)) {
+    return false;
+  }
+
+  if (!sameText(expected.title, actual.title)) {
+    return false;
+  }
+
+  return true;
+}
+
+async function validateActiveWindowForPreview(context: AgentHostMcpContext, expected: DesktopWindowContext) {
+  const activeWindow = await context.linux.getActiveWindow();
+
+  if (!activeWindow.supported) {
+    return {
+      supported: false as const,
+      backend: activeWindow.backend,
+      reason: activeWindow.reason
+    };
+  }
+
+  if (activeWindow.activeWindow === undefined) {
+    return {
+      supported: false as const,
+      backend: activeWindow.backend,
+      reason: "No active window metadata was available from the safe backend."
+    };
+  }
+
+  if (!matchesActiveWindow(expected, activeWindow.activeWindow)) {
+    return {
+      supported: true as const,
+      backend: activeWindow.backend,
+      matched: false as const,
+      reason: "The provided active-window context does not match the current active window.",
+      activeWindow: activeWindow.activeWindow
+    };
+  }
+
+  return {
+    supported: true as const,
+    backend: activeWindow.backend,
+    matched: true as const,
+    reason: activeWindow.reason,
+    activeWindow: activeWindow.activeWindow
+  };
+}
+
+function previewReasons(primaryReason: string, safetyReasons: string[]): string[] {
+  return safetyReasons.includes(primaryReason) ? safetyReasons : [primaryReason, ...safetyReasons];
+}
+
+function initialGuiSafety(
+  runtime: ToolExecutionRuntime | undefined,
+  context: AgentHostMcpContext,
+  tool: "desktop.hotkey" | "desktop.type_text" | "desktop.click",
+  actionType: "gui_click" | "gui_type",
+  activeWindow: DesktopWindowContext,
+  dataSensitivity?: DataSensitivity
+) {
+  if (runtime?.safetyDecision !== undefined) {
+    return runtime.safetyDecision;
+  }
+
+  return evaluateSafety(
+    {
+      tool,
+      actionType,
+      ...(activeWindow.appName === undefined ? {} : { appName: activeWindow.appName }),
+      ...(dataSensitivity === undefined ? {} : { dataSensitivity })
+    },
+    context.policy,
+    { agentHostDir: context.config.agentHostDir }
+  );
 }
 
 export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
@@ -251,7 +351,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     }
   };
 
-  const hotkey: AgentHostToolDefinition<HotkeyInput, DesktopHotkeyResult, AgentHostMcpContext> = {
+  const hotkey: AgentHostToolDefinition<HotkeyInput, DesktopHotkeyResult | ActionPreviewResult, AgentHostMcpContext> = {
     name: "desktop.hotkey",
     description: "Sends a desktop hotkey when policy and active-window context allow it.",
     riskLevel: "medium",
@@ -265,7 +365,8 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           minItems: 1,
           maxItems: 10
         },
-        activeWindow: activeWindowMcpSchema
+        activeWindow: activeWindowMcpSchema,
+        dryRun: { type: "boolean" }
       },
       required: ["keys", "activeWindow"],
       additionalProperties: false
@@ -278,10 +379,67 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return appName === undefined ? {} : { appName };
       }
     },
-    async handler(input, context): Promise<ToolResult<DesktopHotkeyResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<DesktopHotkeyResult | ActionPreviewResult>> {
+      const activeWindow = toActiveWindowContext(input.activeWindow);
+
+      if (runtime?.isDryRun) {
+        const preflightSafety = initialGuiSafety(runtime, context, "desktop.hotkey", "gui_click", activeWindow);
+        const validation = await validateActiveWindowForPreview(context, activeWindow);
+        const previewTarget = validation.supported && "activeWindow" in validation
+          ? validation.activeWindow
+          : activeWindow;
+
+        if (!validation.supported || ("matched" in validation && !validation.matched)) {
+          return buildPreviewResult({
+            tool: "desktop.hotkey",
+            riskLevel: "medium",
+            strategy: "gui_control",
+            safety: preflightSafety,
+            targetSummary: summarizeWindow(previewTarget),
+            target: toWindowPreviewTarget(previewTarget),
+            supported: validation.supported,
+            backend: validation.backend,
+            wouldExecute: false,
+            reasons: previewReasons(validation.reason, preflightSafety.reasons),
+            saferAlternative: guideAlternative("Resolve the active window manually before using generic GUI hotkeys."),
+            observations: ["Previewed a desktop hotkey without sending it."]
+          });
+        }
+
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "desktop.hotkey",
+            actionType: "gui_click",
+            strategy: "gui_control",
+            ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+
+        return buildPreviewResult({
+          tool: "desktop.hotkey",
+          riskLevel: "medium",
+          strategy: "gui_control",
+          safety: postResolutionSafety,
+          targetSummary: summarizeWindow(validation.activeWindow),
+          target: toWindowPreviewTarget(validation.activeWindow),
+          supported: true,
+          backend: validation.backend,
+          reasons: previewReasons(`Would send hotkey ${input.keys.join("+")} to the active window.`, postResolutionSafety.reasons),
+          saferAlternative: postResolutionSafety.blocked
+            ? guideAlternative("Sensitive app hotkeys should stay blocked or guide-only.")
+            : undefined,
+          observations: ["Previewed a desktop hotkey without sending it."]
+        });
+      }
+
       const hotkeyInput = {
         keys: input.keys,
-        activeWindow: toActiveWindowContext(input.activeWindow)
+        activeWindow
       };
 
       return toolSuccess({
@@ -294,7 +452,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     }
   };
 
-  const typeText: AgentHostToolDefinition<TypeTextInput, DesktopTypeTextResult, AgentHostMcpContext> = {
+  const typeText: AgentHostToolDefinition<TypeTextInput, DesktopTypeTextResult | ActionPreviewResult, AgentHostMcpContext> = {
     name: "desktop.type_text",
     description: "Types text into the active window when policy and safety allow it.",
     riskLevel: "medium",
@@ -307,7 +465,8 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         dataSensitivity: {
           type: "string",
           enum: ["none", "low", "sensitive", "secret"]
-        }
+        },
+        dryRun: { type: "boolean" }
       },
       required: ["text", "activeWindow"],
       additionalProperties: false
@@ -334,8 +493,74 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return safetyInput;
       }
     },
-    async handler(input, context): Promise<ToolResult<DesktopTypeTextResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<DesktopTypeTextResult | ActionPreviewResult>> {
       const activeWindow = toActiveWindowContext(input.activeWindow);
+
+      if (runtime?.isDryRun) {
+        const preflightSafety = initialGuiSafety(
+          runtime,
+          context,
+          "desktop.type_text",
+          "gui_type",
+          activeWindow,
+          input.dataSensitivity
+        );
+        const validation = await validateActiveWindowForPreview(context, activeWindow);
+        const previewTarget = validation.supported && "activeWindow" in validation
+          ? validation.activeWindow
+          : activeWindow;
+
+        if (!validation.supported || ("matched" in validation && !validation.matched)) {
+          return buildPreviewResult({
+            tool: "desktop.type_text",
+            riskLevel: "medium",
+            strategy: "gui_control",
+            safety: preflightSafety,
+            targetSummary: summarizeWindow(previewTarget),
+            target: toWindowPreviewTarget(previewTarget),
+            dataSensitivity: input.dataSensitivity,
+            supported: validation.supported,
+            backend: validation.backend,
+            wouldExecute: false,
+            reasons: previewReasons(validation.reason, preflightSafety.reasons),
+            saferAlternative: guideAlternative("Resolve the active window manually before using generic GUI typing."),
+            observations: ["Previewed desktop typing without sending any text."]
+          });
+        }
+
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "desktop.type_text",
+            actionType: "gui_type",
+            strategy: "gui_control",
+            ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName }),
+            ...(input.dataSensitivity === undefined ? {} : { dataSensitivity: input.dataSensitivity })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+
+        return buildPreviewResult({
+          tool: "desktop.type_text",
+          riskLevel: "medium",
+          strategy: "gui_control",
+          safety: postResolutionSafety,
+          targetSummary: summarizeWindow(validation.activeWindow),
+          target: toWindowPreviewTarget(validation.activeWindow),
+          dataSensitivity: input.dataSensitivity,
+          supported: true,
+          backend: validation.backend,
+          reasons: previewReasons(`Would type ${input.text.length} characters into the active window.`, postResolutionSafety.reasons),
+          saferAlternative: postResolutionSafety.blocked
+            ? guideAlternative("Sensitive app text entry should stay blocked or guide-only.")
+            : undefined,
+          observations: ["Previewed desktop typing without sending any text."]
+        });
+      }
+
       return toolSuccess({
         tool: "desktop.type_text",
         riskLevel: "medium",
@@ -349,7 +574,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     }
   };
 
-  const click: AgentHostToolDefinition<ClickInput, DesktopClickResult, AgentHostMcpContext> = {
+  const click: AgentHostToolDefinition<ClickInput, DesktopClickResult | ActionPreviewResult, AgentHostMcpContext> = {
     name: "desktop.click",
     description: "Clicks screen coordinates when policy and active-window context allow it.",
     riskLevel: "medium",
@@ -360,7 +585,8 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         x: { type: "integer", minimum: 0 },
         y: { type: "integer", minimum: 0 },
         button: { type: "string", enum: ["left", "middle", "right"] },
-        activeWindow: activeWindowMcpSchema
+        activeWindow: activeWindowMcpSchema,
+        dryRun: { type: "boolean" }
       },
       required: ["x", "y", "activeWindow"],
       additionalProperties: false
@@ -373,7 +599,67 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return appName === undefined ? {} : { appName };
       }
     },
-    async handler(input, context): Promise<ToolResult<DesktopClickResult>> {
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(input, context, runtime): Promise<ToolResult<DesktopClickResult | ActionPreviewResult>> {
+      const activeWindow = toActiveWindowContext(input.activeWindow);
+
+      if (runtime?.isDryRun) {
+        const preflightSafety = initialGuiSafety(runtime, context, "desktop.click", "gui_click", activeWindow);
+        const validation = await validateActiveWindowForPreview(context, activeWindow);
+        const previewTarget = validation.supported && "activeWindow" in validation
+          ? validation.activeWindow
+          : activeWindow;
+
+        if (!validation.supported || ("matched" in validation && !validation.matched)) {
+          return buildPreviewResult({
+            tool: "desktop.click",
+            riskLevel: "medium",
+            strategy: "gui_control",
+            safety: preflightSafety,
+            targetSummary: summarizeWindow(previewTarget),
+            target: toWindowPreviewTarget(previewTarget),
+            supported: validation.supported,
+            backend: validation.backend,
+            wouldExecute: false,
+            reasons: previewReasons(validation.reason, preflightSafety.reasons),
+            saferAlternative: guideAlternative("Resolve the active window manually before using generic GUI clicking."),
+            observations: ["Previewed a desktop click without sending input."]
+          });
+        }
+
+        const postResolutionSafety = evaluateSafety(
+          {
+            tool: "desktop.click",
+            actionType: "gui_click",
+            strategy: "gui_control",
+            ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName })
+          },
+          context.policy,
+          { agentHostDir: context.config.agentHostDir }
+        );
+
+        return buildPreviewResult({
+          tool: "desktop.click",
+          riskLevel: "medium",
+          strategy: "gui_control",
+          safety: postResolutionSafety,
+          targetSummary: summarizeWindow(validation.activeWindow),
+          target: toWindowPreviewTarget(validation.activeWindow),
+          supported: true,
+          backend: validation.backend,
+          reasons: previewReasons(
+            `Would click (${input.x}, ${input.y}) with ${input.button ?? "left"} button in the active window.`,
+            postResolutionSafety.reasons
+          ),
+          saferAlternative: postResolutionSafety.blocked
+            ? guideAlternative("Sensitive app clicking should stay blocked or guide-only.")
+            : undefined,
+          observations: ["Previewed a desktop click without sending input."]
+        });
+      }
+
       const clickInput: {
         x: number;
         y: number;
@@ -382,12 +668,11 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
       } = {
         x: input.x,
         y: input.y,
-        activeWindow: toActiveWindowContext(input.activeWindow)
+        activeWindow
       };
 
       if (input.button !== undefined) {
-        const button: DesktopMouseButton = input.button;
-        clickInput.button = button;
+        clickInput.button = input.button;
       }
 
       return toolSuccess({

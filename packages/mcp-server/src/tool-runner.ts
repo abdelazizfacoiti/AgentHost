@@ -3,6 +3,7 @@ import type {
   AgentHostConfig,
   AuditLogEntry,
   AuditLogger,
+  SafetyDecision,
   SafetyInput,
   CapabilityRegistrySnapshot,
   PolicyProfile,
@@ -20,6 +21,11 @@ export interface ToolExecutionContext {
   logger: AuditLogger;
 }
 
+export interface ToolExecutionRuntime {
+  isDryRun: boolean;
+  safetyDecision?: SafetyDecision | undefined;
+}
+
 export interface AgentHostToolDefinition<
   TInput,
   TData,
@@ -35,7 +41,14 @@ export interface AgentHostToolDefinition<
     actionType: SafetyInput["actionType"];
     getInput?: (input: TInput) => Partial<SafetyInput>;
   };
-  handler(input: TInput, context: TContext): Promise<ToolResult<TData>> | ToolResult<TData>;
+  preview?: {
+    isDryRun(input: TInput): boolean;
+  };
+  handler(
+    input: TInput,
+    context: TContext,
+    runtime?: ToolExecutionRuntime
+  ): Promise<ToolResult<TData>> | ToolResult<TData>;
 }
 
 export type AnyAgentHostToolDefinition<TContext extends ToolExecutionContext = ToolExecutionContext> =
@@ -52,6 +65,7 @@ function createAuditLogEntry(
     sessionId: context.sessionId,
     tool: result.tool,
     riskLevel: result.riskLevel,
+    ...(result.preview === true ? { preview: true } : {}),
     inputSummary,
     approvalStatus: result.approval.status,
     ok: result.ok,
@@ -92,6 +106,8 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
     });
   } else {
     try {
+      const isDryRun = definition.preview?.isDryRun(parsed.data) ?? false;
+
       if (definition.safety !== undefined) {
         const dynamicSafetyInput = definition.safety.getInput?.(parsed.data) ?? {};
         const safetyInput: SafetyInput = {
@@ -103,7 +119,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
           agentHostDir: context.config.agentHostDir
         });
 
-        if (!safetyDecision.allowed) {
+        if (!safetyDecision.allowed && !isDryRun) {
           result = toolFailure<TData>({
             tool: definition.name,
             riskLevel: safetyDecision.riskLevel,
@@ -118,10 +134,15 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
             observations: safetyDecision.reasons
           });
         } else {
-          result = await definition.handler(parsed.data, context);
+          result = await definition.handler(parsed.data, context, {
+            isDryRun,
+            safetyDecision
+          });
         }
       } else {
-        result = await definition.handler(parsed.data, context);
+        result = await definition.handler(parsed.data, context, {
+          isDryRun
+        });
       }
     } catch (error) {
       result = toolFailure<TData>({

@@ -15,6 +15,7 @@ describe("JsonlAuditLogger", () => {
       sessionId: "session_test",
       tool: "system.get_info",
       riskLevel: "observe",
+      preview: true,
       inputSummary: "Get system info",
       approvalStatus: "not_required",
       ok: true,
@@ -26,7 +27,8 @@ describe("JsonlAuditLogger", () => {
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
       tool: "system.get_info",
-      riskLevel: "observe"
+      riskLevel: "observe",
+      preview: true
     });
   });
 

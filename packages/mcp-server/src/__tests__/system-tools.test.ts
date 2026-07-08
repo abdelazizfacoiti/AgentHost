@@ -327,4 +327,60 @@ describe("system tools", () => {
     expect(result.error?.code).toBe("approval_required");
     expect(result.approval.status).toBe("required");
   });
+
+  it("allows dry-run previews to return safety results without executing", async () => {
+    const logger = new MemoryLogger();
+    const context = createContext(logger);
+    let handlerCalled = false;
+
+    const result = await runTool(
+      {
+        name: "app.open",
+        description: "Future app launch tool.",
+        riskLevel: "medium",
+        inputSchema: z.object({ dryRun: z.boolean().optional() }).strict(),
+        mcpInputSchema: {
+          type: "object",
+          properties: {
+            dryRun: {
+              type: "boolean"
+            }
+          },
+          additionalProperties: false
+        },
+        inputSummary: "Future app launch",
+        safety: {
+          actionType: "app_launch",
+          getInput: () => ({ appName: "GIMP" })
+        },
+        preview: {
+          isDryRun: (input) => input.dryRun === true
+        },
+        handler(_input, _context, runtime) {
+          handlerCalled = true;
+          return {
+            ok: true,
+            tool: "app.open",
+            riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
+            preview: true,
+            approval: runtime?.safetyDecision?.approval ?? { required: false, status: "not_required" },
+            data: {
+              preview: true,
+              wouldExecute: false
+            },
+            observations: ["Preview only."],
+            error: null
+          };
+        }
+      },
+      { dryRun: true },
+      context
+    );
+
+    expect(handlerCalled).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(result.preview).toBe(true);
+    expect(result.approval.status).toBe("required");
+    expect(logger.entries[0]?.preview).toBe(true);
+  });
 });
