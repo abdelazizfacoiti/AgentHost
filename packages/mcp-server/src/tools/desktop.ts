@@ -5,6 +5,7 @@ import {
   toolFailure,
   toolSuccess,
   type DataSensitivity,
+  type DesktopCapabilitiesResult,
   type DesktopClickResult,
   type DesktopGetActiveWindowResult,
   type DesktopHotkeyResult,
@@ -150,6 +151,27 @@ function toActiveWindowContext(input: {
 }
 
 export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
+  const getCapabilities: AgentHostToolDefinition<EmptyInput, DesktopCapabilitiesResult, AgentHostMcpContext> = {
+    name: "desktop.get_capabilities",
+    description: "Reports detected desktop session and safe backend capabilities.",
+    riskLevel: "low",
+    inputSchema: emptyInputSchema,
+    mcpInputSchema: emptyMcpInputSchema,
+    inputSummary: "Get desktop capabilities",
+    safety: {
+      actionType: "inspect"
+    },
+    async handler(_input, context): Promise<ToolResult<DesktopCapabilitiesResult>> {
+      return toolSuccess({
+        tool: "desktop.get_capabilities",
+        riskLevel: "low",
+        strategy: "gui_control",
+        data: await context.linux.getDesktopCapabilities(),
+        observations: ["Reported detected desktop and backend capabilities without taking any desktop action."]
+      });
+    }
+  };
+
   const getActiveWindow: AgentHostToolDefinition<EmptyInput, DesktopGetActiveWindowResult, AgentHostMcpContext> = {
     name: "desktop.get_active_window",
     description: "Returns best-effort metadata about the current active window.",
@@ -378,5 +400,5 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     }
   };
 
-  return [getActiveWindow, screenshot, hotkey, typeText, click];
+  return [getActiveWindow, getCapabilities, screenshot, hotkey, typeText, click];
 }

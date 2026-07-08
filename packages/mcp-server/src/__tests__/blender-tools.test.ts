@@ -99,11 +99,42 @@ function createLinuxAutomation(config: AgentHostConfig): LinuxAutomation {
     fileExists: async (input) => ({ path: input.path, exists: false }),
     listDirectory: async (input) => ({ path: input.path, entries: [], truncated: false }),
     ensureDir: async (input) => ({ path: input.path, exists: true, created: true }),
+    getDesktopCapabilities: async () => ({
+      platform: "linux",
+      sessionType: "unknown",
+      displayAvailable: false,
+      backend: "unavailable",
+      activeWindow: { supported: false, backend: "unavailable", reason: "Not used in blender tool tests." },
+      screenshot: { supported: false, backend: "unavailable", reason: "Not used in blender tool tests." },
+      windowList: { supported: false, backend: "unavailable", reason: "Not used in blender tool tests." },
+      windowFocus: { supported: false, backend: "unavailable", reason: "Not used in blender tool tests." },
+      accessibility: { supported: false, backend: "unavailable", reason: "Not used in blender tool tests." },
+      guiInput: { supported: false, backend: "unavailable", reason: "Not used in blender tool tests." }
+    }),
     getActiveWindow: async () => ({ supported: false, backend: "unavailable", reason: "Not used in blender tool tests." }),
     screenshot: async (input) => ({
       supported: false,
       backend: "unavailable",
       path: input.path,
+      reason: "Not used in blender tool tests."
+    }),
+    listWindows: async () => ({
+      supported: false,
+      backend: "unavailable",
+      windows: [],
+      truncated: false,
+      reason: "Not used in blender tool tests."
+    }),
+    focusWindow: async (input) => ({
+      supported: false,
+      backend: "unavailable",
+      focused: false,
+      window: {
+        ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
+        ...(input.appName === undefined ? {} : { appName: input.appName }),
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.pid === undefined ? {} : { pid: input.pid })
+      },
       reason: "Not used in blender tool tests."
     }),
     hotkey: async (input) => ({
@@ -130,6 +161,20 @@ function createLinuxAutomation(config: AgentHostConfig): LinuxAutomation {
       y: input.y,
       button: input.button ?? "left",
       activeWindow: input.activeWindow,
+      reason: "Not used in blender tool tests."
+    }),
+    getAccessibilityTree: async () => ({
+      supported: false,
+      backend: "unavailable",
+      nodeCount: 0,
+      truncated: false,
+      redacted: false,
+      reason: "Not used in blender tool tests."
+    }),
+    findAccessibilityElement: async () => ({
+      supported: false,
+      backend: "unavailable",
+      candidates: [],
       reason: "Not used in blender tool tests."
     })
   };

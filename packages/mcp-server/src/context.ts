@@ -6,13 +6,18 @@ import type {
   AppStrategyTaskType,
   AdapterRegistrySnapshot,
   AuditLogger,
+  AccessibilityFindElementResult,
+  AccessibilityTreeResult,
   CapabilityRegistrySnapshot,
+  DesktopCapabilitiesResult,
   DesktopClickResult,
   DesktopGetActiveWindowResult,
   DesktopHotkeyResult,
   DesktopScreenshotResult,
   DesktopTypeTextResult,
   DesktopWindowContext,
+  WindowFocusResult,
+  WindowListResult,
   DependencyCheckResult,
   DependencyKind,
   FileEnsureDirResult,
@@ -45,8 +50,11 @@ export interface LinuxAutomation {
   fileExists(input: { path: string }): Promise<FileExistsResult>;
   listDirectory(input: { path: string; limit?: number }): Promise<FileListResult>;
   ensureDir(input: { path: string }): Promise<FileEnsureDirResult>;
+  getDesktopCapabilities(): Promise<DesktopCapabilitiesResult>;
   getActiveWindow(): Promise<DesktopGetActiveWindowResult>;
   screenshot(input: { path: string; includeActiveWindowOnly?: boolean }): Promise<DesktopScreenshotResult>;
+  listWindows(input: { limit?: number; includeTitles?: boolean }): Promise<WindowListResult>;
+  focusWindow(input: { windowId?: string; appName?: string; title?: string; pid?: number }): Promise<WindowFocusResult>;
   hotkey(input: { keys: string[]; activeWindow: DesktopWindowContext }): Promise<DesktopHotkeyResult>;
   typeText(input: { text: string; activeWindow: DesktopWindowContext }): Promise<DesktopTypeTextResult>;
   click(input: {
@@ -55,6 +63,22 @@ export interface LinuxAutomation {
     button?: "left" | "middle" | "right";
     activeWindow: DesktopWindowContext;
   }): Promise<DesktopClickResult>;
+  getAccessibilityTree(input: {
+    appName?: string;
+    windowId?: string;
+    pid?: number;
+    maxDepth?: number;
+    maxNodes?: number;
+    includeText?: boolean;
+  }): Promise<AccessibilityTreeResult>;
+  findAccessibilityElement(input: {
+    appName?: string;
+    windowId?: string;
+    pid?: number;
+    query: string;
+    role?: string;
+    limit?: number;
+  }): Promise<AccessibilityFindElementResult>;
 }
 
 export interface AgentHostMcpContext {

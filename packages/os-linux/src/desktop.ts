@@ -3,18 +3,25 @@ import path from "node:path";
 import {
   classifyAppSensitivity,
   normalizePathForPolicy,
+  redactSensitiveText,
+  type DesktopCapabilitiesResult,
+  type DesktopCapabilitySupport,
   type DesktopClickResult,
   type DesktopGetActiveWindowResult,
   type DesktopHotkeyResult,
   type DesktopMouseButton,
   type DesktopScreenshotResult,
+  type DesktopSessionType,
   type DesktopTypeTextResult,
-  type DesktopWindowContext
+  type DesktopWindowBounds,
+  type DesktopWindowContext,
+  type DesktopWindowSummary,
+  type WindowFocusResult,
+  type WindowListResult
 } from "@agenthost/core";
+import { detectLinuxAccessibilitySupport, type LinuxAccessibilityContext } from "./accessibility.js";
 import { findCommandPath, type LinuxLookupContext } from "./dependencies.js";
 import { runSafeLinuxCommand } from "./shell.js";
-
-type DesktopSessionType = "x11" | "wayland" | "unknown";
 
 export interface LinuxDesktopContext extends LinuxLookupContext {
   agentHostDir?: string;
@@ -42,9 +49,26 @@ export interface LinuxDesktopClickInput {
   activeWindow: DesktopWindowContext;
 }
 
+export interface LinuxWindowListInput {
+  limit?: number;
+  includeTitles?: boolean;
+}
+
+export interface LinuxWindowFocusInput {
+  windowId?: string;
+  appName?: string;
+  title?: string;
+  pid?: number;
+}
+
 interface SessionInfo {
   sessionType: DesktopSessionType;
-  hasDisplay: boolean;
+  displayAvailable: boolean;
+  backend: string;
+}
+
+interface RawWindowSummary extends DesktopWindowSummary {
+  title?: string;
 }
 
 function sessionInfo(context: LinuxDesktopContext = {}): SessionInfo {
@@ -52,25 +76,61 @@ function sessionInfo(context: LinuxDesktopContext = {}): SessionInfo {
   const raw = (env.XDG_SESSION_TYPE ?? "").trim().toLowerCase();
 
   if (raw === "x11") {
-    return { sessionType: "x11", hasDisplay: Boolean(env.DISPLAY) };
+    return {
+      sessionType: "x11",
+      displayAvailable: Boolean(env.DISPLAY),
+      backend: "x11"
+    };
   }
 
   if (raw === "wayland") {
-    return { sessionType: "wayland", hasDisplay: Boolean(env.WAYLAND_DISPLAY) };
+    return {
+      sessionType: "wayland",
+      displayAvailable: Boolean(env.WAYLAND_DISPLAY),
+      backend: "wayland"
+    };
   }
 
   if (env.DISPLAY !== undefined && env.DISPLAY.length > 0) {
-    return { sessionType: "x11", hasDisplay: true };
+    return {
+      sessionType: "x11",
+      displayAvailable: true,
+      backend: "x11"
+    };
   }
 
   if (env.WAYLAND_DISPLAY !== undefined && env.WAYLAND_DISPLAY.length > 0) {
-    return { sessionType: "wayland", hasDisplay: true };
+    return {
+      sessionType: "wayland",
+      displayAvailable: true,
+      backend: "wayland"
+    };
   }
 
-  return { sessionType: "unknown", hasDisplay: false };
+  return {
+    sessionType: "unknown",
+    displayAvailable: false,
+    backend: "unavailable"
+  };
 }
 
-function unsupported<T extends { supported: boolean; backend: string; reason: string }>(
+function support(backend: string, reason: string): DesktopCapabilitySupport {
+  return {
+    supported: true,
+    backend,
+    reason
+  };
+}
+
+function unsupported(backend: string, reason: string): DesktopCapabilitySupport {
+  return {
+    supported: false,
+    backend,
+    reason
+  };
+}
+
+function unsupportedResult<T extends { supported: boolean; backend: string; reason: string }>(
   backend: string,
   reason: string,
   extra: Omit<T, "supported" | "backend" | "reason">
@@ -120,7 +180,7 @@ async function runDesktopCommand(
     command,
     args,
     timeoutMs: 5_000,
-    maxOutputBytes: 32 * 1024
+    maxOutputBytes: 128 * 1024
   };
 
   if (context.agentHostDir !== undefined) {
@@ -128,6 +188,43 @@ async function runDesktopCommand(
   }
 
   return runSafeLinuxCommand(input);
+}
+
+function redactTitle(title: string | undefined): string | undefined {
+  if (title === undefined) {
+    return undefined;
+  }
+
+  return trimLine(redactSensitiveText(title));
+}
+
+function summarizeWindow(raw: RawWindowSummary, includeTitles: boolean): DesktopWindowSummary {
+  const summary: DesktopWindowSummary = {
+    windowId: raw.windowId
+  };
+
+  if (raw.appName !== undefined) {
+    summary.appName = raw.appName;
+    summary.appSensitivity = raw.appSensitivity ?? classifyAppSensitivity({ appName: raw.appName });
+  }
+
+  if (includeTitles) {
+    const title = redactTitle(raw.title);
+
+    if (title !== undefined) {
+      summary.title = title;
+    }
+  }
+
+  if (raw.pid !== undefined) {
+    summary.pid = raw.pid;
+  }
+
+  if (raw.bounds !== undefined) {
+    summary.bounds = raw.bounds;
+  }
+
+  return summary;
 }
 
 function contextMatches(current: DesktopWindowContext | undefined, expected: DesktopWindowContext): boolean {
@@ -154,6 +251,133 @@ function contextMatches(current: DesktopWindowContext | undefined, expected: Des
   return true;
 }
 
+async function detectActiveWindowSupport(context: LinuxDesktopContext = {}): Promise<DesktopCapabilitySupport> {
+  const session = sessionInfo(context);
+
+  if (!session.displayAvailable) {
+    return unsupported("unavailable", "No Linux desktop display session is available.");
+  }
+
+  if (session.sessionType === "wayland") {
+    return unsupported("wayland", "Wayland active-window inspection is unavailable with the current safe backends.");
+  }
+
+  const xdotoolPath = await findCommandPath("xdotool", context);
+
+  if (xdotoolPath === undefined) {
+    return unsupported("unavailable", "Active-window inspection requires xdotool on X11.");
+  }
+
+  return support("xdotool", "Active-window inspection is available through xdotool.");
+}
+
+async function detectScreenshotSupport(context: LinuxDesktopContext = {}): Promise<DesktopCapabilitySupport> {
+  const session = sessionInfo(context);
+
+  if (!session.displayAvailable) {
+    return unsupported("unavailable", "No Linux desktop display session is available.");
+  }
+
+  const gnomeScreenshotPath = await findCommandPath("gnome-screenshot", context);
+
+  if (gnomeScreenshotPath !== undefined) {
+    return support("gnome-screenshot", "Screenshot capture is available through gnome-screenshot.");
+  }
+
+  if (session.sessionType === "x11") {
+    const scrotPath = await findCommandPath("scrot", context);
+
+    if (scrotPath !== undefined) {
+      return support("scrot", "Screenshot capture is available through scrot.");
+    }
+
+    const importPath = await findCommandPath("import", context);
+
+    if (importPath !== undefined) {
+      return support("imagemagick-import", "Screenshot capture is available through ImageMagick import.");
+    }
+  }
+
+  return unsupported(session.sessionType === "wayland" ? "wayland" : "unavailable", "No safe screenshot backend is available in this session.");
+}
+
+async function detectWindowListSupport(context: LinuxDesktopContext = {}): Promise<DesktopCapabilitySupport> {
+  const session = sessionInfo(context);
+
+  if (!session.displayAvailable) {
+    return unsupported("unavailable", "No Linux desktop display session is available.");
+  }
+
+  if (session.sessionType === "wayland") {
+    return unsupported("wayland", "Wayland window listing is unavailable with the current safe backends.");
+  }
+
+  const wmctrlPath = await findCommandPath("wmctrl", context);
+
+  if (wmctrlPath === undefined) {
+    return unsupported("unavailable", "Window listing requires wmctrl on X11.");
+  }
+
+  return support("wmctrl", "Window listing is available through wmctrl.");
+}
+
+async function detectWindowFocusSupport(context: LinuxDesktopContext = {}): Promise<DesktopCapabilitySupport> {
+  const supportStatus = await detectWindowListSupport(context);
+
+  if (!supportStatus.supported) {
+    return supportStatus;
+  }
+
+  return support("wmctrl", "Window focus is available through wmctrl.");
+}
+
+async function detectGuiInputSupport(context: LinuxDesktopContext = {}): Promise<DesktopCapabilitySupport> {
+  const session = sessionInfo(context);
+
+  if (!session.displayAvailable) {
+    return unsupported("unavailable", "No Linux desktop display session is available.");
+  }
+
+  if (session.sessionType !== "x11") {
+    return unsupported(session.backend, "Safe generic GUI input is only supported on X11 in this phase.");
+  }
+
+  const xdotoolPath = await findCommandPath("xdotool", context);
+
+  if (xdotoolPath === undefined) {
+    return unsupported("unavailable", "Generic GUI input requires xdotool on X11.");
+  }
+
+  return support("xdotool", "Generic GUI input is available through xdotool.");
+}
+
+export async function getLinuxDesktopCapabilities(
+  context: LinuxAccessibilityContext = {}
+): Promise<DesktopCapabilitiesResult> {
+  const session = sessionInfo(context);
+  const [activeWindow, screenshot, windowList, windowFocus, accessibility, guiInput] = await Promise.all([
+    detectActiveWindowSupport(context),
+    detectScreenshotSupport(context),
+    detectWindowListSupport(context),
+    detectWindowFocusSupport(context),
+    detectLinuxAccessibilitySupport(context),
+    detectGuiInputSupport(context)
+  ]);
+
+  return {
+    platform: "linux",
+    sessionType: session.sessionType,
+    displayAvailable: session.displayAvailable,
+    backend: session.backend,
+    activeWindow,
+    screenshot,
+    windowList,
+    windowFocus,
+    accessibility,
+    guiInput
+  };
+}
+
 async function activeWindowViaXdotool(
   xdotoolPath: string,
   context: LinuxDesktopContext = {}
@@ -162,7 +386,7 @@ async function activeWindowViaXdotool(
   const windowId = trimLine(idResult.stdout);
 
   if (idResult.exitCode !== 0 || windowId === undefined) {
-    return unsupported("xdotool", "Unable to determine the active window on X11.", {});
+    return unsupportedResult("xdotool", "Unable to determine the active window on X11.", {});
   }
 
   const titleResult = await runDesktopCommand(xdotoolPath, ["getwindowname", windowId], context);
@@ -170,13 +394,23 @@ async function activeWindowViaXdotool(
   const pidValue = trimLine(pidResult.stdout);
   const pid = pidValue !== undefined && /^\d+$/.test(pidValue) ? Number(pidValue) : undefined;
   const appName = pid !== undefined ? await readProcessName(pid) : undefined;
-  const title = trimLine(titleResult.stdout);
+  const title = redactTitle(trimLine(titleResult.stdout));
   const activeWindow: DesktopWindowContext = {
-    windowId,
-    ...(title === undefined ? {} : { title }),
-    ...(pid === undefined ? {} : { pid }),
-    ...(appName === undefined ? {} : { appName, appSensitivity: classifyAppSensitivity({ appName }) })
+    windowId
   };
+
+  if (title !== undefined) {
+    activeWindow.title = title;
+  }
+
+  if (pid !== undefined) {
+    activeWindow.pid = pid;
+  }
+
+  if (appName !== undefined) {
+    activeWindow.appName = appName;
+    activeWindow.appSensitivity = classifyAppSensitivity({ appName });
+  }
 
   return {
     supported: true,
@@ -189,20 +423,16 @@ async function activeWindowViaXdotool(
 export async function getLinuxActiveWindow(
   context: LinuxDesktopContext = {}
 ): Promise<DesktopGetActiveWindowResult> {
-  const session = sessionInfo(context);
+  const supportStatus = await detectActiveWindowSupport(context);
 
-  if (!session.hasDisplay) {
-    return unsupported("unavailable", "No Linux desktop display session is available.", {});
-  }
-
-  if (session.sessionType === "wayland") {
-    return unsupported("wayland", "Wayland active-window inspection is unavailable with the current safe backends.", {});
+  if (!supportStatus.supported) {
+    return unsupportedResult(supportStatus.backend, supportStatus.reason, {});
   }
 
   const xdotoolPath = await findCommandPath("xdotool", context);
 
   if (xdotoolPath === undefined) {
-    return unsupported("unavailable", "Active-window inspection requires xdotool on X11.", {});
+    return unsupportedResult("unavailable", "Active-window inspection requires xdotool on X11.", {});
   }
 
   return activeWindowViaXdotool(xdotoolPath, context);
@@ -246,34 +476,34 @@ export async function captureLinuxScreenshot(
     input.path,
     context.agentHostDir === undefined ? {} : { agentHostDir: context.agentHostDir }
   );
-  const session = sessionInfo(context);
+  const supportStatus = await detectScreenshotSupport(context);
 
-  if (!session.hasDisplay) {
-    return unsupported("unavailable", "No Linux desktop display session is available.", {});
+  if (!supportStatus.supported) {
+    return unsupportedResult(supportStatus.backend, supportStatus.reason, {});
   }
 
-  const gnomeScreenshotPath = await findCommandPath("gnome-screenshot", context);
+  if (supportStatus.backend === "gnome-screenshot") {
+    const command = await findCommandPath("gnome-screenshot", context);
 
-  if (gnomeScreenshotPath !== undefined) {
+    if (command === undefined) {
+      return unsupportedResult("unavailable", "gnome-screenshot is no longer available on PATH.", {});
+    }
+
     const args = input.includeActiveWindowOnly ? ["-w", "-f", outputPath] : ["-f", outputPath];
-    return runAndValidateScreenshot("gnome-screenshot", gnomeScreenshotPath, args, outputPath, undefined, context);
+    return runAndValidateScreenshot("gnome-screenshot", command, args, outputPath, undefined, context);
   }
 
-  if (session.sessionType !== "x11") {
-    return unsupported("wayland", "No safe screenshot backend is available for this Wayland session.", {});
-  }
+  if (supportStatus.backend === "scrot") {
+    const scrotPath = await findCommandPath("scrot", context);
 
-  const scrotPath = await findCommandPath("scrot", context);
+    if (scrotPath === undefined) {
+      return unsupportedResult("unavailable", "scrot is no longer available on PATH.", {});
+    }
 
-  if (scrotPath !== undefined) {
     const activeWindow = input.includeActiveWindowOnly ? await getLinuxActiveWindow(context) : undefined;
 
     if (input.includeActiveWindowOnly && (activeWindow?.supported !== true || activeWindow.activeWindow === undefined)) {
-      return unsupported(
-        "scrot",
-        "Active-window screenshots require active-window inspection support.",
-        {}
-      );
+      return unsupportedResult("scrot", "Active-window screenshots require active-window inspection support.", {});
     }
 
     const args = input.includeActiveWindowOnly ? ["-u", outputPath] : [outputPath];
@@ -289,34 +519,29 @@ export async function captureLinuxScreenshot(
 
   const importPath = await findCommandPath("import", context);
 
-  if (importPath !== undefined) {
-    let activeWindow: DesktopWindowContext | undefined;
-    let args = ["-window", "root", outputPath];
-
-    if (input.includeActiveWindowOnly) {
-      const activeWindowResult = await getLinuxActiveWindow(context);
-
-      if (!activeWindowResult.supported || activeWindowResult.activeWindow?.windowId === undefined) {
-        return unsupported(
-          "imagemagick-import",
-          "Active-window screenshots require active-window inspection support.",
-          {}
-        );
-      }
-
-      activeWindow = activeWindowResult.activeWindow;
-      const windowId = activeWindowResult.activeWindow.windowId;
-      args = ["-window", windowId, outputPath];
-    }
-
-    return runAndValidateScreenshot("imagemagick-import", importPath, args, outputPath, activeWindow, context);
+  if (importPath === undefined) {
+    return unsupportedResult("unavailable", "ImageMagick import is no longer available on PATH.", {});
   }
 
-  return unsupported(
-    "unavailable",
-    "No supported screenshot backend is installed. Checked gnome-screenshot, scrot, and ImageMagick import.",
-    {}
-  );
+  let activeWindow: DesktopWindowContext | undefined;
+  let args = ["-window", "root", outputPath];
+
+  if (input.includeActiveWindowOnly) {
+    const activeWindowResult = await getLinuxActiveWindow(context);
+
+    if (!activeWindowResult.supported || activeWindowResult.activeWindow?.windowId === undefined) {
+      return unsupportedResult(
+        "imagemagick-import",
+        "Active-window screenshots require active-window inspection support.",
+        {}
+      );
+    }
+
+    activeWindow = activeWindowResult.activeWindow;
+    args = ["-window", activeWindowResult.activeWindow.windowId, outputPath];
+  }
+
+  return runAndValidateScreenshot("imagemagick-import", importPath, args, outputPath, activeWindow, context);
 }
 
 function xdotoolButton(button: DesktopMouseButton): string {
@@ -337,24 +562,16 @@ async function verifyX11ActionContext(
   | { ok: false; backend: string; reason: string }
   | { ok: true; backend: string; xdotoolPath: string; activeWindow: DesktopWindowContext }
 > {
-  const session = sessionInfo(context);
+  const supportStatus = await detectGuiInputSupport(context);
 
-  if (!session.hasDisplay) {
-    return { ok: false, backend: "unavailable", reason: "No Linux desktop display session is available." };
-  }
-
-  if (session.sessionType !== "x11") {
-    return {
-      ok: false,
-      backend: session.sessionType,
-      reason: "Safe generic GUI control is only supported on X11 in this phase."
-    };
+  if (!supportStatus.supported) {
+    return { ok: false, backend: supportStatus.backend, reason: supportStatus.reason };
   }
 
   const xdotoolPath = await findCommandPath("xdotool", context);
 
   if (xdotoolPath === undefined) {
-    return { ok: false, backend: "unavailable", reason: "Generic GUI control requires xdotool on X11." };
+    return { ok: false, backend: "unavailable", reason: "Generic GUI input requires xdotool on X11." };
   }
 
   const current = await activeWindowViaXdotool(xdotoolPath, context);
@@ -421,11 +638,7 @@ export async function typeLinuxText(
     };
   }
 
-  const result = await runDesktopCommand(
-    verification.xdotoolPath,
-    ["type", "--delay", "1", "--", input.text],
-    context
-  );
+  const result = await runDesktopCommand(verification.xdotoolPath, ["type", "--delay", "1", "--", input.text], context);
 
   return {
     supported: result.exitCode === 0,
@@ -472,5 +685,246 @@ export async function clickLinuxDesktop(
     button,
     activeWindow: verification.activeWindow,
     reason: result.exitCode === 0 ? "Clicked the active X11 window at the requested coordinates." : "The click backend did not complete successfully."
+  };
+}
+
+function parseWmctrlLine(line: string): RawWindowSummary | undefined {
+  const match = line.match(/^(\S+)\s+\S+\s+(\d+)\s+(-?\d+)\s+(-?\d+)\s+(\d+)\s+(\d+)\s+\S+\s*(.*)$/);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const windowId = match[1] ?? "";
+  const pidRaw = match[2];
+  const xRaw = match[3];
+  const yRaw = match[4];
+  const widthRaw = match[5];
+  const heightRaw = match[6];
+  const titleRaw = match[7] ?? "";
+  const pid = Number(pidRaw);
+  const x = Number(xRaw);
+  const y = Number(yRaw);
+  const width = Number(widthRaw);
+  const height = Number(heightRaw);
+  const title = trimLine(titleRaw);
+
+  return {
+    windowId,
+    ...(Number.isFinite(pid) && pid > 0 ? { pid } : {}),
+    ...(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height)
+      ? {
+          bounds: {
+            x,
+            y,
+            width,
+            height
+          }
+        }
+      : {}),
+    ...(title === undefined ? {} : { title })
+  };
+}
+
+async function listRawWindows(context: LinuxDesktopContext = {}): Promise<
+  | { supported: false; backend: string; reason: string }
+  | { supported: true; backend: string; windows: RawWindowSummary[]; reason: string }
+> {
+  const supportStatus = await detectWindowListSupport(context);
+
+  if (!supportStatus.supported) {
+    return {
+      supported: false,
+      backend: supportStatus.backend,
+      reason: supportStatus.reason
+    };
+  }
+
+  const wmctrlPath = await findCommandPath("wmctrl", context);
+
+  if (wmctrlPath === undefined) {
+    return {
+      supported: false,
+      backend: "unavailable",
+      reason: "Window listing requires wmctrl on X11."
+    };
+  }
+
+  const result = await runDesktopCommand(wmctrlPath, ["-lpG"], context);
+
+  if (result.exitCode !== 0) {
+    return {
+      supported: false,
+      backend: "wmctrl",
+      reason: "wmctrl did not return a window list."
+    };
+  }
+
+  const windows: RawWindowSummary[] = [];
+
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const parsed = parseWmctrlLine(line);
+
+    if (parsed === undefined) {
+      continue;
+    }
+
+    if (parsed.pid !== undefined) {
+      const appName = await readProcessName(parsed.pid);
+
+      if (appName !== undefined) {
+        parsed.appName = appName;
+        parsed.appSensitivity = classifyAppSensitivity({ appName });
+      }
+    }
+
+    windows.push(parsed);
+  }
+
+  return {
+    supported: true,
+    backend: "wmctrl",
+    windows,
+    reason: "Listed visible X11 windows through wmctrl."
+  };
+}
+
+export async function listLinuxWindows(
+  input: LinuxWindowListInput = {},
+  context: LinuxDesktopContext = {}
+): Promise<WindowListResult> {
+  const rawResult = await listRawWindows(context);
+
+  if (!rawResult.supported) {
+    return {
+      supported: false,
+      backend: rawResult.backend,
+      windows: [],
+      truncated: false,
+      reason: rawResult.reason
+    };
+  }
+
+  const limit = Math.min(Math.max(input.limit ?? 100, 1), 500);
+  const includeTitles = input.includeTitles ?? false;
+  const windows = rawResult.windows.slice(0, limit).map((window) => summarizeWindow(window, includeTitles));
+
+  return {
+    supported: true,
+    backend: rawResult.backend,
+    windows,
+    truncated: rawResult.windows.length > limit,
+    reason: rawResult.reason
+  };
+}
+
+function matchesWindowIdentity(window: RawWindowSummary, input: LinuxWindowFocusInput): boolean {
+  if (input.windowId !== undefined && window.windowId !== input.windowId) {
+    return false;
+  }
+
+  if (input.pid !== undefined && window.pid !== input.pid) {
+    return false;
+  }
+
+  if (input.appName !== undefined && window.appName?.toLowerCase() !== input.appName.toLowerCase()) {
+    return false;
+  }
+
+  if (input.title !== undefined && window.title?.toLowerCase() !== input.title.toLowerCase()) {
+    return false;
+  }
+
+  return true;
+}
+
+export async function focusLinuxWindow(
+  input: LinuxWindowFocusInput,
+  context: LinuxDesktopContext = {}
+): Promise<WindowFocusResult> {
+  const rawResult = await listRawWindows(context);
+  const requestedWindow: DesktopWindowContext = {};
+
+  if (input.windowId !== undefined) {
+    requestedWindow.windowId = input.windowId;
+  }
+
+  if (input.appName !== undefined) {
+    requestedWindow.appName = input.appName;
+  }
+
+  if (input.title !== undefined) {
+    requestedWindow.title = redactTitle(input.title) ?? input.title;
+  }
+
+  if (input.pid !== undefined) {
+    requestedWindow.pid = input.pid;
+  }
+
+  if (!rawResult.supported) {
+    return {
+      supported: false,
+      backend: rawResult.backend,
+      focused: false,
+      window: requestedWindow,
+      reason: rawResult.reason
+    };
+  }
+
+  const matches = rawResult.windows.filter((window) => matchesWindowIdentity(window, input));
+
+  if (matches.length === 0) {
+    return {
+      supported: true,
+      backend: rawResult.backend,
+      focused: false,
+      window: requestedWindow,
+      reason: "No visible window matched the requested identity."
+    };
+  }
+
+  if (matches.length > 1) {
+    return {
+      supported: true,
+      backend: rawResult.backend,
+      focused: false,
+      window: requestedWindow,
+      reason: "The requested window identity matched multiple visible windows."
+    };
+  }
+
+  const wmctrlPath = await findCommandPath("wmctrl", context);
+
+  if (wmctrlPath === undefined) {
+    return {
+      supported: false,
+      backend: "unavailable",
+      focused: false,
+      window: requestedWindow,
+      reason: "Window focus requires wmctrl on X11."
+    };
+  }
+
+  const target = matches[0];
+
+  if (target === undefined) {
+    return {
+      supported: true,
+      backend: rawResult.backend,
+      focused: false,
+      window: requestedWindow,
+      reason: "No visible window matched the requested identity."
+    };
+  }
+
+  const result = await runDesktopCommand(wmctrlPath, ["-i", "-a", target.windowId], context);
+  const summarized = summarizeWindow(target, true);
+
+  return {
+    supported: true,
+    backend: "wmctrl",
+    focused: result.exitCode === 0,
+    window: summarized,
+    reason: result.exitCode === 0 ? "Focused the requested X11 window through wmctrl." : "wmctrl could not focus the requested window."
   };
 }

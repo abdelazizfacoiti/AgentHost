@@ -489,6 +489,98 @@ export interface DesktopClickResult {
   reason: string;
 }
 
+export interface DesktopCapabilitySupport {
+  supported: boolean;
+  backend: string;
+  reason: string;
+}
+
+export type DesktopSessionType = "x11" | "wayland" | "unknown";
+
+export interface DesktopCapabilitiesResult {
+  platform: string;
+  sessionType: DesktopSessionType;
+  displayAvailable: boolean;
+  backend: string;
+  activeWindow: DesktopCapabilitySupport;
+  screenshot: DesktopCapabilitySupport;
+  windowList: DesktopCapabilitySupport;
+  windowFocus: DesktopCapabilitySupport;
+  accessibility: DesktopCapabilitySupport;
+  guiInput: DesktopCapabilitySupport;
+}
+
+export interface DesktopWindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DesktopWindowSummary {
+  windowId: string;
+  appName?: string;
+  title?: string;
+  pid?: number;
+  appSensitivity?: AppSensitivity;
+  bounds?: DesktopWindowBounds;
+}
+
+export interface WindowListResult {
+  supported: boolean;
+  backend: string;
+  windows: DesktopWindowSummary[];
+  truncated: boolean;
+  reason: string;
+}
+
+export interface WindowFocusResult {
+  supported: boolean;
+  backend: string;
+  focused: boolean;
+  window: DesktopWindowContext;
+  reason: string;
+}
+
+export interface AccessibilityTreeNode {
+  id: string;
+  role: string;
+  name?: string;
+  text?: string;
+  description?: string;
+  bounds?: DesktopWindowBounds;
+  sensitive?: boolean;
+  hidden?: boolean;
+  children?: AccessibilityTreeNode[];
+}
+
+export interface AccessibilityElementCandidate {
+  id: string;
+  role: string;
+  name?: string;
+  text?: string;
+  bounds?: DesktopWindowBounds;
+  confidence: number;
+  reason: string;
+}
+
+export interface AccessibilityTreeResult {
+  supported: boolean;
+  backend: string;
+  root?: AccessibilityTreeNode;
+  nodeCount: number;
+  truncated: boolean;
+  redacted: boolean;
+  reason: string;
+}
+
+export interface AccessibilityFindElementResult {
+  supported: boolean;
+  backend: string;
+  candidates: AccessibilityElementCandidate[];
+  reason: string;
+}
+
 export interface SystemInfo {
   platform: string;
   arch: string;

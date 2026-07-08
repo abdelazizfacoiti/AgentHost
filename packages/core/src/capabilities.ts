@@ -115,6 +115,12 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Returns best-effort metadata about the current active window."
     },
     {
+      name: "desktop.get_capabilities",
+      riskLevel: "low" as const,
+      strategy: "gui_control" as const,
+      description: "Reports detected desktop session and safe backend capabilities."
+    },
+    {
       name: "desktop.screenshot",
       riskLevel: "medium" as const,
       strategy: "gui_control" as const,
@@ -137,6 +143,30 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       riskLevel: "medium" as const,
       strategy: "gui_control" as const,
       description: "Clicks screen coordinates when policy and active-window context allow it."
+    },
+    {
+      name: "window.list",
+      riskLevel: "low" as const,
+      strategy: "gui_control" as const,
+      description: "Lists visible windows when a safe desktop backend is available."
+    },
+    {
+      name: "window.focus",
+      riskLevel: "medium" as const,
+      strategy: "gui_control" as const,
+      description: "Focuses a window when a safe backend and policy allow it."
+    },
+    {
+      name: "accessibility.get_tree",
+      riskLevel: "low" as const,
+      strategy: "accessibility" as const,
+      description: "Returns a capped, redacted accessibility tree when a safe backend is available."
+    },
+    {
+      name: "accessibility.find_element",
+      riskLevel: "low" as const,
+      strategy: "accessibility" as const,
+      description: "Finds candidate UI elements from accessibility data without acting on them."
     },
     {
       name: "guide.create_steps",

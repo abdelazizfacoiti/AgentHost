@@ -9,6 +9,7 @@ import {
   type AppStrategyResult,
   type AppStrategyTaskType,
   type AutomationStrategy,
+  type DesktopCapabilitiesResult,
   type AppSensitivity,
   type GuideCreateStepsInput,
   type GuideWorkflowKind,
@@ -22,6 +23,7 @@ import {
   type DesktopEntry,
   type LinuxLookupContext
 } from "./dependencies.js";
+import { getLinuxDesktopCapabilities } from "./desktop.js";
 
 function slugify(value: string): string {
   const slug = value
@@ -33,14 +35,26 @@ function slugify(value: string): string {
   return slug.length > 0 ? slug : "unknown";
 }
 
-function strategiesFor(found: boolean, policy: PolicyProfile): AutomationStrategy[] {
+function strategiesFor(
+  found: boolean,
+  policy: PolicyProfile,
+  capabilities?: DesktopCapabilitiesResult
+): AutomationStrategy[] {
   if (!found) {
     return ["guide_only"];
   }
 
   const strategies: AutomationStrategy[] = ["cli_or_script"];
 
-  if (policy.allowGenericClick || policy.allowGenericType) {
+  if (capabilities?.accessibility.supported === true) {
+    strategies.push("accessibility");
+  }
+
+  if (
+    (policy.allowGenericClick || policy.allowGenericType) &&
+    capabilities?.guiInput.supported === true &&
+    capabilities.windowFocus.supported === true
+  ) {
     strategies.push("gui_control");
   }
 
@@ -94,10 +108,11 @@ function detectionFromDesktopEntry(
   appName: string,
   entry: DesktopEntry,
   policy: PolicyProfile,
-  executablePath?: string
+  executablePath?: string,
+  capabilities?: DesktopCapabilitiesResult
 ): AppDetectionResult {
   const appId = slugify(entry.appId);
-  const availableStrategies = strategiesFor(true, policy);
+  const availableStrategies = strategiesFor(true, policy, capabilities);
   const appSensitivity = classifyAppSensitivity({ appId: entry.appId, appName: entry.displayName });
   const reason = `Found generic Linux desktop entry for ${appName}.`;
   const result: AppDetectionResult = {
@@ -150,11 +165,12 @@ export async function detectLinuxApp(
   policy: PolicyProfile,
   context: LinuxLookupContext = {}
 ): Promise<AppDetectionResult> {
+  const capabilities = await getLinuxDesktopCapabilities(context);
   const commandPath = await findCommandPath(input.appName, context);
 
   if (commandPath !== undefined) {
     const appId = slugify(input.appName);
-    const availableStrategies = strategiesFor(true, policy);
+    const availableStrategies = strategiesFor(true, policy, capabilities);
     const appSensitivity = classifyAppSensitivity({ appId: input.appName, appName: input.appName });
     const reason = "Found command on PATH.";
 
@@ -186,7 +202,8 @@ export async function detectLinuxApp(
       input.appName,
       desktopEntry,
       policy,
-      await executableForDesktopEntry(desktopEntry, context)
+      await executableForDesktopEntry(desktopEntry, context),
+      capabilities
     );
   }
 
@@ -307,10 +324,13 @@ export async function getLinuxAppStrategy(
   context: LinuxLookupContext = {}
 ): Promise<AppStrategyResult> {
   const detection = await detectLinuxApp({ appName: input.appName }, policy, context);
+  const capabilities = await getLinuxDesktopCapabilities(context);
   const strategyResult: AppStrategyResult = {
     ...detection,
     taskType: input.taskType ?? "unknown"
   };
+
+  strategyResult.recommendedStrategy = routeLinuxAppStrategy(strategyResult, capabilities);
 
   strategyResult.guideSuggestion = guideSuggestionForDetection({
     appName: detection.displayName ?? input.appName,
@@ -323,6 +343,37 @@ export async function getLinuxAppStrategy(
   });
 
   return strategyResult;
+}
+
+export function routeLinuxAppStrategy(
+  input: Pick<AppStrategyResult, "found" | "availableStrategies" | "appSensitivity" | "taskType">,
+  capabilities?: DesktopCapabilitiesResult
+): AutomationStrategy {
+  if (!input.found) {
+    return "guide_only";
+  }
+
+  if (input.appSensitivity !== "normal" && input.appSensitivity !== "unknown") {
+    return "guide_only";
+  }
+
+  if (input.availableStrategies.includes("cli_or_script")) {
+    return "cli_or_script";
+  }
+
+  if (input.availableStrategies.includes("accessibility") && capabilities?.accessibility.supported === true) {
+    return "accessibility";
+  }
+
+  if (
+    input.availableStrategies.includes("gui_control") &&
+    capabilities?.guiInput.supported === true &&
+    capabilities.windowFocus.supported === true
+  ) {
+    return "gui_control";
+  }
+
+  return "guide_only";
 }
 
 export async function openLinuxApp(
