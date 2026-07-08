@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -98,6 +98,7 @@ describe("Blender adapter", () => {
   it("runs the coffee cup demo with mocked Blender and validates outputs", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-blender-success-"));
     const config = createConfig(dir);
+    let generatedScript = "";
     const result = await runBlenderPython(
       { demo: COFFEE_CUP_DEMO_ID, timeoutMs: 5_000 },
       config,
@@ -106,6 +107,7 @@ describe("Blender adapter", () => {
         findBlenderPath: async () => "/usr/bin/blender",
         now: () => 1234,
         runCommand: async (input) => {
+          generatedScript = await readFile(String(input.args?.[1] === "--python" ? input.args[2] : ""), "utf8");
           await writeFile(path.join(input.cwd ?? dir, "coffee-cup.blend"), "blend", "utf8");
           return {
             exitCode: 0,
@@ -121,6 +123,9 @@ describe("Blender adapter", () => {
     );
 
     expect(result.ok).toBe(true);
+    expect(generatedScript).toContain("import os");
+    expect(generatedScript).toContain("os.makedirs(AGENTHOST_OUTPUT_DIR, exist_ok=True)");
+    expect(generatedScript).toContain("bpy.ops.wm.save_as_mainfile(filepath=AGENTHOST_PRIMARY_OUTPUT)");
     expect(result.data).toMatchObject({
       adapterId: "blender",
       capabilityId: "blender.run_python",
