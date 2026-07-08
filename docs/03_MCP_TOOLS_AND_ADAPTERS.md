@@ -69,6 +69,16 @@ interface ToolResult<T = unknown> {
   tool: string;
   riskLevel: RiskLevel;
   strategy?: AutomationStrategy;
+  preview?: boolean;
+  confirmation?: {
+    status: "previewGenerated" | "tokenUsed" | "tokenAccepted" | "tokenRejected";
+    used: boolean;
+    accepted: boolean;
+    executed: boolean;
+    reason: string;
+    tokenId?: string;
+    expiresAt?: string;
+  };
   approval: {
     required: boolean;
     status: ApprovalStatus;
@@ -81,20 +91,49 @@ interface ToolResult<T = unknown> {
     message: string;
     details?: unknown;
   };
-  preview?: boolean;
-  confirmation?: {
-    required?: boolean;
-    available?: boolean;
-    used?: boolean;
-    accepted?: boolean;
-    reason?: string;
-    tokenId?: string;
-    expiresAt?: string;
-  };
 }
 ```
 
 ## 5. Current tools by category
+
+### Base tools currently returned by `system.list_capabilities`
+
+These are the tools exposed by the default AgentHost runtime today:
+
+```text
+accessibility.find_element
+accessibility.focus_element
+accessibility.get_tree
+accessibility.inspect_element
+accessibility.invoke_action
+accessibility.set_value
+adapter.detect_for_app
+adapter.get_capabilities
+adapter.list
+app.detect
+app.get_strategy
+app.list_installed
+app.open
+desktop.click
+desktop.get_active_window
+desktop.get_capabilities
+desktop.hotkey
+desktop.screenshot
+desktop.type_text
+file.ensure_dir
+file.exists
+file.list
+file.read
+file.write
+guide.create_steps
+guide.explain_strategy
+shell.run_safe
+system.check_dependency
+system.get_info
+system.list_capabilities
+window.focus
+window.list
+```
 
 ### System tools
 
@@ -157,7 +196,9 @@ adapter.get_capabilities
 adapter.detect_for_app
 ```
 
-### Blender adapter tool
+### Optional adapter-exposed tools
+
+These are implemented, but they are not part of the default base capability list unless the adapter/tool is registered in the active runtime:
 
 ```text
 blender.run_python
@@ -245,7 +286,7 @@ Preview data should include:
   "riskLevel": "medium",
   "appSensitivity": "normal",
   "dataSensitivity": "none",
-  "targetSummary": {},
+  "targetSummary": "Notes \"Draft\"",
   "ambiguous": false,
   "reasons": [],
   "matchedRules": [],
@@ -253,7 +294,10 @@ Preview data should include:
   "confirmationRequired": true,
   "confirmationToken": "<redacted in logs>",
   "tokenId": "token_...",
-  "expiresAt": "..."
+  "expiresAt": "...",
+  "inputFingerprint": "input_...",
+  "targetFingerprint": "target_...",
+  "confirmationExplanation": "Use this token to execute the exact previewed action before it expires."
 }
 ```
 

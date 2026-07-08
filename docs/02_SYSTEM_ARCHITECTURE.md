@@ -25,6 +25,7 @@ AgentHost is built around a simple idea:
 │ - supports dry-run previews                                  │
 │ - verifies confirmation tokens                               │
 │ - returns structured ToolResult objects                      │
+│ - will host future Tool Forge workflow gates                 │
 └─────────────────────────────┬────────────────────────────────┘
                               │
                               ▼
@@ -54,6 +55,7 @@ AgentHost is built around a simple idea:
 │ - desktop                     │   │ - user-generated later     │
 │ - windows                     │   │                           │
 │ - accessibility               │   │                           │
+│ - Tool Forge later            │   │                           │
 └───────────────┬──────────────┘   └────────────┬──────────────┘
                 │                               │
                 ▼                               ▼
@@ -116,6 +118,7 @@ Responsibilities:
 - tool result construction
 - JSONL logging
 - adapter runtime wiring
+- future Tool Forge request/validation flow
 
 Important Phase 11 component:
 
@@ -198,6 +201,19 @@ Responsibilities later:
 - emergency stop
 - capability viewer
 - installed tools/adapters/skills
+
+### Future `packages/tool-forge`
+
+Tool-generation safety layer for later phases.
+
+Responsibilities later:
+
+- scaffold new tool packages
+- validate `agenthost.tool.json` manifests
+- enforce declared permissions
+- run generated tool tests
+- gate registration on user approval
+- keep generated tools inside the same safety, preview, and confirmation model
 
 ## 3. Tool execution flow
 
