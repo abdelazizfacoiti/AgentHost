@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { ConfirmationManager } from "../confirmation.js";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
+import { GrantStore } from "../grants.js";
 import { runTool } from "../tool-runner.js";
 import { createWindowTools } from "../tools/window.js";
 
@@ -234,6 +235,7 @@ function createContext(
     registry,
     adapters: createAdapterRegistry({ platform: "linux" }),
     confirmations: new ConfirmationManager(),
+    grants: new GrantStore({ persistentGrants: policy.grants }),
     logger,
     linux,
     calls
@@ -351,7 +353,7 @@ describe("window MCP tools", () => {
     await expect(callTool(context, "window.focus", { appName: "Notes" })).resolves.toMatchObject({
       ok: false,
       error: {
-        code: "confirmation_required"
+        code: "dry_run_required"
       }
     });
 

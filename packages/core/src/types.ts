@@ -55,7 +55,21 @@ export type ActionType = (typeof ACTION_TYPES)[number];
 export const DATA_SENSITIVITIES = ["none", "low", "sensitive", "secret"] as const;
 export type DataSensitivity = (typeof DATA_SENSITIVITIES)[number];
 
-export type PolicyProfileName = "strict" | "dev";
+export const PERMISSION_DEFAULTS = ["allow", "approval_required", "deny", "guide_only"] as const;
+export type PermissionDefault = (typeof PERMISSION_DEFAULTS)[number];
+
+export const GRANT_EFFECTS = ["allow", "deny", "guide_only"] as const;
+export type GrantEffect = (typeof GRANT_EFFECTS)[number];
+
+export const GRANT_SCOPES = ["session", "persistent"] as const;
+export type GrantScope = (typeof GRANT_SCOPES)[number];
+
+export type PolicyProfileName =
+  | "strict"
+  | "dev"
+  | "gui-dev"
+  | "private-data"
+  | "autopilot-future-disabled-by-default";
 
 export interface ApprovalInfo {
   required: boolean;
@@ -76,6 +90,7 @@ export interface ToolResult<T = unknown> {
   strategy?: AutomationStrategy;
   preview?: boolean;
   confirmation?: ToolConfirmationInfo;
+  grantDecision?: GrantDecision;
   approval: ApprovalInfo;
   data: T | null;
   observations: string[];
@@ -104,6 +119,7 @@ export interface ToolCapability {
   description: string;
   strategy?: AutomationStrategy;
   inputSchema?: unknown;
+  generated?: boolean;
 }
 
 export interface AppCapability {
@@ -129,8 +145,65 @@ export interface CapabilityRegistrySnapshot {
   listAppCapabilities(): AppCapability[];
 }
 
+export interface PermissionDefaults {
+  shell: PermissionDefault;
+  fileRead: PermissionDefault;
+  fileWrite: PermissionDefault;
+  appOpen: PermissionDefault;
+  screenshots: PermissionDefault;
+  windowFocus: PermissionDefault;
+  accessibilityRead: PermissionDefault;
+  accessibilityActions: PermissionDefault;
+  guiClick: PermissionDefault;
+  guiType: PermissionDefault;
+  guiHotkey: PermissionDefault;
+  browserAutomation: PermissionDefault;
+  communicationActions: PermissionDefault;
+  privateDataReads: PermissionDefault;
+  externalSendsUploads: PermissionDefault;
+  destructiveActions: PermissionDefault;
+  generatedTools: PermissionDefault;
+}
+
+export interface CapabilityGrantRequirements {
+  requiresDryRun?: boolean;
+  requiresConfirmationToken?: boolean;
+  requiresApproval?: boolean;
+  requiresExactTarget?: boolean;
+  maxRiskLevel?: RiskLevel;
+  allowedRoots?: string[];
+}
+
+export interface CapabilityGrantMatch {
+  tools?: string[];
+  strategies?: AutomationStrategy[];
+  actionTypes?: ActionType[];
+  appNames?: string[];
+  appIds?: string[];
+  appSensitivities?: AppSensitivity[];
+  dataSensitivities?: DataSensitivity[];
+  fileRoots?: string[];
+  commandAllowlist?: string[];
+  networkDomains?: string[];
+  oauthScopes?: string[];
+  generatedToolIds?: string[];
+}
+
+export interface CapabilityGrant {
+  id: string;
+  scope: GrantScope;
+  effect: GrantEffect;
+  description?: string;
+  createdAt?: string;
+  expiresAt?: string;
+  match: CapabilityGrantMatch;
+  requirements?: CapabilityGrantRequirements;
+}
+
 export interface PolicyProfile {
   name: PolicyProfileName;
+  description: string;
+  enabled: boolean;
   allowScreenshots: boolean;
   allowAppLaunch: boolean;
   allowShell: boolean;
@@ -141,6 +214,11 @@ export interface PolicyProfile {
   allowUploads: boolean;
   requireApprovalForMediumRisk: boolean;
   blockHighRiskByDefault: boolean;
+  requireDryRunForStateChanging: boolean;
+  requireConfirmationForStateChanging: boolean;
+  requireExactTargetForStateChanging: boolean;
+  defaults: PermissionDefaults;
+  grants: CapabilityGrant[];
 }
 
 export interface AgentHostConfig {
@@ -313,6 +391,8 @@ export interface SafetyInput {
   tool: string;
   actionType: ActionType;
   strategy?: AutomationStrategy;
+  generatedToolId?: string;
+  generatedTool?: boolean;
   appId?: string;
   appName?: string;
   url?: string;
@@ -324,14 +404,27 @@ export interface SafetyInput {
   communicative?: boolean;
 }
 
+export interface GrantDecision {
+  matchedGrantIds: string[];
+  allowedByGrantIds: string[];
+  deniedByGrantIds: string[];
+  guideOnlyByGrantIds: string[];
+  requiresDryRun: boolean;
+  requiresConfirmationToken: boolean;
+  requiresApproval: boolean;
+  requiresExactTarget: boolean;
+}
+
 export interface SafetyDecision {
   riskLevel: RiskLevel;
   appSensitivity: AppSensitivity;
   approval: ApprovalInfo;
   allowed: boolean;
   blocked: boolean;
+  guideOnly: boolean;
   reasons: string[];
   matchedRules: string[];
+  grantDecision: GrantDecision;
 }
 
 export type PathAccessMode = "read" | "write" | "delete";
@@ -353,6 +446,7 @@ export interface SafetyEvaluationContext {
   homeDir?: string;
   cwd?: string;
   agentHostDir?: string;
+  grants?: CapabilityGrant[];
 }
 
 export type DependencyKind = "command" | "desktop_app" | "any";
@@ -755,9 +849,51 @@ export interface CapabilityList {
   appCapabilities: AppCapability[];
 }
 
+export interface PolicyProfileSummary {
+  name: PolicyProfileName;
+  description: string;
+  enabled: boolean;
+  defaults: PermissionDefaults;
+  requireDryRunForStateChanging: boolean;
+  requireConfirmationForStateChanging: boolean;
+  requireExactTargetForStateChanging: boolean;
+}
+
+export interface GrantSummary {
+  id: string;
+  scope: GrantScope;
+  effect: GrantEffect;
+  description?: string;
+  createdAt?: string;
+  expiresAt?: string;
+  active: boolean;
+  match: CapabilityGrantMatch;
+  requirements?: CapabilityGrantRequirements;
+}
+
+export interface PolicyGetProfileResult {
+  activeProfile: PolicyProfileSummary;
+}
+
+export interface PolicyListProfilesResult {
+  profiles: PolicyProfileSummary[];
+}
+
+export interface PolicyListGrantsResult {
+  profile: PolicyProfileName;
+  grants: GrantSummary[];
+}
+
+export interface PolicyExplainDecisionResult {
+  profile: PolicyProfileName;
+  input: SafetyInput;
+  decision: SafetyDecision;
+}
+
 export interface AuditLogEntry {
   timestamp: string;
   sessionId: string;
+  profile: PolicyProfileName;
   tool: string;
   riskLevel: RiskLevel;
   strategy?: AutomationStrategy;
@@ -765,6 +901,14 @@ export interface AuditLogEntry {
   confirmationStatus?: ConfirmationStatus;
   confirmationTokenId?: string;
   confirmationReason?: string;
+  matchedGrantIds?: string[];
+  deniedGrantIds?: string[];
+  guideOnlyGrantIds?: string[];
+  grantDecision?: GrantDecision;
+  dryRunRequired?: boolean;
+  confirmationRequiredByGrant?: boolean;
+  approvalRequiredByGrant?: boolean;
+  grantDenied?: boolean;
   inputSummary: string;
   approvalStatus: ApprovalStatus;
   ok: boolean;

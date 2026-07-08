@@ -12,6 +12,7 @@ import type {
 } from "@agenthost/core";
 import { evaluateSafety, summarizeToolResult, toolFailure } from "@agenthost/core";
 import type { z } from "zod";
+import type { GrantStore } from "./grants.js";
 
 export interface ToolExecutionContext {
   sessionId: string;
@@ -19,6 +20,7 @@ export interface ToolExecutionContext {
   policy: PolicyProfile;
   registry: CapabilityRegistrySnapshot;
   logger: AuditLogger;
+  grants: GrantStore;
 }
 
 export interface ToolExecutionRuntime {
@@ -63,6 +65,7 @@ function createAuditLogEntry(
   const entry: AuditLogEntry = {
     timestamp: new Date().toISOString(),
     sessionId: context.sessionId,
+    profile: context.policy.name,
     tool: result.tool,
     riskLevel: result.riskLevel,
     ...(result.preview === true ? { preview: true } : {}),
@@ -72,6 +75,19 @@ function createAuditLogEntry(
           confirmationStatus: result.confirmation.status,
           ...(result.confirmation.tokenId === undefined ? {} : { confirmationTokenId: result.confirmation.tokenId }),
           confirmationReason: result.confirmation.reason
+        }),
+    ...(result.grantDecision === undefined
+      ? {}
+      : {
+          matchedGrantIds: result.grantDecision.matchedGrantIds,
+          deniedGrantIds: result.grantDecision.deniedByGrantIds,
+          guideOnlyGrantIds: result.grantDecision.guideOnlyByGrantIds,
+          grantDecision: result.grantDecision,
+          dryRunRequired: result.grantDecision.requiresDryRun,
+          confirmationRequiredByGrant: result.grantDecision.requiresConfirmationToken,
+          approvalRequiredByGrant: result.grantDecision.requiresApproval,
+          grantDenied:
+            result.grantDecision.deniedByGrantIds.length > 0 || result.grantDecision.guideOnlyByGrantIds.length > 0
         }),
     inputSummary,
     approvalStatus: result.approval.status,
@@ -89,6 +105,14 @@ function createAuditLogEntry(
   }
 
   return entry;
+}
+
+function hasConfirmationToken(rawInput: unknown): boolean {
+  if (typeof rawInput !== "object" || rawInput === null) {
+    return false;
+  }
+
+  return typeof (rawInput as { confirmationToken?: unknown }).confirmationToken === "string";
 }
 
 export async function runTool<TInput, TData, TContext extends ToolExecutionContext>(
@@ -123,13 +147,15 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
           actionType: definition.safety.actionType
         };
         const safetyDecision = evaluateSafety(safetyInput, context.policy, {
-          agentHostDir: context.config.agentHostDir
+          agentHostDir: context.config.agentHostDir,
+          grants: context.grants.listActiveGrants()
         });
 
         if (!safetyDecision.allowed && !isDryRun) {
           result = toolFailure<TData>({
             tool: definition.name,
             riskLevel: safetyDecision.riskLevel,
+            grantDecision: safetyDecision.grantDecision,
             approval: safetyDecision.approval,
             error: {
               code: safetyDecision.blocked ? "safety_blocked" : "approval_required",
@@ -145,6 +171,13 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
             isDryRun,
             safetyDecision
           });
+
+          if (result.grantDecision === undefined) {
+            result = {
+              ...result,
+              grantDecision: safetyDecision.grantDecision
+            };
+          }
         }
       } else {
         result = await definition.handler(parsed.data, context, {

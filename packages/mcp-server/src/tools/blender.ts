@@ -3,6 +3,7 @@ import { evaluateSafety, toolFailure, type ToolResult } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
 import type { AgentHostToolDefinition } from "../tool-runner.js";
+import { createSafetyEvaluationContext } from "../grants.js";
 
 const blenderInputSchema = z
   .object({
@@ -151,7 +152,7 @@ export function createBlenderTools(): AgentHostToolDefinition<BlenderToolInput, 
             filePath: outputDir
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
 
         if (!postResolutionSafety.allowed) {

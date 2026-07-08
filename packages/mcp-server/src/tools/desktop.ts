@@ -23,11 +23,13 @@ import type {
   AnyAgentHostToolDefinition,
   ToolExecutionRuntime
 } from "../tool-runner.js";
+import { createSafetyEvaluationContext } from "../grants.js";
 import {
   acceptedConfirmation,
   buildPreviewResult,
   confirmationRequired,
   guideAlternative,
+  missingConfirmationReason,
   rejectedConfirmation,
   summarizeWindow,
   toWindowPreviewTarget
@@ -257,7 +259,7 @@ function initialGuiSafety(
       ...(dataSensitivity === undefined ? {} : { dataSensitivity })
     },
     context.policy,
-    { agentHostDir: context.config.agentHostDir }
+    createSafetyEvaluationContext(context)
   );
 }
 
@@ -340,7 +342,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           filePath: outputPath
         },
         context.policy,
-        { agentHostDir: context.config.agentHostDir }
+        createSafetyEvaluationContext(context)
       );
 
       if (!postResolutionSafety.allowed) {
@@ -385,7 +387,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     },
     inputSummary: "Send hotkey",
     safety: {
-      actionType: "gui_click",
+      actionType: "inspect",
       getInput: (input) => {
         const appName = activeWindowAppName(toActiveWindowContext(input.activeWindow));
         return appName === undefined ? {} : { appName };
@@ -429,7 +431,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
             ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
 
         return buildPreviewResult({
@@ -462,21 +464,6 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         keys: input.keys,
         activeWindow
       };
-      if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
-        return toolFailure({
-          tool: "desktop.hotkey",
-          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-          strategy: "gui_control",
-          confirmation: confirmationRequired(reason),
-          error: {
-            code: "confirmation_required",
-            message: reason
-          },
-          observations: [reason]
-        });
-      }
-
       const validation = await validateActiveWindowForPreview(context, activeWindow);
 
         if (!validation.supported || !("matched" in validation) || !validation.matched) {
@@ -501,8 +488,27 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
             ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
+
+      if (!postResolutionSafety.allowed) {
+        return safetyFailure("desktop.hotkey", postResolutionSafety);
+      }
+
+      if (input.confirmationToken === undefined) {
+        const { code, reason } = missingConfirmationReason(postResolutionSafety);
+        return toolFailure({
+          tool: "desktop.hotkey",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "gui_control",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code,
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
 
       const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
         sessionId: context.sessionId,
@@ -559,7 +565,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     },
     inputSummary: "Type text",
     safety: {
-      actionType: "gui_type",
+      actionType: "inspect",
       getInput: (input) => {
         const activeWindow = toActiveWindowContext(input.activeWindow);
         const appName = activeWindowAppName(activeWindow);
@@ -626,7 +632,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
             ...(input.dataSensitivity === undefined ? {} : { dataSensitivity: input.dataSensitivity })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
 
         return buildPreviewResult({
@@ -657,21 +663,6 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         });
       }
 
-      if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
-        return toolFailure({
-          tool: "desktop.type_text",
-          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-          strategy: "gui_control",
-          confirmation: confirmationRequired(reason),
-          error: {
-            code: "confirmation_required",
-            message: reason
-          },
-          observations: [reason]
-        });
-      }
-
       const validation = await validateActiveWindowForPreview(context, activeWindow);
 
         if (!validation.supported || !("matched" in validation) || !validation.matched) {
@@ -697,8 +688,27 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
             ...(input.dataSensitivity === undefined ? {} : { dataSensitivity: input.dataSensitivity })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
+
+      if (!postResolutionSafety.allowed) {
+        return safetyFailure("desktop.type_text", postResolutionSafety);
+      }
+
+      if (input.confirmationToken === undefined) {
+        const { code, reason } = missingConfirmationReason(postResolutionSafety);
+        return toolFailure({
+          tool: "desktop.type_text",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "gui_control",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code,
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
       const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
         sessionId: context.sessionId,
         tool: "desktop.type_text",
@@ -755,7 +765,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     },
     inputSummary: "Click desktop coordinates",
     safety: {
-      actionType: "gui_click",
+      actionType: "inspect",
       getInput: (input) => {
         const appName = activeWindowAppName(toActiveWindowContext(input.activeWindow));
         return appName === undefined ? {} : { appName };
@@ -799,7 +809,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
             ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
 
         return buildPreviewResult({
@@ -846,21 +856,6 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         clickInput.button = input.button;
       }
 
-      if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
-        return toolFailure({
-          tool: "desktop.click",
-          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-          strategy: "gui_control",
-          confirmation: confirmationRequired(reason),
-          error: {
-            code: "confirmation_required",
-            message: reason
-          },
-          observations: [reason]
-        });
-      }
-
       const validation = await validateActiveWindowForPreview(context, activeWindow);
 
         if (!validation.supported || !("matched" in validation) || !validation.matched) {
@@ -885,8 +880,27 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
             ...(validation.activeWindow.appName === undefined ? {} : { appName: validation.activeWindow.appName })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
+
+      if (!postResolutionSafety.allowed) {
+        return safetyFailure("desktop.click", postResolutionSafety);
+      }
+
+      if (input.confirmationToken === undefined) {
+        const { code, reason } = missingConfirmationReason(postResolutionSafety);
+        return toolFailure({
+          tool: "desktop.click",
+          riskLevel: postResolutionSafety.riskLevel,
+          strategy: "gui_control",
+          confirmation: confirmationRequired(reason),
+          error: {
+            code,
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
       const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
         sessionId: context.sessionId,
         tool: "desktop.click",

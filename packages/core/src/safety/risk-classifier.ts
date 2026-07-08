@@ -7,6 +7,7 @@ import type {
   SafetyEvaluationContext,
   SafetyInput
 } from "../types.js";
+import { evaluateGrantDecision, isStateChangingAction } from "../grants.js";
 import { evaluateApprovalRequirement, isApprovalSatisfied } from "./approval.js";
 import { classifyAppSensitivity } from "./app-sensitivity.js";
 import { classifyPath } from "./path-policy.js";
@@ -144,9 +145,15 @@ export function classifyRisk(
     reasons.push("Secret data must not be accessed, typed, uploaded, or sent by default.");
     matchedRules.push("data.secret.blocked");
   } else if (input.dataSensitivity === "sensitive") {
-    riskLevel = maxRiskLevel(riskLevel, "high");
-    reasons.push("Sensitive data makes the action high-risk.");
-    matchedRules.push("data.sensitive.high_risk");
+    const readOnlySensitive =
+      input.actionType === "observe" || input.actionType === "inspect" || input.actionType === "file_read";
+    riskLevel = maxRiskLevel(riskLevel, readOnlySensitive ? "medium" : "high");
+    reasons.push(
+      readOnlySensitive
+        ? "Sensitive data inspection requires elevated controls."
+        : "Sensitive data makes the action high-risk."
+    );
+    matchedRules.push(readOnlySensitive ? "data.sensitive.read_requires_controls" : "data.sensitive.high_risk");
   }
 
   if (input.destructive) {
@@ -214,8 +221,51 @@ export function classifyRisk(
     matchedRules.push("action.unknown.conservative");
   }
 
-  const approval = evaluateApprovalRequirement(riskLevel, policy, reasons);
-  const blocked = riskLevel === "blocked" || approval.status === "denied";
+  if (!policy.enabled && isStateChangingAction(input.actionType)) {
+    riskLevel = "blocked";
+    reasons.push(`Profile ${policy.name} is disabled for state-changing execution.`);
+    matchedRules.push(`policy.profile.${policy.name}.disabled`);
+  }
+
+  const grantEvaluation = evaluateGrantDecision(input, policy, context.grants ?? policy.grants, appSensitivity, context);
+  reasons.push(...grantEvaluation.reasons);
+  matchedRules.push(...grantEvaluation.matchedRules);
+
+  if (
+    appSensitivity === "communication" &&
+    (input.actionType === "observe" || input.actionType === "inspect" || input.actionType === "file_read") &&
+    input.dataSensitivity !== undefined &&
+    input.dataSensitivity !== "none" &&
+    grantEvaluation.decision.allowedByGrantIds.length === 0
+  ) {
+    riskLevel = "blocked";
+    reasons.push("Communication app private-data reads require an explicit grant.");
+    matchedRules.push("app.communication.private_data_requires_grant");
+  }
+
+  let approval = evaluateApprovalRequirement(riskLevel, policy, reasons);
+
+  if (
+    grantEvaluation.decision.requiresApproval &&
+    approval.status !== "denied" &&
+    approval.status !== "required"
+  ) {
+    approval = {
+      required: true,
+      status: "required",
+      reason: "A matching capability grant requires approval before execution."
+    };
+  }
+
+  const blocked = riskLevel === "blocked" || approval.status === "denied" || grantEvaluation.blocked || grantEvaluation.guideOnly;
+
+  if (blocked && approval.status !== "denied") {
+    approval = {
+      required: false,
+      status: "denied",
+      reason: reasons.join(" ")
+    };
+  }
 
   return {
     riskLevel,
@@ -223,8 +273,10 @@ export function classifyRisk(
     approval,
     allowed: !blocked && isApprovalSatisfied(approval),
     blocked,
+    guideOnly: grantEvaluation.guideOnly,
     reasons,
-    matchedRules: [...new Set(matchedRules)]
+    matchedRules: [...new Set(matchedRules)],
+    grantDecision: grantEvaluation.decision
   };
 }
 

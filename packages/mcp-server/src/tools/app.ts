@@ -11,11 +11,13 @@ import { applyAdapterDetectionToAppResult, evaluateSafety, toolFailure, toolSucc
 import { z } from "zod";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
+import { createSafetyEvaluationContext } from "../grants.js";
 import {
   acceptedConfirmation,
   buildPreviewResult,
   confirmationRequired,
   guideAlternative,
+  missingConfirmationReason,
   rejectedConfirmation,
   toAppPreviewTarget
 } from "./preview.js";
@@ -186,7 +188,7 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
               appName: input.appName
             },
             context.policy,
-            { agentHostDir: context.config.agentHostDir }
+            createSafetyEvaluationContext(context)
           );
         const linuxResult = await context.linux.detectApp({ appName: input.appName });
         const data = applyAdapterDetectionToAppResult(
@@ -230,13 +232,23 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
         context.adapters.detectForApp({ appName: input.appName, appId: previewData.appId })
       );
       if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        const { code, reason } = missingConfirmationReason(runtime?.safetyDecision ?? {
+          ...evaluateSafety(
+            {
+              tool: "app.open",
+              actionType: "app_launch",
+              appName: input.appName
+            },
+            context.policy,
+            createSafetyEvaluationContext(context)
+          )
+        });
         return toolFailure({
           tool: "app.open",
           riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
           confirmation: confirmationRequired(reason),
           error: {
-            code: "confirmation_required",
+            code,
             message: reason
           },
           observations: [reason]

@@ -11,10 +11,12 @@ import { evaluateSafety, normalizePathForPolicy, toolFailure, toolSuccess } from
 import { z } from "zod";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
+import { createSafetyEvaluationContext } from "../grants.js";
 import {
   acceptedConfirmation,
   buildPreviewResult,
   confirmationRequired,
+  missingConfirmationReason,
   rejectedConfirmation,
   toFilePreviewTarget
 } from "./preview.js";
@@ -158,7 +160,7 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
               filePath: input.path
             },
             context.policy,
-            { agentHostDir: context.config.agentHostDir }
+            createSafetyEvaluationContext(context)
           );
 
         return buildPreviewResult({
@@ -183,13 +185,24 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
 
       const normalizedPath = normalizePreviewPath(input.path, context);
       if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        const { code, reason } = missingConfirmationReason(
+          runtime?.safetyDecision ??
+            evaluateSafety(
+              {
+                tool: "file.write",
+                actionType: "file_write",
+                filePath: input.path
+              },
+              context.policy,
+              createSafetyEvaluationContext(context)
+            )
+        );
         return toolFailure({
           tool: "file.write",
           riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
           confirmation: confirmationRequired(reason),
           error: {
-            code: "confirmation_required",
+            code,
             message: reason
           },
           observations: [reason]
@@ -390,7 +403,7 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
               filePath: input.path
             },
             context.policy,
-            { agentHostDir: context.config.agentHostDir }
+            createSafetyEvaluationContext(context)
           );
 
         return buildPreviewResult({
@@ -415,13 +428,24 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
 
       const normalizedPath = normalizePreviewPath(input.path, context);
       if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        const { code, reason } = missingConfirmationReason(
+          runtime?.safetyDecision ??
+            evaluateSafety(
+              {
+                tool: "file.ensure_dir",
+                actionType: "file_write",
+                filePath: input.path
+              },
+              context.policy,
+              createSafetyEvaluationContext(context)
+            )
+        );
         return toolFailure({
           tool: "file.ensure_dir",
           riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
           confirmation: confirmationRequired(reason),
           error: {
-            code: "confirmation_required",
+            code,
             message: reason
           },
           observations: [reason]

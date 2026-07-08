@@ -14,6 +14,7 @@ describe("JsonlAuditLogger", () => {
       timestamp: "2026-07-07T21:00:00.000Z",
       sessionId: "session_test",
       tool: "system.get_info",
+      profile: "strict",
       riskLevel: "observe",
       preview: true,
       inputSummary: "Get system info",

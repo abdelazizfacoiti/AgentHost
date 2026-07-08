@@ -9,9 +9,11 @@ import {
 import { describe, expect, it } from "vitest";
 import { runTool, type ToolExecutionContext } from "../tool-runner.js";
 import { createSystemTools } from "../tools/system.js";
+import { createPolicyTools } from "../tools/policy.js";
 import { z } from "zod";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
 import { ConfirmationManager } from "../confirmation.js";
+import { GrantStore } from "../grants.js";
 
 class MemoryLogger implements AuditLogger {
   readonly entries: AuditLogEntry[] = [];
@@ -213,6 +215,7 @@ function createContext(logger: MemoryLogger): AgentHostMcpContext {
     adapters: createAdapterRegistry({ platform: "linux" }),
     logger,
     confirmations: new ConfirmationManager(),
+    grants: new GrantStore({ persistentGrants: policy.grants }),
     linux
   };
 }
@@ -243,8 +246,111 @@ describe("system tools", () => {
     expect(result.ok).toBe(true);
     const data = result.data as { tools: Array<{ name: string }> };
     expect(data.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(["system.get_info", "system.list_capabilities", "system.check_dependency"])
+      expect.arrayContaining([
+        "system.get_info",
+        "system.list_capabilities",
+        "system.check_dependency",
+        "policy.get_profile",
+        "policy.list_profiles",
+        "policy.list_grants",
+        "policy.explain_decision"
+      ])
     );
+  });
+
+  it("returns built-in policy profiles and safe grant summaries", async () => {
+    const logger = new MemoryLogger();
+    const context = createContext(logger);
+    context.grants = new GrantStore({
+      persistentGrants: [
+        {
+          id: "allow-output-write",
+          scope: "persistent",
+          effect: "allow",
+          match: {
+            tools: ["file.write"],
+            fileRoots: ["~/.agenthost/outputs"]
+          },
+          requirements: {
+            requiresDryRun: true,
+            requiresConfirmationToken: true
+          }
+        }
+      ]
+    });
+
+    const listProfiles = createPolicyTools().find((candidate) => candidate.name === "policy.list_profiles");
+    const listGrants = createPolicyTools().find((candidate) => candidate.name === "policy.list_grants");
+
+    expect(listProfiles).toBeDefined();
+    expect(listGrants).toBeDefined();
+
+    const profilesResult = await runTool(listProfiles!, {}, context);
+    const grantsResult = await runTool(listGrants!, {}, context);
+
+    expect(profilesResult.ok).toBe(true);
+    expect(profilesResult.data).toMatchObject({
+      profiles: expect.arrayContaining([
+        expect.objectContaining({ name: "strict" }),
+        expect.objectContaining({ name: "dev" }),
+        expect.objectContaining({ name: "gui-dev" }),
+        expect.objectContaining({ name: "private-data" }),
+        expect.objectContaining({ name: "autopilot-future-disabled-by-default" })
+      ])
+    });
+    expect(grantsResult.ok).toBe(true);
+    expect(grantsResult.data).toMatchObject({
+      profile: "strict",
+      grants: [
+        expect.objectContaining({
+          id: "allow-output-write",
+          effect: "allow",
+          active: true
+        })
+      ]
+    });
+  });
+
+  it("explains policy decisions with matched grant metadata and logs the profile", async () => {
+    const logger = new MemoryLogger();
+    const context = createContext(logger);
+    context.grants = new GrantStore({
+      persistentGrants: [
+        {
+          id: "allow-private-read",
+          scope: "persistent",
+          effect: "allow",
+          match: {
+            tools: ["file.read"],
+            dataSensitivities: ["sensitive"]
+          }
+        }
+      ]
+    });
+
+    const explain = createPolicyTools().find((candidate) => candidate.name === "policy.explain_decision");
+    expect(explain).toBeDefined();
+
+    const result = await runTool(
+      explain!,
+      {
+        tool: "file.read",
+        actionType: "file_read",
+        filePath: "/tmp/private.txt",
+        dataSensitivity: "sensitive"
+      },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.grantDecision).toMatchObject({
+      matchedGrantIds: ["allow-private-read"],
+      allowedByGrantIds: ["allow-private-read"]
+    });
+    expect(logger.entries.at(-1)).toMatchObject({
+      profile: "strict",
+      matchedGrantIds: ["allow-private-read"]
+    });
   });
 
   it("rejects unexpected input before execution", async () => {

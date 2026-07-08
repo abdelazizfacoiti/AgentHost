@@ -2,6 +2,7 @@ import type {
   ApprovalInfo,
   AutomationStrategy,
   RiskLevel,
+  GrantDecision,
   ToolConfirmationInfo,
   ToolError,
   ToolResult
@@ -21,6 +22,7 @@ export interface ToolSuccessInput<T> {
   strategy?: AutomationStrategy;
   preview?: boolean;
   confirmation?: ToolConfirmationInfo;
+  grantDecision?: GrantDecision;
   approval?: ApprovalInfo;
   observations?: string[];
 }
@@ -32,6 +34,7 @@ export function toolSuccess<T>(input: ToolSuccessInput<T>): ToolResult<T> {
     riskLevel: input.riskLevel,
     ...(input.preview === true ? { preview: true } : {}),
     ...(input.confirmation === undefined ? {} : { confirmation: input.confirmation }),
+    ...(input.grantDecision === undefined ? {} : { grantDecision: input.grantDecision }),
     approval: input.approval ?? noApprovalRequired(),
     data: input.data,
     observations: input.observations ?? [],
@@ -52,6 +55,7 @@ export interface ToolFailureInput {
   strategy?: AutomationStrategy;
   preview?: boolean;
   confirmation?: ToolConfirmationInfo;
+  grantDecision?: GrantDecision;
   approval?: ApprovalInfo;
   observations?: string[];
 }
@@ -63,6 +67,7 @@ export function toolFailure<T = never>(input: ToolFailureInput): ToolResult<T> {
     riskLevel: input.riskLevel,
     ...(input.preview === true ? { preview: true } : {}),
     ...(input.confirmation === undefined ? {} : { confirmation: input.confirmation }),
+    ...(input.grantDecision === undefined ? {} : { grantDecision: input.grantDecision }),
     approval: input.approval ?? noApprovalRequired(),
     data: null,
     observations: input.observations ?? [],

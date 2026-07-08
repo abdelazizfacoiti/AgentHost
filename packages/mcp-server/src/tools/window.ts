@@ -14,11 +14,13 @@ import type {
   AnyAgentHostToolDefinition,
   ToolExecutionRuntime
 } from "../tool-runner.js";
+import { createSafetyEvaluationContext } from "../grants.js";
 import {
   acceptedConfirmation,
   buildPreviewResult,
   confirmationRequired,
   guideAlternative,
+  missingConfirmationReason,
   rejectedConfirmation,
   summarizeWindow,
   toWindowPreviewTarget
@@ -116,7 +118,7 @@ function initialFocusSafety(runtime: ToolExecutionRuntime | undefined, context: 
       ...(input.appName === undefined ? {} : { appName: input.appName })
     },
     context.policy,
-    { agentHostDir: context.config.agentHostDir }
+    createSafetyEvaluationContext(context)
   );
 }
 
@@ -168,7 +170,7 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     },
     inputSummary: "Focus window",
     safety: {
-      actionType: "gui_click",
+      actionType: "inspect",
       getInput: (input) => (input.appName === undefined ? {} : { appName: input.appName })
     },
     preview: {
@@ -266,7 +268,7 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
             ...(target.appName === undefined ? {} : { appName: target.appName })
           },
           context.policy,
-          { agentHostDir: context.config.agentHostDir }
+          createSafetyEvaluationContext(context)
         );
 
         return buildPreviewResult({
@@ -372,7 +374,7 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
           ...(target.appName === undefined ? {} : { appName: target.appName })
         },
         context.policy,
-        { agentHostDir: context.config.agentHostDir }
+        createSafetyEvaluationContext(context)
       );
 
       if (!postResolutionSafety.allowed) {
@@ -380,14 +382,14 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
       }
 
       if (input.confirmationToken === undefined) {
-        const reason = "Execution requires a fresh dry-run preview confirmation token.";
+        const { code, reason } = missingConfirmationReason(postResolutionSafety);
         return toolFailure({
           tool: "window.focus",
           riskLevel: postResolutionSafety.riskLevel,
           strategy: "gui_control",
           confirmation: confirmationRequired(reason),
           error: {
-            code: "confirmation_required",
+            code,
             message: reason
           },
           observations: [reason]

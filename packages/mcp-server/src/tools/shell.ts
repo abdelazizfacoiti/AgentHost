@@ -10,10 +10,12 @@ import { formatCommandForSafety } from "@agenthost/os-linux";
 import { z } from "zod";
 import type { AgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
+import { createSafetyEvaluationContext } from "../grants.js";
 import {
   acceptedConfirmation,
   buildPreviewResult,
   confirmationRequired,
+  missingConfirmationReason,
   rejectedConfirmation,
   toShellPreviewTarget
 } from "./preview.js";
@@ -127,7 +129,7 @@ export function createShellTools(): AgentHostToolDefinition<
                 ...(input.cwd === undefined ? {} : { filePath: input.cwd })
               },
               context.policy,
-              { agentHostDir: context.config.agentHostDir }
+              createSafetyEvaluationContext(context)
             );
 
           return buildPreviewResult({
@@ -152,14 +154,26 @@ export function createShellTools(): AgentHostToolDefinition<
         }
 
         if (input.confirmationToken === undefined) {
-          const reason = "Execution requires a fresh dry-run preview confirmation token.";
+          const { code, reason } = missingConfirmationReason(
+            runtime?.safetyDecision ??
+              evaluateSafety(
+                {
+                  tool: "shell.run_safe",
+                  actionType: "shell_command",
+                  shellCommand: formattedCommand,
+                  ...(input.cwd === undefined ? {} : { filePath: input.cwd })
+                },
+                context.policy,
+                createSafetyEvaluationContext(context)
+              )
+          );
           return toolFailure({
             tool: "shell.run_safe",
             riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
             strategy: "cli_or_script",
             confirmation: confirmationRequired(reason),
             error: {
-              code: "confirmation_required",
+              code,
               message: reason
             },
             observations: [reason]

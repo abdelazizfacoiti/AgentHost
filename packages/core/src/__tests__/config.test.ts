@@ -33,4 +33,52 @@ describe("loadAgentHostConfig", () => {
     expect(config.profile).toBe("dev");
     expect(config.logFile).toBe(path.join(homeDir, "agenthost-test-log.jsonl"));
   });
+
+  it("loads persistent grants from config and applies richer profile names", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-grants-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        profile: "gui-dev",
+        grants: [
+          {
+            id: "allow-output-write",
+            scope: "persistent",
+            effect: "allow",
+            match: {
+              tools: ["file.write"],
+              fileRoots: ["~/.agenthost/outputs"]
+            },
+            requirements: {
+              requiresDryRun: true,
+              requiresConfirmationToken: true
+            }
+          }
+        ]
+      }),
+      "utf8"
+    );
+
+    const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
+
+    expect(config.profile).toBe("gui-dev");
+    expect(config.policy.name).toBe("gui-dev");
+    expect(config.policy.grants).toHaveLength(1);
+    expect(config.policy.grants[0]).toMatchObject({
+      id: "allow-output-write",
+      scope: "persistent",
+      effect: "allow",
+      match: {
+        tools: ["file.write"],
+        fileRoots: ["~/.agenthost/outputs"]
+      },
+      requirements: {
+        requiresDryRun: true,
+        requiresConfirmationToken: true
+      }
+    });
+  });
 });

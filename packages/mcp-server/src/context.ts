@@ -36,6 +36,7 @@ import type {
 } from "@agenthost/core";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
 import type { ConfirmationManager } from "./confirmation.js";
+import type { GrantStore } from "./grants.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -130,5 +131,6 @@ export interface AgentHostMcpContext {
   adapters: AdapterRegistrySnapshot;
   logger: AuditLogger;
   confirmations: ConfirmationManager;
+  grants: GrantStore;
   linux: LinuxAutomation;
 }

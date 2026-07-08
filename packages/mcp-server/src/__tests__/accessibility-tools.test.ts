@@ -10,6 +10,7 @@ import {
 } from "@agenthost/core";
 import { describe, expect, it } from "vitest";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
+import { GrantStore } from "../grants.js";
 import { runTool } from "../tool-runner.js";
 import { createAccessibilityTools } from "../tools/accessibility.js";
 import { ConfirmationManager } from "../confirmation.js";
@@ -281,6 +282,7 @@ function createContext(options: ContextOptions = {}): AgentHostMcpContext & { ca
     adapters: createAdapterRegistry({ platform: "linux" }),
     logger,
     confirmations: new ConfirmationManager(),
+    grants: new GrantStore({ persistentGrants: policy.grants }),
     linux,
     calls
   };
@@ -646,7 +648,7 @@ describe("accessibility MCP tools", () => {
     await expect(callTool(context, "accessibility.invoke_action", { query: "Save", actionName: "click" })).resolves.toMatchObject({
       ok: false,
       error: {
-        code: "confirmation_required"
+        code: "dry_run_required"
       }
     });
 

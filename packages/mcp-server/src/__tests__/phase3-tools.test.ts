@@ -8,6 +8,7 @@ import {
 } from "@agenthost/core";
 import { describe, expect, it } from "vitest";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
+import { GrantStore } from "../grants.js";
 import { runTool } from "../tool-runner.js";
 import { createAppTools } from "../tools/app.js";
 import { createFileTools } from "../tools/file.js";
@@ -272,6 +273,7 @@ function createContext(profile: "strict" | "dev" = "dev"): AgentHostMcpContext &
     adapters: createAdapterRegistry({ platform: "linux" }),
     logger: new MemoryLogger(),
     confirmations: new ConfirmationManager(),
+    grants: new GrantStore({ persistentGrants: policy.grants }),
     linux,
     calls
   };
@@ -460,11 +462,67 @@ describe("Phase 3 MCP tools", () => {
 
     await expect(callTool(context, "shell.run_safe", { command: "node", args: ["--version"] })).resolves.toMatchObject({
       ok: false,
-      error: { code: "confirmation_required" }
+      error: { code: "dry_run_required" }
     });
     await expect(callTool(context, "file.write", { path: "/tmp/agenthost-phase3-test/no-token.txt", content: "ok" })).resolves.toMatchObject({
       ok: false,
-      error: { code: "confirmation_required" }
+      error: { code: "dry_run_required" }
+    });
+  });
+
+  it("honors grant-required dry-run and confirmation even when the base profile is relaxed", async () => {
+    const context = createContext("dev");
+    context.policy.requireDryRunForStateChanging = false;
+    context.policy.requireConfirmationForStateChanging = false;
+    context.grants = new GrantStore({
+      persistentGrants: [
+        {
+          id: "grant-shell-confirm",
+          scope: "persistent",
+          effect: "allow",
+          match: {
+            tools: ["shell.run_safe"],
+            commandAllowlist: ["node"]
+          },
+          requirements: {
+            requiresDryRun: true,
+            requiresConfirmationToken: true
+          }
+        }
+      ]
+    });
+
+    await expect(callTool(context, "shell.run_safe", { command: "node", args: ["--version"] })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "dry_run_required" },
+      grantDecision: {
+        matchedGrantIds: ["grant-shell-confirm"],
+        requiresDryRun: true,
+        requiresConfirmationToken: true
+      }
+    });
+
+    const preview = await callTool(context, "shell.run_safe", { command: "node", args: ["--version"], dryRun: true });
+    const token = confirmationTokenOf(preview);
+
+    expect(preview.grantDecision).toMatchObject({
+      matchedGrantIds: ["grant-shell-confirm"]
+    });
+
+    await expect(
+      callTool(context, "shell.run_safe", { command: "node", args: ["--version"], confirmationToken: token })
+    ).resolves.toMatchObject({
+      ok: true,
+      confirmation: { accepted: true },
+      grantDecision: {
+        matchedGrantIds: ["grant-shell-confirm"]
+      }
+    });
+
+    expect(context.logger.entries.at(-1)).toMatchObject({
+      matchedGrantIds: ["grant-shell-confirm"],
+      confirmationRequiredByGrant: true,
+      dryRunRequired: true
     });
   });
 
