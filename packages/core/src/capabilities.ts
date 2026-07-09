@@ -94,6 +94,46 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Maps a Tool Forge manifest to proposed grants without saving or applying them."
     },
     {
+      name: "forge.save_manifest",
+      riskLevel: "medium" as const,
+      description: "Validates and stores an inert Tool Forge manifest plus artifact record under AgentHost home."
+    },
+    {
+      name: "forge.list_manifests",
+      riskLevel: "low" as const,
+      description: "Lists stored Tool Forge manifests and inert artifact summaries."
+    },
+    {
+      name: "forge.get_manifest",
+      riskLevel: "low" as const,
+      description: "Returns a stored Tool Forge manifest and its inert artifact record."
+    },
+    {
+      name: "forge.create_review",
+      riskLevel: "medium" as const,
+      description: "Creates and stores a Tool Forge review record bound to an exact manifest hash."
+    },
+    {
+      name: "forge.get_review",
+      riskLevel: "low" as const,
+      description: "Returns one stored Tool Forge review record."
+    },
+    {
+      name: "forge.list_reviews",
+      riskLevel: "low" as const,
+      description: "Lists stored Tool Forge review summaries."
+    },
+    {
+      name: "forge.archive_manifest",
+      riskLevel: "medium" as const,
+      description: "Marks an inert Tool Forge artifact as archived without deleting stored files."
+    },
+    {
+      name: "forge.apply_session_grants_from_review",
+      riskLevel: "medium" as const,
+      description: "Applies eligible session-only grants from a reviewed inert Tool Forge artifact."
+    },
+    {
       name: "app.detect",
       riskLevel: "low" as const,
       description: "Detects a Linux app generically and reports available automation strategies."

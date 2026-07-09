@@ -13,6 +13,7 @@ import { createPolicyTools } from "../tools/policy.js";
 import { z } from "zod";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
 import { ConfirmationManager } from "../confirmation.js";
+import { ForgeStore } from "../forge-store.js";
 import { GrantStore } from "../grants.js";
 
 class MemoryLogger implements AuditLogger {
@@ -216,6 +217,7 @@ function createContext(logger: MemoryLogger): AgentHostMcpContext {
     logger,
     confirmations: new ConfirmationManager(),
     grants: new GrantStore({ persistentGrants: policy.grants }),
+    forge: new ForgeStore(config.agentHostDir),
     linux
   };
 }
@@ -256,7 +258,15 @@ describe("system tools", () => {
         "policy.explain_decision",
         "forge.validate_manifest",
         "forge.review_manifest",
-        "forge.propose_grants"
+        "forge.propose_grants",
+        "forge.save_manifest",
+        "forge.list_manifests",
+        "forge.get_manifest",
+        "forge.create_review",
+        "forge.get_review",
+        "forge.list_reviews",
+        "forge.archive_manifest",
+        "forge.apply_session_grants_from_review"
       ])
     );
   });

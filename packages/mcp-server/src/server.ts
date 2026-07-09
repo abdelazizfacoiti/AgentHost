@@ -47,6 +47,7 @@ import {
 } from "@agenthost/os-linux";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { ConfirmationManager } from "./confirmation.js";
+import { ForgeStore } from "./forge-store.js";
 import { GrantStore } from "./grants.js";
 import { runTool } from "./tool-runner.js";
 import { createAdapterTools } from "./tools/adapter.js";
@@ -133,6 +134,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
   const policy = options.policy ?? config.policy;
   const confirmations = new ConfirmationManager();
+  const forge = new ForgeStore(config.agentHostDir);
+  await forge.ensureStructure();
   const grants = new GrantStore({
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
@@ -178,6 +181,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     logger,
     confirmations,
     grants,
+    forge,
     linux
   };
   const tools = [

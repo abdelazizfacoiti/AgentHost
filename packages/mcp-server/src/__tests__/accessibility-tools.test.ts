@@ -10,6 +10,7 @@ import {
 } from "@agenthost/core";
 import { describe, expect, it } from "vitest";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
+import { ForgeStore } from "../forge-store.js";
 import { GrantStore } from "../grants.js";
 import { runTool } from "../tool-runner.js";
 import { createAccessibilityTools } from "../tools/accessibility.js";
@@ -283,6 +284,7 @@ function createContext(options: ContextOptions = {}): AgentHostMcpContext & { ca
     logger,
     confirmations: new ConfirmationManager(),
     grants: new GrantStore({ persistentGrants: policy.grants }),
+    forge: new ForgeStore(config.agentHostDir),
     linux,
     calls
   };

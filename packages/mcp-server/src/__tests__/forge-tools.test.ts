@@ -1,14 +1,17 @@
+import { access, readFile, rm } from "node:fs/promises";
 import {
   createAdapterRegistry,
   createBaseCapabilityRegistry,
   getPolicyProfile,
   type AgentHostConfig,
   type AuditLogEntry,
-  type AuditLogger
+  type AuditLogger,
+  type ToolForgeManifest
 } from "@agenthost/core";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
 import { ConfirmationManager } from "../confirmation.js";
+import { ForgeStore } from "../forge-store.js";
 import { GrantStore } from "../grants.js";
 import { runTool } from "../tool-runner.js";
 import { createForgeTools } from "../tools/forge.js";
@@ -21,7 +24,7 @@ class MemoryLogger implements AuditLogger {
   }
 }
 
-const validManifest = {
+const validManifest: ToolForgeManifest = {
   schemaVersion: "agenthost.forge.v1",
   id: "example.generated-tool",
   displayName: "Example Generated Tool",
@@ -54,7 +57,7 @@ const validManifest = {
     requiresDryRun: true,
     requiresConfirmationToken: true
   }
-} as const;
+};
 
 function createLinuxStub(config: AgentHostConfig, registry = createBaseCapabilityRegistry()): LinuxAutomation {
   return {
@@ -123,20 +126,29 @@ function createLinuxStub(config: AgentHostConfig, registry = createBaseCapabilit
   };
 }
 
-function createContext(): AgentHostMcpContext & { logger: MemoryLogger } {
+function createContext(
+  options: { profile?: "strict" | "dev"; blockHighRiskByDefault?: boolean } = {}
+): AgentHostMcpContext & { logger: MemoryLogger } {
   const registry = createBaseCapabilityRegistry();
-  const policy = getPolicyProfile("strict");
+  const basePolicy = getPolicyProfile(options.profile ?? "dev");
+  const policy = {
+    ...basePolicy,
+    ...(options.blockHighRiskByDefault === undefined
+      ? {}
+      : { blockHighRiskByDefault: options.blockHighRiskByDefault })
+  };
+  const testId = `agenthost-forge-tests-${Math.random().toString(36).slice(2, 10)}`;
   const config: AgentHostConfig = {
-    agentHostDir: "/tmp/agenthost-forge-tests",
-    configPath: "/tmp/agenthost-forge-tests/config.json",
-    logFile: "/tmp/agenthost-forge-tests/logs/agenthost.jsonl",
-    profile: "strict",
+    agentHostDir: `/tmp/${testId}`,
+    configPath: `/tmp/${testId}/config.json`,
+    logFile: `/tmp/${testId}/logs/agenthost.jsonl`,
+    profile: options.profile ?? "dev",
     policy
   };
   const logger = new MemoryLogger();
 
   return {
-    sessionId: "session_forge",
+    sessionId: `session_${testId}`,
     config,
     policy,
     registry,
@@ -144,43 +156,262 @@ function createContext(): AgentHostMcpContext & { logger: MemoryLogger } {
     logger,
     confirmations: new ConfirmationManager(),
     grants: new GrantStore({ persistentGrants: policy.grants }),
+    forge: new ForgeStore(config.agentHostDir),
     linux: createLinuxStub(config, registry)
   };
 }
 
+function getTool(name: string) {
+  const tool = createForgeTools().find((candidate) => candidate.name === name);
+  expect(tool).toBeDefined();
+  return tool!;
+}
+
+async function previewThenExecute(
+  context: AgentHostMcpContext,
+  toolName: string,
+  previewInput: Record<string, unknown>,
+  executeInput: Record<string, unknown>
+) {
+  const tool = getTool(toolName);
+  const previewResult = await runTool(tool, previewInput, context);
+  expect(previewResult.ok).toBe(true);
+  const previewData = previewResult.data as { confirmationToken?: string };
+  expect(previewData.confirmationToken).toBeTruthy();
+  return runTool(tool, { ...executeInput, confirmationToken: previewData.confirmationToken }, context);
+}
+
+beforeEach(async () => {
+  await rm("/tmp/agenthost-forge-tests", { recursive: true, force: true }).catch(() => undefined);
+});
+
 describe("forge MCP tools", () => {
-  it("validates a manifest and logs safely", async () => {
+  it("validates, reviews, and proposes grants without registering generated tools", async () => {
     const context = createContext();
-    const tool = createForgeTools().find((candidate) => candidate.name === "forge.validate_manifest");
 
-    const result = await runTool(tool!, { manifest: validManifest }, context);
+    const validateResult = await runTool(getTool("forge.validate_manifest"), { manifest: validManifest }, context);
+    const reviewResult = await runTool(getTool("forge.review_manifest"), { manifest: validManifest }, context);
+    const proposalResult = await runTool(getTool("forge.propose_grants"), { manifest: validManifest }, context);
 
-    expect(result.ok).toBe(true);
-    expect(result.data).toMatchObject({ valid: true });
-    expect(context.logger.entries[0]?.tool).toBe("forge.validate_manifest");
-  });
-
-  it("reviews a manifest without registering generated tools", async () => {
-    const context = createContext();
-    const tool = createForgeTools().find((candidate) => candidate.name === "forge.review_manifest");
-
-    const result = await runTool(tool!, { manifest: validManifest }, context);
-
-    expect(result.ok).toBe(true);
-    expect((result.data as { missingGrants: string[] }).missingGrants).toEqual(["write-output"]);
+    expect(validateResult.ok).toBe(true);
+    expect(reviewResult.ok).toBe(true);
+    expect(proposalResult.ok).toBe(true);
+    expect((reviewResult.data as { missingGrants: string[] }).missingGrants).toEqual(["write-output"]);
     expect(context.registry.listTools().some((entry) => entry.name === "example.generated.preview")).toBe(false);
   });
 
-  it("proposes grants without applying them", async () => {
+  it("save_manifest dryRun does not write files and does not leak the raw token in logs", async () => {
     const context = createContext();
-    const tool = createForgeTools().find((candidate) => candidate.name === "forge.propose_grants");
+    const tool = getTool("forge.save_manifest");
 
-    const result = await runTool(tool!, { manifest: validManifest }, context);
+    const result = await runTool(tool, { manifest: validManifest, dryRun: true }, context);
 
     expect(result.ok).toBe(true);
-    expect((result.data as { proposals: Array<{ grant: { id: string } }> }).proposals[0]?.grant.id).toBe(
-      "forge.example.generated-tool.write-output"
+    const data = result.data as { confirmationToken?: string };
+    expect(data.confirmationToken).toBeTruthy();
+    expect(await context.forge.listArtifacts()).toHaveLength(0);
+    expect(context.logger.entries.some((entry) => JSON.stringify(entry).includes(data.confirmationToken!))).toBe(false);
+  });
+
+  it("save_manifest with a confirmation token writes the inert manifest and artifact", async () => {
+    const context = createContext();
+
+    const result = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
     );
-    expect(context.grants.listActiveGrants()).toHaveLength(0);
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { manifestHash: string; storagePath: string; artifact: { executable: boolean; registered: boolean } };
+    expect(data.artifact.executable).toBe(false);
+    expect(data.artifact.registered).toBe(false);
+    await access(data.storagePath);
+    expect(await context.forge.listArtifacts()).toHaveLength(1);
+  });
+
+  it("invalid manifests cannot be saved", async () => {
+    const context = createContext();
+    const result = await runTool(getTool("forge.save_manifest"), { manifest: { ...validManifest, id: "Invalid Id" }, dryRun: true }, context);
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("invalid_manifest");
+  });
+
+  it("create_review stores a review bound to the manifest hash", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const savedData = saved.data as { manifestHash: string };
+
+    const reviewResult = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash }
+    );
+
+    expect(reviewResult.ok).toBe(true);
+    const reviewData = reviewResult.data as { review: { manifestHash: string; reviewId: string } };
+    expect(reviewData.review.manifestHash).toBe(savedData.manifestHash);
+    const storedReview = await context.forge.loadReview(reviewData.review.reviewId);
+    expect(storedReview.manifestHash).toBe(savedData.manifestHash);
+  });
+
+  it("list/get manifests and reviews work from stored artifacts", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const savedData = saved.data as { manifestHash: string };
+    const createdReview = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash }
+    );
+    const reviewId = (createdReview.data as { review: { reviewId: string } }).review.reviewId;
+
+    const listManifests = await runTool(getTool("forge.list_manifests"), {}, context);
+    const getManifest = await runTool(
+      getTool("forge.get_manifest"),
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash },
+      context
+    );
+    const listReviews = await runTool(getTool("forge.list_reviews"), {}, context);
+    const getReview = await runTool(getTool("forge.get_review"), { reviewId }, context);
+
+    expect((listManifests.data as { manifests: unknown[] }).manifests).toHaveLength(1);
+    expect((getManifest.data as { artifact: { executable: boolean; registered: boolean } }).artifact.executable).toBe(false);
+    expect((listReviews.data as { reviews: unknown[] }).reviews).toHaveLength(1);
+    expect((getReview.data as { review: { reviewId: string } }).review.reviewId).toBe(reviewId);
+  });
+
+  it("archive_manifest marks the artifact archived", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const savedData = saved.data as { manifestHash: string };
+
+    const archived = await previewThenExecute(
+      context,
+      "forge.archive_manifest",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash }
+    );
+
+    expect(archived.ok).toBe(true);
+    expect((archived.data as { artifact: { status: string } }).artifact.status).toBe("archived");
+  });
+
+  it("apply_session_grants_from_review dryRun previews grants and actual execution applies only session grants", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+
+    const preview = await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      { reviewId, dryRun: true },
+      context
+    );
+    expect(preview.ok).toBe(true);
+
+    const execute = await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      {
+        reviewId,
+        confirmationToken: (preview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+
+    expect(execute.ok).toBe(true);
+    expect((execute.data as { appliedGrantIds: string[] }).appliedGrantIds).toEqual([
+      "forge.example.generated-tool.write-output"
+    ]);
+    expect(context.grants.listSessionGrants().map((grant) => grant.id)).toEqual([
+      "forge.example.generated-tool.write-output"
+    ]);
+  });
+
+  it("changing the stored manifest invalidates a previous review for grant application", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const savedData = saved.data as { manifestHash: string };
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash: savedData.manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+
+    await context.forge.saveManifest(
+      {
+        ...validManifest,
+        description: "Tampered manifest content."
+      },
+      savedData.manifestHash
+    );
+
+    const applyResult = await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      { reviewId, dryRun: true },
+      context
+    );
+
+    expect(applyResult.ok).toBe(false);
+    expect(applyResult.error?.code).toBe("manifest_hash_mismatch");
+  });
+
+  it("blocked permissions prevent session grant application", async () => {
+    const context = createContext();
+    const blockedManifest: ToolForgeManifest = {
+      ...validManifest,
+      requestedPermissions: [
+        {
+          id: "touch-credentials",
+          appSensitivities: ["credential_or_security"]
+        }
+      ]
+    };
+
+    const reviewResult = await runTool(
+      getTool("forge.create_review"),
+      { manifest: blockedManifest, dryRun: true },
+      context
+    );
+
+    expect(reviewResult.ok).toBe(false);
+    expect(reviewResult.error?.code).toBe("invalid_manifest");
   });
 });
