@@ -1,8 +1,10 @@
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
 import path from "node:path";
 import {
   canApplySessionGrantsFromReview,
   createToolForgeArtifactRecord,
+  createToolForgeHarnessRunRecord,
   createToolForgeReviewRecord,
   createToolForgeValidationRecord,
   evaluateSafety,
@@ -12,6 +14,7 @@ import {
   summarizeGrant,
   summarizeToolForgeArtifact,
   summarizeToolForgeArtifactRecord,
+  summarizeToolForgeHarnessRun,
   summarizeToolForgeReview,
   summarizeToolForgeValidation,
   toolFailure,
@@ -24,21 +27,27 @@ import {
   type ToolForgeArtifactRecord,
   type ToolForgeGetArtifactResult,
   type ToolForgeCreateReviewResult,
+  type ToolForgeGetHarnessRunResult,
   type ToolForgeGetManifestResult,
   type ToolForgeGetReviewResult,
   type ToolForgeGetValidationResult,
   type ToolForgeGrantProposalResult,
   type ToolForgeListArtifactsResult,
+  type ToolForgeListHarnessRunsResult,
   type ToolForgeListManifestsResult,
   type ToolForgeListReviewsResult,
   type ToolForgeListValidationsResult,
+  type ToolForgeHarnessMode,
+  type ToolForgeHarnessRunRecord,
   type ToolForgeManifest,
   type ToolForgeProjectFilePlanEntry,
+  type ToolForgeRunValidationHarnessResult,
   type ToolForgeReviewRecord,
   type ToolForgeReviewResult,
   type ToolForgeScaffoldProjectResult,
   type ToolForgeSaveManifestResult,
   type ToolForgeValidationResult,
+  type ToolForgeValidationRecord,
   type ToolForgeValidateProjectResult,
   type ToolResult
 } from "@agenthost/core";
@@ -244,6 +253,45 @@ const listValidationsInputSchema = z
   })
   .strict();
 
+const runHarnessInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300).optional(),
+    validationId: z.string().trim().min(1).max(300).optional(),
+    projectPath: z.string().trim().min(1).max(2000).optional(),
+    mode: z.enum(["static-plus", "contract"]).optional(),
+    timeoutMs: z.number().int().min(100).max(30_000).optional(),
+    dryRun: z.boolean().optional(),
+    confirmationToken: optionalConfirmationSchema
+  })
+  .strict()
+  .superRefine((input, refinementContext) => {
+    const count =
+      Number(input.artifactId !== undefined) +
+      Number(input.validationId !== undefined) +
+      Number(input.projectPath !== undefined);
+    if (count !== 1) {
+      refinementContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of artifactId, validationId, or projectPath."
+      });
+    }
+  });
+
+const getHarnessRunInputSchema = z
+  .object({
+    harnessRunId: z.string().trim().min(1).max(300)
+  })
+  .strict();
+
+const listHarnessRunsInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300).optional(),
+    manifestId: z.string().trim().min(1).max(200).optional(),
+    mode: z.enum(["static-plus", "contract"]).optional(),
+    limit: z.number().int().min(1).max(500).optional()
+  })
+  .strict();
+
 type ValidateReviewProposeInput = z.infer<typeof validateReviewProposeInputSchema>;
 type SaveManifestInput = z.infer<typeof saveManifestInputSchema>;
 type ListManifestsInput = z.infer<typeof listManifestsInputSchema>;
@@ -259,6 +307,9 @@ type GetArtifactInput = z.infer<typeof getArtifactInputSchema>;
 type ListArtifactsInput = z.infer<typeof listArtifactsInputSchema>;
 type GetValidationInput = z.infer<typeof getValidationInputSchema>;
 type ListValidationsInput = z.infer<typeof listValidationsInputSchema>;
+type RunHarnessInput = z.infer<typeof runHarnessInputSchema>;
+type GetHarnessRunInput = z.infer<typeof getHarnessRunInputSchema>;
+type ListHarnessRunsInput = z.infer<typeof listHarnessRunsInputSchema>;
 
 const validateReviewProposeMcpInputSchema = {
   type: "object",
@@ -426,6 +477,40 @@ const listValidationsMcpInputSchema = {
   properties: {
     artifactId: { type: "string", minLength: 1, maxLength: 300 },
     manifestId: { type: "string", minLength: 1, maxLength: 200 },
+    limit: { type: "integer", minimum: 1, maximum: 500 }
+  },
+  additionalProperties: false
+};
+
+const runHarnessMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 },
+    validationId: { type: "string", minLength: 1, maxLength: 300 },
+    projectPath: { type: "string", minLength: 1, maxLength: 2000 },
+    mode: { type: "string", enum: ["static-plus", "contract"] },
+    timeoutMs: { type: "integer", minimum: 100, maximum: 30000 },
+    dryRun: { type: "boolean" },
+    confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
+  },
+  additionalProperties: false
+};
+
+const getHarnessRunMcpInputSchema = {
+  type: "object",
+  properties: {
+    harnessRunId: { type: "string", minLength: 1, maxLength: 300 }
+  },
+  required: ["harnessRunId"],
+  additionalProperties: false
+};
+
+const listHarnessRunsMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 },
+    manifestId: { type: "string", minLength: 1, maxLength: 200 },
+    mode: { type: "string", enum: ["static-plus", "contract"] },
     limit: { type: "integer", minimum: 1, maximum: 500 }
   },
   additionalProperties: false
@@ -601,9 +686,12 @@ function buildScaffoldFiles(
 
   const contractText = [
     `Manifest: ${manifest.id}@${manifest.version}`,
+    `Tools: ${manifest.tools.map((tool) => tool.name).join(", ") || "none"}`,
+    `Requirements: dryRun=${manifest.requirements.requiresDryRun === true}, confirmation=${manifest.requirements.requiresConfirmationToken === true}, approval=${manifest.requirements.requiresApproval === true}`,
+    `Permissions: ${manifest.requestedPermissions.map((permission) => permission.id).join(", ") || "none"}`,
     "",
     "This scaffold is inert.",
-    "It must not be executed, registered, or dynamically imported in Phase 15.",
+    "It must not be executed, registered, or dynamically imported in AgentHost.",
     "Validation may inspect these files statically only."
   ].join("\n");
 
@@ -813,6 +901,8 @@ function collectStaticValidationChecks(
   const childProcessPattern = /\b(child_process|execSync|execFile|spawn|fork)\b/;
   const networkPattern = /\b(node:)?(http|https|net|tls|dgram)\b|\bfetch\s*\(|\baxios\b|\bWebSocket\b/;
   const internalsPattern = /@agenthost\/(mcp-server|os-linux)|packages\/mcp-server|packages\/os-linux/;
+  const dynamicExecutionPattern = /\beval\s*\(|\bnew Function\s*\(|\bimport\s*\(/;
+  const shellEscapePattern = /\b(curl|wget)\b.*\|\s*(bash|sh)\b|\b(?:\/bin\/sh|\/bin\/bash)\b/;
 
   for (const [relativePath, content] of combinedEntries) {
     if (broadFsPattern.test(content)) {
@@ -869,6 +959,28 @@ function collectStaticValidationChecks(
         )
       );
     }
+
+    if (dynamicExecutionPattern.test(content)) {
+      checks.push(
+        createValidationCheck(
+          "dynamic_execution_reference",
+          "error",
+          "Generated project references eval, dynamic import, or Function constructor behavior.",
+          relativePath
+        )
+      );
+    }
+
+    if (shellEscapePattern.test(content)) {
+      checks.push(
+        createValidationCheck(
+          "shell_escape_pattern",
+          "error",
+          "Generated project contains shell escape or remote-pipe execution patterns.",
+          relativePath
+        )
+      );
+    }
   }
 
   if (checks.every((check) => check.level !== "error")) {
@@ -920,6 +1032,197 @@ function determineValidationStatus(checks: Array<{ level: "info" | "warning" | "
   }
 
   return "passed" as const;
+}
+
+function determineHarnessStatus(checks: Array<{ level: "info" | "warning" | "error" }>) {
+  if (checks.some((check) => check.level === "error")) {
+    return "failed" as const;
+  }
+
+  return "passed" as const;
+}
+
+async function resolveValidationByProject(
+  context: AgentHostMcpContext,
+  artifact: ToolForgeArtifactRecord
+): Promise<ToolForgeValidationRecord | undefined> {
+  const validations = await context.forge.listValidations();
+  return validations
+    .filter((validation) => validation.artifactId === artifact.artifactId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+}
+
+async function resolveHarnessInput(
+  context: AgentHostMcpContext,
+  input: { artifactId?: string; validationId?: string; projectPath?: string }
+): Promise<{
+  artifact: ToolForgeArtifactRecord;
+  manifest: ToolForgeManifest;
+  validation: ToolForgeValidationRecord | undefined;
+  projectPath: string;
+}> {
+  if (input.validationId !== undefined) {
+    const validation = await context.forge.loadValidation(input.validationId);
+    const artifact = await context.forge.loadArtifact(validation.artifactId);
+    const manifest = await context.forge.loadManifestByPath(artifact.storagePath);
+    return {
+      artifact,
+      manifest,
+      validation,
+      projectPath: validation.projectPath
+    };
+  }
+
+  if (input.artifactId !== undefined) {
+    const artifact = await context.forge.loadArtifact(input.artifactId);
+    const manifest = await context.forge.loadManifestByPath(artifact.storagePath);
+    return {
+      artifact,
+      manifest,
+      validation: await resolveValidationByProject(context, artifact),
+      projectPath: artifact.projectPath ?? ""
+    };
+  }
+
+  const resolvedProjectPath = path.resolve(input.projectPath!);
+  const artifacts = await context.forge.listArtifacts();
+  const artifact = artifacts.find(
+    (candidate) => candidate.projectPath !== undefined && path.resolve(candidate.projectPath) === resolvedProjectPath
+  );
+
+  if (artifact === undefined) {
+    throw new Error("Stored artifact for the requested project path was not found.");
+  }
+
+  const manifest = await context.forge.loadManifestByPath(artifact.storagePath);
+  return {
+    artifact,
+    manifest,
+    validation: await resolveValidationByProject(context, artifact),
+    projectPath: resolvedProjectPath
+  };
+}
+
+function collectContractHarnessChecks(
+  manifest: ToolForgeManifest,
+  files: Record<string, string>
+): ReturnType<typeof createValidationCheck>[] {
+  const checks: ReturnType<typeof createValidationCheck>[] = [];
+  const contractText = files["CONTRACT.md"] ?? "";
+
+  if (contractText.trim() === "") {
+    checks.push(createValidationCheck("missing_contract", "error", "Generated project is missing CONTRACT.md.", "CONTRACT.md"));
+  } else {
+    if (!contractText.includes(`Manifest: ${manifest.id}@${manifest.version}`)) {
+      checks.push(
+        createValidationCheck(
+          "contract_manifest_mismatch",
+          "error",
+          "CONTRACT.md does not describe the current manifest id and version.",
+          "CONTRACT.md"
+        )
+      );
+    }
+
+    for (const tool of manifest.tools) {
+      if (!contractText.includes(tool.name)) {
+        checks.push(
+          createValidationCheck(
+            "contract_tool_missing",
+            "error",
+            `CONTRACT.md does not mention tool ${tool.name}.`,
+            "CONTRACT.md"
+          )
+        );
+      }
+
+      if (tool.inputSchema === undefined || tool.outputSchema === undefined) {
+        checks.push(
+          createValidationCheck(
+            "tool_schema_missing",
+            "error",
+            `Manifest tool ${tool.name} must declare both input and output schemas for harness validation.`,
+            "agenthost.manifest.json"
+          )
+        );
+      }
+    }
+
+    if (!contractText.includes(`dryRun=${manifest.requirements.requiresDryRun === true}`)) {
+      checks.push(
+        createValidationCheck(
+          "contract_requirements_mismatch",
+          "error",
+          "CONTRACT.md does not reflect the manifest dry-run requirement.",
+          "CONTRACT.md"
+        )
+      );
+    }
+
+    if (!contractText.includes(`confirmation=${manifest.requirements.requiresConfirmationToken === true}`)) {
+      checks.push(
+        createValidationCheck(
+          "contract_requirements_mismatch",
+          "error",
+          "CONTRACT.md does not reflect the manifest confirmation requirement.",
+          "CONTRACT.md"
+        )
+      );
+    }
+
+    for (const permission of manifest.requestedPermissions) {
+      if (!contractText.includes(permission.id)) {
+        checks.push(
+          createValidationCheck(
+            "contract_permission_missing",
+            "error",
+            `CONTRACT.md does not mention requested permission ${permission.id}.`,
+            "CONTRACT.md"
+          )
+        );
+      }
+    }
+  }
+
+  const packageJsonText = files["package.json"] ?? "";
+  if (/"agenthost:register"|registered"\s*:\s*true|"live"\s*:\s*true/.test(packageJsonText)) {
+    checks.push(
+      createValidationCheck(
+        "live_registration_metadata",
+        "error",
+        "Generated project contains live registration metadata, which is not allowed in Forge scaffolds.",
+        "package.json"
+      )
+    );
+  }
+
+  if (checks.length === 0) {
+    checks.push(
+      createValidationCheck(
+        "contract_consistent",
+        "info",
+        "Manifest declarations and scaffolded contract metadata are consistent.",
+        "CONTRACT.md"
+      )
+    );
+  }
+
+  return checks;
+}
+
+function buildHarnessChecks(
+  mode: ToolForgeHarnessMode,
+  manifest: ToolForgeManifest,
+  projectPath: string,
+  files: Record<string, string>
+): ReturnType<typeof createValidationCheck>[] {
+  if (mode === "contract") {
+    return collectContractHarnessChecks(manifest, files);
+  }
+
+  const staticChecks = collectStaticValidationChecks(manifest, projectPath, files).checks;
+  const contractChecks = collectContractHarnessChecks(manifest, files);
+  return [...staticChecks, ...contractChecks];
 }
 
 export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
@@ -2326,6 +2629,341 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     }
   };
 
+  const runValidationHarness: AgentHostToolDefinition<
+    RunHarnessInput,
+    ToolForgeRunValidationHarnessResult | (ActionPreviewResult & { mode: ToolForgeHarnessMode; plannedChecks: string[] }),
+    AgentHostMcpContext
+  > = {
+    name: "forge.run_validation_harness",
+    description: "Runs a controlled inert validation harness for a generated Forge project and stores a harness record.",
+    riskLevel: "medium",
+    inputSchema: runHarnessInputSchema,
+    mcpInputSchema: runHarnessMcpInputSchema,
+    inputSummary: "Run Forge validation harness",
+    safety: {
+      actionType: "file_write"
+    },
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(
+      input,
+      context,
+      runtime
+    ): Promise<ToolResult<ToolForgeRunValidationHarnessResult | (ActionPreviewResult & { mode: ToolForgeHarnessMode; plannedChecks: string[] })>> {
+      const mode: ToolForgeHarnessMode = input.mode ?? "static-plus";
+      let artifact: ToolForgeArtifactRecord;
+      let manifest: ToolForgeManifest;
+      let validation: ToolForgeValidationRecord | undefined;
+      let projectPath: string;
+
+      try {
+        ({ artifact, manifest, validation, projectPath } = await resolveHarnessInput(context, {
+          ...(input.artifactId === undefined ? {} : { artifactId: input.artifactId }),
+          ...(input.validationId === undefined ? {} : { validationId: input.validationId }),
+          ...(input.projectPath === undefined ? {} : { projectPath: input.projectPath })
+        }));
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: "medium",
+          error: {
+            code: "harness_target_not_found",
+            message: error instanceof Error ? error.message : "Harness target could not be resolved."
+          },
+          observations: ["Could not resolve the requested Forge harness target."]
+        });
+      }
+
+      if (artifact.projectPath === undefined || projectPath === "") {
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: "medium",
+          error: {
+            code: "project_not_scaffolded",
+            message: "Artifact does not have a generated project scaffold yet."
+          },
+          observations: ["Scaffold the project before running the validation harness."]
+        });
+      }
+
+      const generatedRoot = context.forge.generatedRootDir();
+      if (!isInsideOrEqual(projectPath, generatedRoot)) {
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: "medium",
+          error: {
+            code: "path_not_allowed",
+            message: "Harness runs must stay inside the approved AgentHost forge/generated folder."
+          },
+          observations: ["Rejected harness execution for a path outside approved Forge generated storage."]
+        });
+      }
+
+      const manifestPath = path.join(projectPath, "agenthost.manifest.json");
+      if (!(await pathExists(manifestPath))) {
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: "medium",
+          error: {
+            code: "manifest_copy_missing",
+            message: "Generated project is missing agenthost.manifest.json."
+          },
+          observations: ["The harness could not verify the project because the manifest copy is missing."]
+        });
+      }
+
+      const manifestValidation = validateToolForgeManifest(await readFile(manifestPath, "utf8"));
+      if (!manifestValidation.valid || manifestValidation.manifest === undefined) {
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: "medium",
+          error: {
+            code: "manifest_copy_invalid",
+            message: "Generated project manifest copy is invalid.",
+            details: manifestValidation
+          },
+          observations: ["The harness could not start because the project manifest copy is invalid."]
+        });
+      }
+
+      const manifestHash = hashToolForgeManifest(manifestValidation.manifest);
+      if (manifestHash !== artifact.manifestHash) {
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: "medium",
+          error: {
+            code: "manifest_hash_mismatch",
+            message: "Generated project manifest hash no longer matches the saved artifact."
+          },
+          observations: ["Refused harness execution because the scaffold no longer matches the saved artifact."]
+        });
+      }
+
+      if (validation === undefined) {
+        validation = await resolveValidationByProject(context, artifact);
+      }
+
+      const hasUsableValidation = validation !== undefined;
+      const validationFailed = validation?.status === "failed";
+      const files = await readProjectFiles(projectPath);
+      const plannedChecks = buildHarnessChecks(mode, manifestValidation.manifest, projectPath, files).map((check) => check.id);
+      const safetyDecision =
+        runtime?.safetyDecision ??
+        evaluateSafety(
+          {
+            tool: "forge.run_validation_harness",
+            actionType: "file_write",
+            filePath: context.forge.harnessRunPath(`preview.${artifact.artifactId}.${mode}`),
+            generatedTool: true,
+            generatedToolId: artifact.manifestId
+          },
+          context.policy,
+          createSafetyEvaluationContext(context)
+        );
+      const targetSummary = `Run ${mode} harness for ${artifact.manifestId}@${artifact.manifestVersion}`;
+      const target = {
+        artifactId: artifact.artifactId,
+        validationId: validation?.validationId,
+        manifestHash,
+        projectPath,
+        mode,
+        plannedChecks
+      };
+      const prerequisiteReasons: string[] = [];
+
+      if (!hasUsableValidation) {
+        prerequisiteReasons.push("Run forge.validate_project successfully before the harness.");
+      } else if (validationFailed) {
+        prerequisiteReasons.push("Static validation failed, so the harness cannot execute until the project is fixed.");
+      }
+
+      if (runtime?.isDryRun) {
+        const preview = buildPreviewResult({
+          tool: "forge.run_validation_harness",
+          riskLevel: "medium",
+          safety: safetyDecision,
+          targetSummary,
+          target: toFilePreviewTarget(projectPath, targetSummary),
+          wouldExecute: prerequisiteReasons.length === 0 && safetyDecision.allowed,
+          ...(prerequisiteReasons.length > 0
+            ? {}
+            : {
+                confirmation: {
+                  manager: context.confirmations,
+                  sessionId: context.sessionId,
+                  input,
+                  target,
+                  explanation: "Use this token to store the exact previewed harness run before it expires.",
+                  riskLevel: safetyDecision.riskLevel,
+                  appSensitivity: safetyDecision.appSensitivity
+                }
+              }),
+          reasons: previewReasons(
+            prerequisiteReasons[0] ?? "Prepared the inert validation harness plan without writing a harness record.",
+            safetyDecision.reasons
+          ),
+          observations: ["Previewed the Forge validation harness without executing generated code or writing a harness record."]
+        });
+
+        return {
+          ...preview,
+          data: {
+            ...(preview.data as ActionPreviewResult),
+            mode,
+            plannedChecks
+          }
+        };
+      }
+
+      if (prerequisiteReasons.length > 0) {
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: safetyDecision.riskLevel,
+          error: {
+            code: hasUsableValidation ? "static_validation_failed" : "validation_required",
+            message: prerequisiteReasons.join(" ")
+          },
+          observations: prerequisiteReasons
+        });
+      }
+
+      const validatedProject = validation!;
+
+      if (input.confirmationToken === undefined) {
+        const { code, reason } = missingConfirmationReason(safetyDecision);
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: confirmationRequired(reason),
+          error: {
+            code,
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "forge.run_validation_harness",
+        input,
+        target,
+        riskLevel: safetyDecision.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "forge.run_validation_harness",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
+      const start = performance.now();
+      const checks = buildHarnessChecks(mode, manifestValidation.manifest, projectPath, files);
+      const durationMs = Math.max(1, Math.round(performance.now() - start));
+      const harnessRun = createToolForgeHarnessRunRecord({
+        artifact,
+        projectPath,
+        mode,
+        status: determineHarnessStatus(checks),
+        checks,
+        stdoutSummary: "",
+        stderrSummary: "No subprocess commands were run in Phase 16.",
+        durationMs,
+        safeToConsiderRegistration: checks.every((check) => check.level !== "error")
+      });
+      await context.forge.saveHarnessRun(harnessRun);
+
+      return toolSuccess({
+        tool: "forge.run_validation_harness",
+        riskLevel: safetyDecision.riskLevel,
+        confirmation: acceptedConfirmation(
+          verification.tokenId,
+          true,
+          "Confirmation token accepted and inert harness validation executed."
+        ),
+        data: {
+          artifact,
+          validation: validatedProject,
+          harnessRun
+        },
+        observations: ["Ran the inert Forge harness checks without registering or executing any generated tool handler."]
+      });
+    }
+  };
+
+  const getHarnessRun: AgentHostToolDefinition<GetHarnessRunInput, ToolForgeGetHarnessRunResult, AgentHostMcpContext> = {
+    name: "forge.get_harness_run",
+    description: "Returns one stored Forge harness run record.",
+    riskLevel: "low",
+    inputSchema: getHarnessRunInputSchema,
+    mcpInputSchema: getHarnessRunMcpInputSchema,
+    inputSummary: "Get Forge harness run",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeGetHarnessRunResult>> {
+      try {
+        const harnessRun = await context.forge.loadHarnessRun(input.harnessRunId);
+        return toolSuccess({
+          tool: "forge.get_harness_run",
+          riskLevel: "low",
+          data: { harnessRun },
+          observations: ["Returned one stored Forge harness run record."]
+        });
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.get_harness_run",
+          riskLevel: "low",
+          error: {
+            code: "harness_run_not_found",
+            message: error instanceof Error ? error.message : "Stored harness run was not found."
+          },
+          observations: ["No stored harness run matched the requested id."]
+        });
+      }
+    }
+  };
+
+  const listHarnessRuns: AgentHostToolDefinition<
+    ListHarnessRunsInput,
+    ToolForgeListHarnessRunsResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.list_harness_runs",
+    description: "Lists stored Forge harness run summaries.",
+    riskLevel: "low",
+    inputSchema: listHarnessRunsInputSchema,
+    mcpInputSchema: listHarnessRunsMcpInputSchema,
+    inputSummary: "List Forge harness runs",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeListHarnessRunsResult>> {
+      const harnessRuns = (await context.forge.listHarnessRuns())
+        .filter((record) => input.artifactId === undefined || record.artifactId === input.artifactId)
+        .filter((record) => input.manifestId === undefined || record.manifestId === input.manifestId)
+        .filter((record) => input.mode === undefined || record.mode === input.mode)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, input.limit ?? 100)
+        .map((record) => summarizeToolForgeHarnessRun(record));
+
+      return toolSuccess({
+        tool: "forge.list_harness_runs",
+        riskLevel: "low",
+        data: { harnessRuns },
+        observations: ["Listed stored Forge harness run summaries."]
+      });
+    }
+  };
+
   return [
     validateManifest,
     reviewManifest,
@@ -2343,6 +2981,9 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     getArtifact,
     listArtifacts,
     getValidation,
-    listValidations
+    listValidations,
+    runValidationHarness,
+    getHarnessRun,
+    listHarnessRuns
   ];
 }
