@@ -4,7 +4,8 @@ import type {
   CapabilityGrant,
   ToolForgeArtifactRecord,
   ToolForgeManifest,
-  ToolForgeReviewRecord
+  ToolForgeReviewRecord,
+  ToolForgeValidationRecord
 } from "@agenthost/core";
 
 interface ForgeProposalRecord {
@@ -36,6 +37,8 @@ export class ForgeStore {
   readonly #reviewsDir: string;
   readonly #artifactsDir: string;
   readonly #proposalsDir: string;
+  readonly #generatedDir: string;
+  readonly #validationsDir: string;
 
   constructor(agentHostDir: string) {
     this.#rootDir = path.resolve(agentHostDir, "forge");
@@ -43,6 +46,8 @@ export class ForgeStore {
     this.#reviewsDir = path.join(this.#rootDir, "reviews");
     this.#artifactsDir = path.join(this.#rootDir, "artifacts");
     this.#proposalsDir = path.join(this.#rootDir, "proposals");
+    this.#generatedDir = path.join(this.#rootDir, "generated");
+    this.#validationsDir = path.join(this.#rootDir, "validations");
   }
 
   rootDir(): string {
@@ -63,12 +68,24 @@ export class ForgeStore {
     return path.join(this.#artifactsDir, `${sanitizeSegment(artifactId)}.json`);
   }
 
+  generatedRootDir(): string {
+    return this.#generatedDir;
+  }
+
+  generatedProjectPath(manifestId: string, version: string): string {
+    return path.join(this.#generatedDir, sanitizeSegment(manifestId), sanitizeSegment(version));
+  }
+
   reviewPath(reviewId: string): string {
     return path.join(this.#reviewsDir, `${sanitizeSegment(reviewId)}.json`);
   }
 
   proposalPath(reviewId: string): string {
     return path.join(this.#proposalsDir, `${sanitizeSegment(reviewId)}.json`);
+  }
+
+  validationPath(validationId: string): string {
+    return path.join(this.#validationsDir, `${sanitizeSegment(validationId)}.json`);
   }
 
   async saveManifest(manifest: ToolForgeManifest, manifestHash: string): Promise<string> {
@@ -128,6 +145,18 @@ export class ForgeStore {
     return this.#readJsonDirectory<ToolForgeReviewRecord>(this.#reviewsDir);
   }
 
+  async saveValidation(record: ToolForgeValidationRecord): Promise<void> {
+    await writeJson(this.validationPath(record.validationId), record);
+  }
+
+  async loadValidation(validationId: string): Promise<ToolForgeValidationRecord> {
+    return readJson<ToolForgeValidationRecord>(this.validationPath(validationId));
+  }
+
+  async listValidations(): Promise<ToolForgeValidationRecord[]> {
+    return this.#readJsonDirectory<ToolForgeValidationRecord>(this.#validationsDir);
+  }
+
   async saveProposalRecord(record: ForgeProposalRecord): Promise<void> {
     await writeJson(this.proposalPath(record.reviewId), record);
   }
@@ -137,7 +166,9 @@ export class ForgeStore {
       mkdir(this.#manifestsDir, { recursive: true }),
       mkdir(this.#reviewsDir, { recursive: true }),
       mkdir(this.#artifactsDir, { recursive: true }),
-      mkdir(this.#proposalsDir, { recursive: true })
+      mkdir(this.#proposalsDir, { recursive: true }),
+      mkdir(this.#generatedDir, { recursive: true }),
+      mkdir(this.#validationsDir, { recursive: true })
     ]);
   }
 

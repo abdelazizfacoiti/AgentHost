@@ -4,9 +4,14 @@ import type {
   PolicyProfileName,
   ToolForgeArtifactRecord,
   ToolForgeArtifactStatus,
+  ToolForgeArtifactSummary,
   ToolForgeGrantProposalResult,
   ToolForgeManifest,
   ToolForgeManifestSummary,
+  ToolForgeValidationCheck,
+  ToolForgeValidationRecord,
+  ToolForgeValidationStatus,
+  ToolForgeValidationSummary,
   ToolForgeReviewDecisionStatus,
   ToolForgeReviewRecord,
   ToolForgeReviewResult,
@@ -40,6 +45,12 @@ export function createToolForgeArtifactId(manifest: ToolForgeManifest, manifestH
 
 export function createToolForgeReviewId(manifest: ToolForgeManifest, manifestHash: string): string {
   return `review.${manifest.id}.${manifest.version}.${manifestHash.slice(0, 12)}`;
+}
+
+export function createToolForgeValidationId(
+  artifact: Pick<ToolForgeArtifactRecord, "manifestId" | "manifestVersion" | "manifestHash">
+): string {
+  return `validation.${artifact.manifestId}.${artifact.manifestVersion}.${artifact.manifestHash.slice(0, 12)}`;
 }
 
 export function createToolForgeArtifactRecord(input: {
@@ -116,6 +127,24 @@ export function summarizeToolForgeArtifact(record: ToolForgeArtifactRecord): Too
   };
 }
 
+export function summarizeToolForgeArtifactRecord(record: ToolForgeArtifactRecord): ToolForgeArtifactSummary {
+  return {
+    artifactId: record.artifactId,
+    manifestId: record.manifestId,
+    manifestVersion: record.manifestVersion,
+    manifestHash: record.manifestHash,
+    kind: record.kind,
+    source: record.source,
+    storagePath: record.storagePath,
+    ...(record.projectPath === undefined ? {} : { projectPath: record.projectPath }),
+    status: record.status,
+    executable: false,
+    registered: false,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
 export function summarizeToolForgeReview(record: ToolForgeReviewRecord): ToolForgeReviewSummary {
   return {
     reviewId: record.reviewId,
@@ -126,6 +155,47 @@ export function summarizeToolForgeReview(record: ToolForgeReviewRecord): ToolFor
     profile: record.profile,
     riskLevel: record.riskLevel,
     decisionStatus: record.decisionStatus
+  };
+}
+
+export function createToolForgeValidationRecord(input: {
+  artifact: ToolForgeArtifactRecord;
+  projectPath: string;
+  checks: ToolForgeValidationCheck[];
+  status: ToolForgeValidationStatus;
+  safeToConsiderRegistration: boolean;
+  summary: string;
+  now?: string;
+}): ToolForgeValidationRecord {
+  const now = input.now ?? new Date().toISOString();
+
+  return {
+    validationId: createToolForgeValidationId(input.artifact),
+    artifactId: input.artifact.artifactId,
+    manifestId: input.artifact.manifestId,
+    manifestHash: input.artifact.manifestHash,
+    projectPath: input.projectPath,
+    status: input.status,
+    checks: input.checks.map((check) => ({ ...check })),
+    createdAt: now,
+    summary: input.summary,
+    safeToConsiderRegistration: input.safeToConsiderRegistration
+  };
+}
+
+export function summarizeToolForgeValidation(
+  record: ToolForgeValidationRecord
+): ToolForgeValidationSummary {
+  return {
+    validationId: record.validationId,
+    artifactId: record.artifactId,
+    manifestId: record.manifestId,
+    manifestHash: record.manifestHash,
+    projectPath: record.projectPath,
+    status: record.status,
+    createdAt: record.createdAt,
+    summary: record.summary,
+    safeToConsiderRegistration: record.safeToConsiderRegistration
   };
 }
 

@@ -1,15 +1,19 @@
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   canApplySessionGrantsFromReview,
   createToolForgeArtifactRecord,
   createToolForgeReviewRecord,
+  createToolForgeValidationRecord,
   evaluateSafety,
   hashToolForgeManifest,
   proposeToolForgeGrants,
   reviewToolForgeManifest,
   summarizeGrant,
   summarizeToolForgeArtifact,
+  summarizeToolForgeArtifactRecord,
   summarizeToolForgeReview,
+  summarizeToolForgeValidation,
   toolFailure,
   toolSuccess,
   validateToolForgeManifest,
@@ -18,17 +22,24 @@ import {
   type ToolForgeApplySessionGrantsResult,
   type ToolForgeArchiveManifestResult,
   type ToolForgeArtifactRecord,
+  type ToolForgeGetArtifactResult,
   type ToolForgeCreateReviewResult,
   type ToolForgeGetManifestResult,
   type ToolForgeGetReviewResult,
+  type ToolForgeGetValidationResult,
   type ToolForgeGrantProposalResult,
+  type ToolForgeListArtifactsResult,
   type ToolForgeListManifestsResult,
   type ToolForgeListReviewsResult,
+  type ToolForgeListValidationsResult,
   type ToolForgeManifest,
+  type ToolForgeProjectFilePlanEntry,
   type ToolForgeReviewRecord,
   type ToolForgeReviewResult,
+  type ToolForgeScaffoldProjectResult,
   type ToolForgeSaveManifestResult,
   type ToolForgeValidationResult,
+  type ToolForgeValidateProjectResult,
   type ToolResult
 } from "@agenthost/core";
 import { z } from "zod";
@@ -158,6 +169,81 @@ const applySessionGrantsInputSchema = z
   })
   .strict();
 
+const scaffoldProjectInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300).optional(),
+    reviewId: z.string().trim().min(1).max(300).optional(),
+    allowOverwrite: z.boolean().optional(),
+    dryRun: z.boolean().optional(),
+    confirmationToken: optionalConfirmationSchema
+  })
+  .strict()
+  .superRefine((input, refinementContext) => {
+    const count = Number(input.artifactId !== undefined) + Number(input.reviewId !== undefined);
+    if (count !== 1) {
+      refinementContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of artifactId or reviewId."
+      });
+    }
+  });
+
+const validateProjectInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300).optional(),
+    projectPath: z.string().trim().min(1).max(2000).optional()
+  })
+  .strict()
+  .superRefine((input, refinementContext) => {
+    const count = Number(input.artifactId !== undefined) + Number(input.projectPath !== undefined);
+    if (count !== 1) {
+      refinementContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of artifactId or projectPath."
+      });
+    }
+  });
+
+const getArtifactInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300)
+  })
+  .strict();
+
+const listArtifactsInputSchema = z
+  .object({
+    manifestId: z.string().trim().min(1).max(200).optional(),
+    status: z
+      .enum([
+        "draft",
+        "validated",
+        "scaffolded",
+        "validation_pending",
+        "reviewed",
+        "grant_pending",
+        "approved_inert",
+        "rejected",
+        "archived"
+      ])
+      .optional(),
+    limit: z.number().int().min(1).max(500).optional()
+  })
+  .strict();
+
+const getValidationInputSchema = z
+  .object({
+    validationId: z.string().trim().min(1).max(300)
+  })
+  .strict();
+
+const listValidationsInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300).optional(),
+    manifestId: z.string().trim().min(1).max(200).optional(),
+    limit: z.number().int().min(1).max(500).optional()
+  })
+  .strict();
+
 type ValidateReviewProposeInput = z.infer<typeof validateReviewProposeInputSchema>;
 type SaveManifestInput = z.infer<typeof saveManifestInputSchema>;
 type ListManifestsInput = z.infer<typeof listManifestsInputSchema>;
@@ -167,6 +253,12 @@ type GetReviewInput = z.infer<typeof getReviewInputSchema>;
 type ListReviewsInput = z.infer<typeof listReviewsInputSchema>;
 type ArchiveManifestInput = z.infer<typeof archiveManifestInputSchema>;
 type ApplySessionGrantsInput = z.infer<typeof applySessionGrantsInputSchema>;
+type ScaffoldProjectInput = z.infer<typeof scaffoldProjectInputSchema>;
+type ValidateProjectInput = z.infer<typeof validateProjectInputSchema>;
+type GetArtifactInput = z.infer<typeof getArtifactInputSchema>;
+type ListArtifactsInput = z.infer<typeof listArtifactsInputSchema>;
+type GetValidationInput = z.infer<typeof getValidationInputSchema>;
+type ListValidationsInput = z.infer<typeof listValidationsInputSchema>;
 
 const validateReviewProposeMcpInputSchema = {
   type: "object",
@@ -264,6 +356,78 @@ const applySessionGrantsMcpInputSchema = {
     confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
   },
   required: ["reviewId"],
+  additionalProperties: false
+};
+
+const scaffoldProjectMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 },
+    reviewId: { type: "string", minLength: 1, maxLength: 300 },
+    allowOverwrite: { type: "boolean" },
+    dryRun: { type: "boolean" },
+    confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
+  },
+  additionalProperties: false
+};
+
+const validateProjectMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 },
+    projectPath: { type: "string", minLength: 1, maxLength: 2000 }
+  },
+  additionalProperties: false
+};
+
+const getArtifactMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 }
+  },
+  required: ["artifactId"],
+  additionalProperties: false
+};
+
+const listArtifactsMcpInputSchema = {
+  type: "object",
+  properties: {
+    manifestId: { type: "string", minLength: 1, maxLength: 200 },
+    status: {
+      type: "string",
+      enum: [
+        "draft",
+        "validated",
+        "scaffolded",
+        "validation_pending",
+        "reviewed",
+        "grant_pending",
+        "approved_inert",
+        "rejected",
+        "archived"
+      ]
+    },
+    limit: { type: "integer", minimum: 1, maximum: 500 }
+  },
+  additionalProperties: false
+};
+
+const getValidationMcpInputSchema = {
+  type: "object",
+  properties: {
+    validationId: { type: "string", minLength: 1, maxLength: 300 }
+  },
+  required: ["validationId"],
+  additionalProperties: false
+};
+
+const listValidationsMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 },
+    manifestId: { type: "string", minLength: 1, maxLength: 200 },
+    limit: { type: "integer", minimum: 1, maximum: 500 }
+  },
   additionalProperties: false
 };
 
@@ -372,6 +536,390 @@ function toGrantApplicationTarget(review: ToolForgeReviewRecord): { reviewId: st
     manifestHash: review.manifestHash,
     grantIds: review.proposedGrants.map((grant) => grant.id).sort()
   };
+}
+
+async function pathExists(candidatePath: string): Promise<boolean> {
+  try {
+    await stat(candidatePath);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function directoryHasEntries(candidatePath: string): Promise<boolean> {
+  try {
+    const entries = await readdir(candidatePath);
+    return entries.length > 0;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function buildScaffoldFiles(
+  manifest: ToolForgeManifest,
+  projectPath: string
+): Array<ToolForgeProjectFilePlanEntry & { content: string }> {
+  const packageJson = {
+    name: manifest.id,
+    version: manifest.version,
+    private: true,
+    description: manifest.description,
+    type: "module",
+    scripts: {
+      build: "tsc --noEmit",
+      test: "node --test"
+    }
+  };
+
+  const srcIndex = [
+    `export const manifestId = ${JSON.stringify(manifest.id)};`,
+    `export const manifestVersion = ${JSON.stringify(manifest.version)};`,
+    "",
+    "export function describeGeneratedArtifact(): string {",
+    `  return ${JSON.stringify(`${manifest.displayName} is scaffolded and inert in Phase 15.`)};`,
+    "}"
+  ].join("\n");
+
+  const testFile = [
+    "import test from \"node:test\";",
+    "import assert from \"node:assert/strict\";",
+    "import { describeGeneratedArtifact } from \"../src/index.js\";",
+    "",
+    "test(\"generated scaffold remains inert\", () => {",
+    "  assert.match(describeGeneratedArtifact(), /inert/);",
+    "});"
+  ].join("\n");
+
+  const contractText = [
+    `Manifest: ${manifest.id}@${manifest.version}`,
+    "",
+    "This scaffold is inert.",
+    "It must not be executed, registered, or dynamically imported in Phase 15.",
+    "Validation may inspect these files statically only."
+  ].join("\n");
+
+  const readme = [
+    `# ${manifest.displayName}`,
+    "",
+    manifest.description,
+    "",
+    "This project scaffold was generated by AgentHost Tool Forge Phase 15.",
+    "It is intentionally inert and non-executable until later reviewed phases."
+  ].join("\n");
+
+  const tsconfig = {
+    compilerOptions: {
+      target: "ES2022",
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
+      strict: true,
+      noEmit: true,
+      skipLibCheck: true
+    },
+    include: ["src/**/*.ts", "tests/**/*.ts"]
+  };
+
+  const plan: Array<ToolForgeProjectFilePlanEntry & { content: string }> = [
+    { path: projectPath, kind: "directory", description: "Generated project root", content: "" },
+    { path: path.join(projectPath, "src"), kind: "directory", description: "Source directory", content: "" },
+    { path: path.join(projectPath, "tests"), kind: "directory", description: "Test directory", content: "" },
+    {
+      path: path.join(projectPath, "agenthost.manifest.json"),
+      kind: "file",
+      description: "Canonical manifest copy",
+      content: `${JSON.stringify(manifest, null, 2)}\n`
+    },
+    { path: path.join(projectPath, "README.md"), kind: "file", description: "Project overview", content: `${readme}\n` },
+    {
+      path: path.join(projectPath, "package.json"),
+      kind: "file",
+      description: "Inert package metadata",
+      content: `${JSON.stringify(packageJson, null, 2)}\n`
+    },
+    {
+      path: path.join(projectPath, "tsconfig.json"),
+      kind: "file",
+      description: "Static TypeScript config",
+      content: `${JSON.stringify(tsconfig, null, 2)}\n`
+    },
+    { path: path.join(projectPath, "src", "index.ts"), kind: "file", description: "Inert source placeholder", content: `${srcIndex}\n` },
+    {
+      path: path.join(projectPath, "tests", "generated.test.ts"),
+      kind: "file",
+      description: "Static placeholder test",
+      content: `${testFile}\n`
+    },
+    { path: path.join(projectPath, "CONTRACT.md"), kind: "file", description: "Artifact safety contract", content: `${contractText}\n` }
+  ];
+
+  return plan.map((entry) => ({
+    ...entry,
+    ...(entry.kind === "file" ? { bytes: Buffer.byteLength(entry.content, "utf8") } : {})
+  }));
+}
+
+function summarizeFilePlan(plan: Array<ToolForgeProjectFilePlanEntry & { content?: string }>): ToolForgeProjectFilePlanEntry[] {
+  return plan.map(({ content: _content, ...entry }) => ({ ...entry }));
+}
+
+async function writeScaffoldFiles(plan: Array<ToolForgeProjectFilePlanEntry & { content: string }>): Promise<void> {
+  for (const entry of plan) {
+    if (entry.kind === "directory") {
+      await mkdir(entry.path, { recursive: true });
+      continue;
+    }
+
+    await mkdir(path.dirname(entry.path), { recursive: true });
+    await writeFile(entry.path, entry.content, "utf8");
+  }
+}
+
+async function resolveArtifactById(
+  context: AgentHostMcpContext,
+  artifactId: string
+): Promise<{ artifact: ToolForgeArtifactRecord; manifest: ToolForgeManifest }> {
+  const artifact = await context.forge.loadArtifact(artifactId);
+  const manifest = await context.forge.loadManifestByPath(artifact.storagePath);
+  return { artifact, manifest };
+}
+
+async function resolveArtifactForProjectInput(
+  context: AgentHostMcpContext,
+  input: { artifactId?: string; reviewId?: string }
+): Promise<{
+  artifact: ToolForgeArtifactRecord;
+  manifest: ToolForgeManifest;
+  review?: ToolForgeReviewRecord;
+}> {
+  if (input.reviewId !== undefined) {
+    const review = await context.forge.loadReview(input.reviewId);
+    const { artifact, manifest } = await resolveStoredManifest(context, {
+      manifestId: review.manifestId,
+      version: review.manifestVersion,
+      manifestHash: review.manifestHash
+    });
+    const manifestHash = hashToolForgeManifest(manifest);
+    if (manifestHash !== review.manifestHash) {
+      throw new Error("Stored manifest content changed, so the review no longer matches the current artifact.");
+    }
+
+    return { artifact, manifest, review };
+  }
+
+  const { artifact, manifest } = await resolveArtifactById(context, input.artifactId!);
+  return { artifact, manifest };
+}
+
+function buildScaffoldPreviewTarget(projectPath: string, manifest: ToolForgeManifest): {
+  path: string;
+  summary: string;
+} {
+  return {
+    path: projectPath,
+    summary: `Scaffold inert project ${manifest.id}@${manifest.version}`
+  };
+}
+
+function sanitizeAbsoluteForMessage(candidatePath: string, root: string): string {
+  const relative = path.relative(root, candidatePath);
+  return relative === "" || relative.startsWith("..") ? candidatePath : path.join("forge/generated", relative);
+}
+
+function createValidationCheck(
+  id: string,
+  level: "info" | "warning" | "error",
+  message: string,
+  pathValue?: string
+) {
+  return pathValue === undefined ? { id, level, message } : { id, level, message, path: pathValue };
+}
+
+function requestedPermissionsAllowShell(manifest: ToolForgeManifest): boolean {
+  return manifest.requestedPermissions.some(
+    (permission) => permission.canRunShell === true || (permission.actionTypes ?? []).includes("shell_command")
+  );
+}
+
+function requestedPermissionsAllowNetwork(manifest: ToolForgeManifest): boolean {
+  return manifest.requestedPermissions.some((permission) => (permission.networkDomains?.length ?? 0) > 0);
+}
+
+function collectStaticValidationChecks(
+  manifest: ToolForgeManifest,
+  projectPath: string,
+  files: Record<string, string>
+): { checks: ReturnType<typeof createValidationCheck>[]; safeToConsiderRegistration: boolean } {
+  const checks: ReturnType<typeof createValidationCheck>[] = [];
+
+  for (const requiredPath of [
+    "agenthost.manifest.json",
+    "README.md",
+    "package.json",
+    "tsconfig.json",
+    "src/index.ts",
+    "tests/generated.test.ts",
+    "CONTRACT.md"
+  ]) {
+    if (!(requiredPath in files)) {
+      checks.push(createValidationCheck("missing_file", "error", `Missing required scaffold file ${requiredPath}.`, requiredPath));
+    }
+  }
+
+  let packageJson: Record<string, unknown> | undefined;
+  if (files["package.json"] !== undefined) {
+    try {
+      packageJson = JSON.parse(files["package.json"]) as Record<string, unknown>;
+      checks.push(createValidationCheck("package_json", "info", "package.json parsed successfully.", "package.json"));
+    } catch {
+      checks.push(createValidationCheck("package_json_invalid", "error", "package.json is not valid JSON.", "package.json"));
+    }
+  }
+
+  const scripts =
+    packageJson !== undefined &&
+    typeof packageJson.scripts === "object" &&
+    packageJson.scripts !== null &&
+    !Array.isArray(packageJson.scripts)
+      ? (packageJson.scripts as Record<string, unknown>)
+      : {};
+
+  for (const scriptName of ["preinstall", "install", "postinstall"]) {
+    if (typeof scripts[scriptName] === "string" && scripts[scriptName]!.trim() !== "") {
+      checks.push(
+        createValidationCheck(
+          "dangerous_package_script",
+          "error",
+          `Package script ${scriptName} is not allowed in an inert generated project.`,
+          "package.json"
+        )
+      );
+    }
+  }
+
+  const combinedEntries = Object.entries(files);
+  const shellAllowed = requestedPermissionsAllowShell(manifest);
+  const networkAllowed = requestedPermissionsAllowNetwork(manifest);
+  const broadFsPattern = /(~\/\.ssh|~\/\.gnupg|~\/\.config|~\/\.local\/share\/keyrings|\/etc\/|\/usr\/|\/var\/|\/root\/|process\.env\.HOME|process\.cwd\(\))/i;
+  const secretPattern = /\b(password|api[_-]?key|secret|private[_-]?key|session[_-]?token|access[_-]?token|cookie)\b/i;
+  const childProcessPattern = /\b(child_process|execSync|execFile|spawn|fork)\b/;
+  const networkPattern = /\b(node:)?(http|https|net|tls|dgram)\b|\bfetch\s*\(|\baxios\b|\bWebSocket\b/;
+  const internalsPattern = /@agenthost\/(mcp-server|os-linux)|packages\/mcp-server|packages\/os-linux/;
+
+  for (const [relativePath, content] of combinedEntries) {
+    if (broadFsPattern.test(content)) {
+      checks.push(
+        createValidationCheck(
+          "broad_filesystem_reference",
+          "error",
+          "Generated project references filesystem locations outside approved Forge storage.",
+          relativePath
+        )
+      );
+    }
+
+    if (secretPattern.test(content)) {
+      checks.push(
+        createValidationCheck(
+          "secret_reference",
+          "warning",
+          "Generated project contains credential or secret-related identifiers that need review.",
+          relativePath
+        )
+      );
+    }
+
+    if (childProcessPattern.test(content) && !shellAllowed) {
+      checks.push(
+        createValidationCheck(
+          "child_process_without_permission",
+          "error",
+          "Generated project references child_process-style execution without requesting shell permission.",
+          relativePath
+        )
+      );
+    }
+
+    if (networkPattern.test(content) && !networkAllowed) {
+      checks.push(
+        createValidationCheck(
+          "network_without_permission",
+          "error",
+          "Generated project references network access without requesting network domains.",
+          relativePath
+        )
+      );
+    }
+
+    if (internalsPattern.test(content)) {
+      checks.push(
+        createValidationCheck(
+          "agenthost_internal_reference",
+          "error",
+          "Generated project references AgentHost internals directly.",
+          relativePath
+        )
+      );
+    }
+  }
+
+  if (checks.every((check) => check.level !== "error")) {
+    checks.push(
+      createValidationCheck(
+        "static_scan_complete",
+        "info",
+        `Static validation inspected ${combinedEntries.length} project files without executing generated code.`,
+        sanitizeAbsoluteForMessage(projectPath, projectPath)
+      )
+    );
+  }
+
+  const hasErrors = checks.some((check) => check.level === "error");
+  return {
+    checks,
+    safeToConsiderRegistration: !hasErrors
+  };
+}
+
+async function readProjectFiles(projectPath: string): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+
+  async function walk(currentPath: string): Promise<void> {
+    const currentStat = await stat(currentPath);
+    if (currentStat.isDirectory()) {
+      const entries = await readdir(currentPath, { withFileTypes: true });
+      for (const entry of entries) {
+        await walk(path.join(currentPath, entry.name));
+      }
+      return;
+    }
+
+    const relative = path.relative(projectPath, currentPath);
+    result[relative] = await readFile(currentPath, "utf8");
+  }
+
+  await walk(projectPath);
+  return result;
+}
+
+function determineValidationStatus(checks: Array<{ level: "info" | "warning" | "error" }>) {
+  if (checks.some((check) => check.level === "error")) {
+    return "failed" as const;
+  }
+
+  if (checks.some((check) => check.level === "warning")) {
+    return "warnings" as const;
+  }
+
+  return "passed" as const;
 }
 
 export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
@@ -1270,6 +1818,514 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     }
   };
 
+  const scaffoldProject: AgentHostToolDefinition<
+    ScaffoldProjectInput,
+    ToolForgeScaffoldProjectResult | (ActionPreviewResult & { filePlan: ToolForgeProjectFilePlanEntry[] }),
+    AgentHostMcpContext
+  > = {
+    name: "forge.scaffold_project",
+    description: "Creates an inert generated project scaffold under AgentHost Forge storage without registering or executing it.",
+    riskLevel: "medium",
+    inputSchema: scaffoldProjectInputSchema,
+    mcpInputSchema: scaffoldProjectMcpInputSchema,
+    inputSummary: "Scaffold Forge generated project",
+    safety: {
+      actionType: "file_write"
+    },
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(
+      input,
+      context,
+      runtime
+    ): Promise<ToolResult<ToolForgeScaffoldProjectResult | (ActionPreviewResult & { filePlan: ToolForgeProjectFilePlanEntry[] })>> {
+      let artifact: ToolForgeArtifactRecord;
+      let manifest: ToolForgeManifest;
+      let review: ToolForgeReviewRecord | undefined;
+
+      try {
+        ({ artifact, manifest, review } = await resolveArtifactForProjectInput(context, {
+          ...(input.artifactId === undefined ? {} : { artifactId: input.artifactId }),
+          ...(input.reviewId === undefined ? {} : { reviewId: input.reviewId })
+        }));
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.scaffold_project",
+          riskLevel: "medium",
+          error: {
+            code: "artifact_not_found",
+            message: error instanceof Error ? error.message : "Forge artifact or review could not be resolved."
+          },
+          observations: ["Could not resolve the stored inert artifact for scaffolding."]
+        });
+      }
+
+      const manifestHash = hashToolForgeManifest(manifest);
+      if (manifestHash !== artifact.manifestHash) {
+        return toolFailure({
+          tool: "forge.scaffold_project",
+          riskLevel: "medium",
+          error: {
+            code: "manifest_hash_mismatch",
+            message: "Stored manifest content changed, so this scaffold request no longer matches the artifact."
+          },
+          observations: ["Refused to scaffold because the saved manifest no longer matches the artifact hash."]
+        });
+      }
+
+      const projectPath = context.forge.generatedProjectPath(manifest.id, manifest.version);
+      const filePlan = summarizeFilePlan(buildScaffoldFiles(manifest, projectPath));
+      const overwriteBlocked = (await directoryHasEntries(projectPath)) && input.allowOverwrite !== true;
+      const previewTarget = buildScaffoldPreviewTarget(projectPath, manifest);
+      const safetyDecision =
+        runtime?.safetyDecision ??
+        evaluateSafety(
+          {
+            tool: "forge.scaffold_project",
+            actionType: "file_write",
+            filePath: projectPath,
+            generatedTool: true,
+            generatedToolId: manifest.id
+          },
+          context.policy,
+          createSafetyEvaluationContext(context)
+        );
+      const target = {
+        artifactId: artifact.artifactId,
+        manifestHash,
+        projectPath,
+        allowOverwrite: input.allowOverwrite === true,
+        filePlan: filePlan.map((entry) => `${entry.kind}:${entry.path}`)
+      };
+
+      if (runtime?.isDryRun) {
+        const preview = buildPreviewResult({
+          tool: "forge.scaffold_project",
+          riskLevel: "medium",
+          safety: safetyDecision,
+          targetSummary: previewTarget.summary,
+          target: toFilePreviewTarget(projectPath, previewTarget.summary),
+          wouldExecute: !overwriteBlocked && safetyDecision.allowed,
+          ...(overwriteBlocked
+            ? {}
+            : {
+                confirmation: {
+                  manager: context.confirmations,
+                  sessionId: context.sessionId,
+                  input,
+                  target,
+                  explanation:
+                    "Use this token to scaffold the exact previewed inert generated project before it expires.",
+                  riskLevel: safetyDecision.riskLevel,
+                  appSensitivity: safetyDecision.appSensitivity
+                }
+              }),
+          reasons: previewReasons(
+            overwriteBlocked
+              ? "Project scaffold already exists. Set allowOverwrite:true in the preview and execute flow to replace it."
+              : "Prepared an inert project file plan without writing generated files.",
+            safetyDecision.reasons
+          ),
+          observations: ["Previewed inert project scaffolding without writing any files."]
+        });
+
+        return {
+          ...preview,
+          data: {
+            ...(preview.data as ActionPreviewResult),
+            filePlan
+          }
+        };
+      }
+
+      if (overwriteBlocked) {
+        return toolFailure({
+          tool: "forge.scaffold_project",
+          riskLevel: safetyDecision.riskLevel,
+          error: {
+            code: "overwrite_requires_preview",
+            message: "Existing scaffold would be overwritten. Preview again with allowOverwrite:true before execution."
+          },
+          observations: ["Refused to overwrite an existing generated project scaffold without explicit previewed consent."]
+        });
+      }
+
+      if (input.confirmationToken === undefined) {
+        const { code, reason } = missingConfirmationReason(safetyDecision);
+        return toolFailure({
+          tool: "forge.scaffold_project",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: confirmationRequired(reason),
+          error: {
+            code,
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "forge.scaffold_project",
+        input,
+        target,
+        riskLevel: safetyDecision.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "forge.scaffold_project",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
+      await writeScaffoldFiles(buildScaffoldFiles(manifest, projectPath));
+      const updatedArtifact: ToolForgeArtifactRecord = {
+        ...artifact,
+        projectPath,
+        status: "scaffolded",
+        updatedAt: new Date().toISOString()
+      };
+      await context.forge.saveArtifact(updatedArtifact);
+
+      return toolSuccess({
+        tool: "forge.scaffold_project",
+        riskLevel: safetyDecision.riskLevel,
+        confirmation: acceptedConfirmation(
+          verification.tokenId,
+          true,
+          "Confirmation token accepted and inert project scaffolding executed."
+        ),
+        data: {
+          artifact: updatedArtifact,
+          manifestHash,
+          projectPath,
+          ...(review === undefined ? {} : { reviewId: review.reviewId }),
+          files: filePlan,
+          overwritten: input.allowOverwrite === true
+        },
+        observations: ["Wrote an inert generated project scaffold without registering or executing any generated tool."]
+      });
+    }
+  };
+
+  const validateProject: AgentHostToolDefinition<
+    ValidateProjectInput,
+    ToolForgeValidateProjectResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.validate_project",
+    description: "Validates an inert generated project scaffold and stores a non-executable validation record.",
+    riskLevel: "medium",
+    inputSchema: validateProjectInputSchema,
+    mcpInputSchema: validateProjectMcpInputSchema,
+    inputSummary: "Validate Forge generated project",
+    safety: {
+      actionType: "file_write"
+    },
+    async handler(input, context, runtime): Promise<ToolResult<ToolForgeValidateProjectResult>> {
+      const generatedRoot = context.forge.generatedRootDir();
+      let artifact: ToolForgeArtifactRecord | undefined;
+      let manifest: ToolForgeManifest | undefined;
+      let projectPath: string;
+
+      if (input.artifactId !== undefined) {
+        try {
+          const resolved = await resolveArtifactById(context, input.artifactId);
+          artifact = resolved.artifact;
+          manifest = resolved.manifest;
+        } catch (error) {
+          return toolFailure({
+            tool: "forge.validate_project",
+            riskLevel: "medium",
+            error: {
+              code: "artifact_not_found",
+              message: error instanceof Error ? error.message : "Stored artifact was not found."
+            },
+            observations: ["Could not resolve the stored artifact for project validation."]
+          });
+        }
+
+        if (artifact.projectPath === undefined) {
+          return toolFailure({
+            tool: "forge.validate_project",
+            riskLevel: "medium",
+            error: {
+              code: "project_not_scaffolded",
+              message: "Artifact does not have a generated project scaffold yet."
+            },
+            observations: ["Scaffold the project before validating it."]
+          });
+        }
+
+        projectPath = artifact.projectPath;
+      } else {
+        projectPath = path.resolve(input.projectPath!);
+        const artifacts = await context.forge.listArtifacts();
+        artifact = artifacts.find((candidate) => candidate.projectPath !== undefined && path.resolve(candidate.projectPath) === projectPath);
+        if (artifact !== undefined) {
+          manifest = await context.forge.loadManifestByPath(artifact.storagePath);
+        }
+      }
+
+      if (!isInsideOrEqual(projectPath, generatedRoot)) {
+        return toolFailure({
+          tool: "forge.validate_project",
+          riskLevel: "medium",
+          error: {
+            code: "path_not_allowed",
+            message: "Project paths must stay inside the approved AgentHost forge/generated folder."
+          },
+          observations: ["Rejected validation for a path outside approved Forge generated storage."]
+        });
+      }
+
+      if (!(await pathExists(projectPath))) {
+        return toolFailure({
+          tool: "forge.validate_project",
+          riskLevel: "medium",
+          error: {
+            code: "project_not_found",
+            message: "Generated project path was not found."
+          },
+          observations: ["The generated project path does not exist."]
+        });
+      }
+
+      const manifestPath = path.join(projectPath, "agenthost.manifest.json");
+      if (!(await pathExists(manifestPath))) {
+        return toolFailure({
+          tool: "forge.validate_project",
+          riskLevel: "medium",
+          error: {
+            code: "manifest_copy_missing",
+            message: "Generated project is missing agenthost.manifest.json."
+          },
+          observations: ["Generated project did not contain the required manifest copy."]
+        });
+      }
+
+      const manifestFromProject = validateToolForgeManifest(await readFile(manifestPath, "utf8"));
+      if (!manifestFromProject.valid || manifestFromProject.manifest === undefined) {
+        return toolFailure({
+          tool: "forge.validate_project",
+          riskLevel: "medium",
+          error: {
+            code: "manifest_copy_invalid",
+            message: "Generated project manifest copy is invalid.",
+            details: manifestFromProject
+          },
+          observations: ["Generated project manifest copy failed validation."]
+        });
+      }
+
+      manifest ??= manifestFromProject.manifest;
+      const manifestHash = hashToolForgeManifest(manifestFromProject.manifest);
+      if (artifact !== undefined && manifestHash !== artifact.manifestHash) {
+        return toolFailure({
+          tool: "forge.validate_project",
+          riskLevel: "medium",
+          error: {
+            code: "manifest_hash_mismatch",
+            message: "Generated project manifest hash no longer matches the saved artifact."
+          },
+          observations: ["Refused validation because the generated project does not match the saved artifact."]
+        });
+      }
+
+      const safetyDecision =
+        runtime?.safetyDecision ??
+        evaluateSafety(
+          {
+            tool: "forge.validate_project",
+            actionType: "file_write",
+            filePath: context.forge.validationPath(
+              artifact === undefined
+                ? `validation.${manifestFromProject.manifest.id}.${manifestFromProject.manifest.version}.${manifestHash.slice(0, 12)}`
+                : `validation.${artifact.manifestId}.${artifact.manifestVersion}.${artifact.manifestHash.slice(0, 12)}`
+            ),
+            generatedTool: true,
+            generatedToolId: manifestFromProject.manifest.id
+          },
+          context.policy,
+          createSafetyEvaluationContext(context)
+        );
+
+      const files = await readProjectFiles(projectPath);
+      const staticChecks = collectStaticValidationChecks(manifestFromProject.manifest, projectPath, files);
+      const validationRecord = createToolForgeValidationRecord({
+        artifact:
+          artifact ??
+          createToolForgeArtifactRecord({
+            manifest: manifestFromProject.manifest,
+            manifestHash,
+            storagePath: manifestPath,
+            status: "validation_pending"
+          }),
+        projectPath,
+        checks: staticChecks.checks,
+        status: determineValidationStatus(staticChecks.checks),
+        safeToConsiderRegistration: staticChecks.safeToConsiderRegistration,
+        summary: staticChecks.safeToConsiderRegistration
+          ? "Static validation completed without executable behavior or blocked findings."
+          : "Static validation found issues that keep the generated project inert and not ready for later consideration."
+      });
+
+      await context.forge.saveValidation(validationRecord);
+
+      if (artifact !== undefined) {
+        const updatedArtifact: ToolForgeArtifactRecord = {
+          ...artifact,
+          status: "validation_pending",
+          updatedAt: new Date().toISOString()
+        };
+        await context.forge.saveArtifact(updatedArtifact);
+        artifact = updatedArtifact;
+      }
+
+      return toolSuccess({
+        tool: "forge.validate_project",
+        riskLevel: safetyDecision.riskLevel,
+        data: {
+          ...(artifact === undefined ? {} : { artifact }),
+          validation: validationRecord
+        },
+        observations: ["Validated scaffolded project files statically without executing generated code or package scripts."]
+      });
+    }
+  };
+
+  const getArtifact: AgentHostToolDefinition<GetArtifactInput, ToolForgeGetArtifactResult, AgentHostMcpContext> = {
+    name: "forge.get_artifact",
+    description: "Returns one stored Forge artifact record.",
+    riskLevel: "low",
+    inputSchema: getArtifactInputSchema,
+    mcpInputSchema: getArtifactMcpInputSchema,
+    inputSummary: "Get Forge artifact",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeGetArtifactResult>> {
+      try {
+        const artifact = await context.forge.loadArtifact(input.artifactId);
+        return toolSuccess({
+          tool: "forge.get_artifact",
+          riskLevel: "low",
+          data: { artifact },
+          observations: ["Returned one stored Forge artifact record."]
+        });
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.get_artifact",
+          riskLevel: "low",
+          error: {
+            code: "artifact_not_found",
+            message: error instanceof Error ? error.message : "Stored artifact was not found."
+          },
+          observations: ["No stored artifact matched the requested artifact id."]
+        });
+      }
+    }
+  };
+
+  const listArtifacts: AgentHostToolDefinition<ListArtifactsInput, ToolForgeListArtifactsResult, AgentHostMcpContext> = {
+    name: "forge.list_artifacts",
+    description: "Lists stored Forge artifact summaries.",
+    riskLevel: "low",
+    inputSchema: listArtifactsInputSchema,
+    mcpInputSchema: listArtifactsMcpInputSchema,
+    inputSummary: "List Forge artifacts",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeListArtifactsResult>> {
+      const artifacts = (await context.forge.listArtifacts())
+        .filter((artifact) => input.manifestId === undefined || artifact.manifestId === input.manifestId)
+        .filter((artifact) => input.status === undefined || artifact.status === input.status)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .slice(0, input.limit ?? 100)
+        .map((artifact) => summarizeToolForgeArtifactRecord(artifact));
+
+      return toolSuccess({
+        tool: "forge.list_artifacts",
+        riskLevel: "low",
+        data: { artifacts },
+        observations: ["Listed stored Forge artifact summaries."]
+      });
+    }
+  };
+
+  const getValidation: AgentHostToolDefinition<GetValidationInput, ToolForgeGetValidationResult, AgentHostMcpContext> = {
+    name: "forge.get_validation",
+    description: "Returns one stored Forge validation record.",
+    riskLevel: "low",
+    inputSchema: getValidationInputSchema,
+    mcpInputSchema: getValidationMcpInputSchema,
+    inputSummary: "Get Forge validation",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeGetValidationResult>> {
+      try {
+        const validation = await context.forge.loadValidation(input.validationId);
+        return toolSuccess({
+          tool: "forge.get_validation",
+          riskLevel: "low",
+          data: { validation },
+          observations: ["Returned one stored Forge validation record."]
+        });
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.get_validation",
+          riskLevel: "low",
+          error: {
+            code: "validation_not_found",
+            message: error instanceof Error ? error.message : "Stored validation was not found."
+          },
+          observations: ["No stored validation matched the requested validation id."]
+        });
+      }
+    }
+  };
+
+  const listValidations: AgentHostToolDefinition<
+    ListValidationsInput,
+    ToolForgeListValidationsResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.list_validations",
+    description: "Lists stored Forge validation summaries.",
+    riskLevel: "low",
+    inputSchema: listValidationsInputSchema,
+    mcpInputSchema: listValidationsMcpInputSchema,
+    inputSummary: "List Forge validations",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeListValidationsResult>> {
+      const validations = (await context.forge.listValidations())
+        .filter((validation) => input.artifactId === undefined || validation.artifactId === input.artifactId)
+        .filter((validation) => input.manifestId === undefined || validation.manifestId === input.manifestId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, input.limit ?? 100)
+        .map((validation) => summarizeToolForgeValidation(validation));
+
+      return toolSuccess({
+        tool: "forge.list_validations",
+        riskLevel: "low",
+        data: { validations },
+        observations: ["Listed stored Forge validation summaries."]
+      });
+    }
+  };
+
   return [
     validateManifest,
     reviewManifest,
@@ -1281,6 +2337,12 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     getReview,
     listReviews,
     archiveManifest,
-    applySessionGrants
+    applySessionGrants,
+    scaffoldProject,
+    validateProject,
+    getArtifact,
+    listArtifacts,
+    getValidation,
+    listValidations
   ];
 }

@@ -1022,6 +1022,8 @@ export type ToolForgeReviewDecisionStatus = (typeof TOOL_FORGE_REVIEW_DECISION_S
 export const TOOL_FORGE_ARTIFACT_STATUSES = [
   "draft",
   "validated",
+  "scaffolded",
+  "validation_pending",
   "reviewed",
   "grant_pending",
   "approved_inert",
@@ -1029,6 +1031,9 @@ export const TOOL_FORGE_ARTIFACT_STATUSES = [
   "archived"
 ] as const;
 export type ToolForgeArtifactStatus = (typeof TOOL_FORGE_ARTIFACT_STATUSES)[number];
+
+export const TOOL_FORGE_VALIDATION_STATUSES = ["passed", "failed", "warnings"] as const;
+export type ToolForgeValidationStatus = (typeof TOOL_FORGE_VALIDATION_STATUSES)[number];
 
 export interface ToolForgeArtifactRecord {
   artifactId: string;
@@ -1038,6 +1043,7 @@ export interface ToolForgeArtifactRecord {
   kind: ToolForgeManifestKind;
   source: ToolForgeManifestSource;
   storagePath: string;
+  projectPath?: string;
   status: ToolForgeArtifactStatus;
   executable: false;
   registered: false;
@@ -1086,6 +1092,91 @@ export interface ToolForgeReviewSummary {
   profile: PolicyProfileName;
   riskLevel: RiskLevel;
   decisionStatus: ToolForgeReviewDecisionStatus;
+}
+
+export interface ToolForgeProjectFilePlanEntry {
+  path: string;
+  kind: "file" | "directory";
+  description: string;
+  bytes?: number;
+}
+
+export interface ToolForgeScaffoldProjectResult {
+  artifact: ToolForgeArtifactRecord;
+  manifestHash: string;
+  projectPath: string;
+  reviewId?: string;
+  files: ToolForgeProjectFilePlanEntry[];
+  overwritten: boolean;
+}
+
+export interface ToolForgeValidationCheck {
+  id: string;
+  level: "info" | "warning" | "error";
+  message: string;
+  path?: string;
+}
+
+export interface ToolForgeValidationRecord {
+  validationId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestHash: string;
+  projectPath: string;
+  status: ToolForgeValidationStatus;
+  checks: ToolForgeValidationCheck[];
+  createdAt: string;
+  summary: string;
+  safeToConsiderRegistration: boolean;
+}
+
+export interface ToolForgeValidateProjectResult {
+  artifact?: ToolForgeArtifactRecord;
+  validation: ToolForgeValidationRecord;
+}
+
+export interface ToolForgeArtifactSummary {
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  kind: ToolForgeManifestKind;
+  source: ToolForgeManifestSource;
+  storagePath: string;
+  projectPath?: string;
+  status: ToolForgeArtifactStatus;
+  executable: false;
+  registered: false;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ToolForgeGetArtifactResult {
+  artifact: ToolForgeArtifactRecord;
+}
+
+export interface ToolForgeListArtifactsResult {
+  artifacts: ToolForgeArtifactSummary[];
+}
+
+export interface ToolForgeValidationSummary {
+  validationId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestHash: string;
+  projectPath: string;
+  status: ToolForgeValidationStatus;
+  createdAt: string;
+  summary: string;
+  safeToConsiderRegistration: boolean;
+}
+
+export interface ToolForgeGetValidationResult {
+  validation: ToolForgeValidationRecord;
+}
+
+export interface ToolForgeListValidationsResult {
+  validations: ToolForgeValidationSummary[];
 }
 
 export interface ToolForgeSaveManifestResult {
