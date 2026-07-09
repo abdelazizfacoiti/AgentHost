@@ -6,6 +6,10 @@ import type {
   ToolForgeArtifactStatus,
   ToolForgeArtifactSummary,
   ToolForgeGrantProposalResult,
+  ToolForgeHarnessMode,
+  ToolForgeHarnessRunRecord,
+  ToolForgeHarnessRunSummary,
+  ToolForgeHarnessStatus,
   ToolForgeManifest,
   ToolForgeManifestSummary,
   ToolForgeValidationCheck,
@@ -51,6 +55,15 @@ export function createToolForgeValidationId(
   artifact: Pick<ToolForgeArtifactRecord, "manifestId" | "manifestVersion" | "manifestHash">
 ): string {
   return `validation.${artifact.manifestId}.${artifact.manifestVersion}.${artifact.manifestHash.slice(0, 12)}`;
+}
+
+export function createToolForgeHarnessRunId(input: {
+  artifact: Pick<ToolForgeArtifactRecord, "manifestId" | "manifestVersion" | "manifestHash">;
+  mode: ToolForgeHarnessMode;
+  now?: string;
+}): string {
+  const timestampSegment = (input.now ?? new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
+  return `harness.${input.artifact.manifestId}.${input.artifact.manifestVersion}.${input.mode}.${input.artifact.manifestHash.slice(0, 12)}.${timestampSegment}`;
 }
 
 export function createToolForgeArtifactRecord(input: {
@@ -196,6 +209,58 @@ export function summarizeToolForgeValidation(
     createdAt: record.createdAt,
     summary: record.summary,
     safeToConsiderRegistration: record.safeToConsiderRegistration
+  };
+}
+
+export function createToolForgeHarnessRunRecord(input: {
+  artifact: ToolForgeArtifactRecord;
+  projectPath: string;
+  mode: ToolForgeHarnessMode;
+  status: ToolForgeHarnessStatus;
+  checks: ToolForgeValidationCheck[];
+  stdoutSummary?: string;
+  stderrSummary?: string;
+  durationMs: number;
+  safeToConsiderRegistration: boolean;
+  now?: string;
+}): ToolForgeHarnessRunRecord {
+  const now = input.now ?? new Date().toISOString();
+
+  return {
+    harnessRunId: createToolForgeHarnessRunId({
+      artifact: input.artifact,
+      mode: input.mode,
+      now
+    }),
+    artifactId: input.artifact.artifactId,
+    manifestId: input.artifact.manifestId,
+    manifestHash: input.artifact.manifestHash,
+    projectPath: input.projectPath,
+    mode: input.mode,
+    status: input.status,
+    checks: input.checks.map((check) => ({ ...check })),
+    stdoutSummary: input.stdoutSummary ?? "",
+    stderrSummary: input.stderrSummary ?? "",
+    durationMs: input.durationMs,
+    safeToConsiderRegistration: input.safeToConsiderRegistration,
+    createdAt: now
+  };
+}
+
+export function summarizeToolForgeHarnessRun(
+  record: ToolForgeHarnessRunRecord
+): ToolForgeHarnessRunSummary {
+  return {
+    harnessRunId: record.harnessRunId,
+    artifactId: record.artifactId,
+    manifestId: record.manifestId,
+    manifestHash: record.manifestHash,
+    projectPath: record.projectPath,
+    mode: record.mode,
+    status: record.status,
+    durationMs: record.durationMs,
+    safeToConsiderRegistration: record.safeToConsiderRegistration,
+    createdAt: record.createdAt
   };
 }
 

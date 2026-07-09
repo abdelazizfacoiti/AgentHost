@@ -673,4 +673,352 @@ describe("forge MCP tools", () => {
     expect((getValidation.data as { validation: { validationId: string } }).validation.validationId).toBe(validationId);
     expect((listValidations.data as { validations: unknown[] }).validations.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("run_validation_harness dryRun writes nothing and returns planned checks", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+
+    const result = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "static-plus", dryRun: true },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { confirmationToken?: string; plannedChecks: string[]; mode: string };
+    expect(data.confirmationToken).toBeTruthy();
+    expect(data.mode).toBe("static-plus");
+    expect(data.plannedChecks.length).toBeGreaterThan(0);
+    expect((await context.forge.listHarnessRuns()).length).toBe(0);
+  });
+
+  it("run_validation_harness requires a confirmation token for actual execution", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+
+    const result = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "static-plus" },
+      context
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("dry_run_required");
+  });
+
+  it("run_validation_harness rejects a project outside Forge generated storage", async () => {
+    const context = createContext();
+
+    const result = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath: "/tmp/not-agenthost-project", mode: "static-plus", dryRun: true },
+      context
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("harness_target_not_found");
+  });
+
+  it("run_validation_harness rejects manifest hash mismatch", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    await writeFile(
+      `${projectPath}/agenthost.manifest.json`,
+      JSON.stringify({ ...validManifest, description: "tampered" }, null, 2),
+      "utf8"
+    );
+
+    const result = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "static-plus", dryRun: true },
+      context
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("manifest_hash_mismatch");
+  });
+
+  it("run_validation_harness refuses after failed static validation", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await writeFile(
+      `${projectPath}/package.json`,
+      JSON.stringify({ scripts: { install: "bad" } }, null, 2),
+      "utf8"
+    );
+    const validation = await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    expect((validation.data as { validation: { status: string } }).validation.status).toBe("failed");
+
+    const preview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "static-plus", dryRun: true },
+      context
+    );
+    expect(preview.ok).toBe(true);
+    expect((preview.data as { wouldExecute: boolean }).wouldExecute).toBe(false);
+
+    const execute = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "static-plus" },
+      context
+    );
+    expect(execute.ok).toBe(false);
+    expect(execute.error?.code).toBe("static_validation_failed");
+  });
+
+  it("contract mode passes a clean scaffold", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    const validation = await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const validationId = (validation.data as { validation: { validationId: string } }).validation.validationId;
+
+    const preview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { validationId, mode: "contract", dryRun: true },
+      context
+    );
+    const execute = await runTool(
+      getTool("forge.run_validation_harness"),
+      {
+        validationId,
+        mode: "contract",
+        confirmationToken: (preview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+
+    expect(execute.ok).toBe(true);
+    const data = execute.data as {
+      harnessRun: { status: string; mode: string; safeToConsiderRegistration: boolean };
+      artifact: { executable: boolean; registered: boolean };
+    };
+    expect(data.harnessRun.mode).toBe("contract");
+    expect(data.harnessRun.status).toBe("passed");
+    expect(data.harnessRun.safeToConsiderRegistration).toBe(true);
+    expect(data.artifact.executable).toBe(false);
+    expect(data.artifact.registered).toBe(false);
+  });
+
+  it("static-plus detects eval, dynamic import, AgentHost internals, network, and child_process", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    await writeFile(
+      `${projectPath}/src/index.ts`,
+      [
+        "import { execSync } from \"node:child_process\";",
+        "import https from \"node:https\";",
+        "import \"@agenthost/mcp-server\";",
+        "const fn = new Function('return 1');",
+        "const later = import('./other.js');",
+        "const remote = fetch('https://example.com');",
+        "export const run = () => ({ execSync, https, fn, later, remote });"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const preview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "static-plus", dryRun: true },
+      context
+    );
+    const execute = await runTool(
+      getTool("forge.run_validation_harness"),
+      {
+        projectPath,
+        mode: "static-plus",
+        confirmationToken: (preview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+
+    expect(execute.ok).toBe(true);
+    const checkIds = (execute.data as { harnessRun: { checks: Array<{ id: string }> } }).harnessRun.checks.map(
+      (check) => check.id
+    );
+    expect(checkIds).toContain("child_process_without_permission");
+    expect(checkIds).toContain("network_without_permission");
+    expect(checkIds).toContain("agenthost_internal_reference");
+    expect(checkIds).toContain("dynamic_execution_reference");
+  });
+
+  it("get/list harness runs return stored results", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+    expect(artifact).toBeDefined();
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    const validation = await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const validationId = (validation.data as { validation: { validationId: string } }).validation.validationId;
+    const preview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { validationId, mode: "contract", dryRun: true },
+      context
+    );
+    const executed = await runTool(
+      getTool("forge.run_validation_harness"),
+      {
+        validationId,
+        mode: "contract",
+        confirmationToken: (preview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const harnessRunId = (executed.data as { harnessRun: { harnessRunId: string } }).harnessRun.harnessRunId;
+
+    const getHarnessRun = await runTool(getTool("forge.get_harness_run"), { harnessRunId }, context);
+    const listHarnessRuns = await runTool(getTool("forge.list_harness_runs"), { artifactId: artifact!.artifactId }, context);
+
+    expect(getHarnessRun.ok).toBe(true);
+    expect((getHarnessRun.data as { harnessRun: { harnessRunId: string } }).harnessRun.harnessRunId).toBe(harnessRunId);
+    expect((listHarnessRuns.data as { harnessRuns: Array<{ harnessRunId: string }> }).harnessRuns).toEqual(
+      expect.arrayContaining([expect.objectContaining({ harnessRunId })])
+    );
+  });
 });

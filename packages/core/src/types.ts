@@ -1035,6 +1035,12 @@ export type ToolForgeArtifactStatus = (typeof TOOL_FORGE_ARTIFACT_STATUSES)[numb
 export const TOOL_FORGE_VALIDATION_STATUSES = ["passed", "failed", "warnings"] as const;
 export type ToolForgeValidationStatus = (typeof TOOL_FORGE_VALIDATION_STATUSES)[number];
 
+export const TOOL_FORGE_HARNESS_MODES = ["static-plus", "contract"] as const;
+export type ToolForgeHarnessMode = (typeof TOOL_FORGE_HARNESS_MODES)[number];
+
+export const TOOL_FORGE_HARNESS_STATUSES = ["passed", "failed", "skipped", "blocked"] as const;
+export type ToolForgeHarnessStatus = (typeof TOOL_FORGE_HARNESS_STATUSES)[number];
+
 export interface ToolForgeArtifactRecord {
   artifactId: string;
   manifestId: string;
@@ -1177,6 +1183,49 @@ export interface ToolForgeGetValidationResult {
 
 export interface ToolForgeListValidationsResult {
   validations: ToolForgeValidationSummary[];
+}
+
+export interface ToolForgeHarnessRunRecord {
+  harnessRunId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestHash: string;
+  projectPath: string;
+  mode: ToolForgeHarnessMode;
+  status: ToolForgeHarnessStatus;
+  checks: ToolForgeValidationCheck[];
+  stdoutSummary: string;
+  stderrSummary: string;
+  durationMs: number;
+  safeToConsiderRegistration: boolean;
+  createdAt: string;
+}
+
+export interface ToolForgeRunValidationHarnessResult {
+  artifact: ToolForgeArtifactRecord;
+  validation: ToolForgeValidationRecord;
+  harnessRun: ToolForgeHarnessRunRecord;
+}
+
+export interface ToolForgeHarnessRunSummary {
+  harnessRunId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestHash: string;
+  projectPath: string;
+  mode: ToolForgeHarnessMode;
+  status: ToolForgeHarnessStatus;
+  durationMs: number;
+  safeToConsiderRegistration: boolean;
+  createdAt: string;
+}
+
+export interface ToolForgeGetHarnessRunResult {
+  harnessRun: ToolForgeHarnessRunRecord;
+}
+
+export interface ToolForgeListHarnessRunsResult {
+  harnessRuns: ToolForgeHarnessRunSummary[];
 }
 
 export interface ToolForgeSaveManifestResult {

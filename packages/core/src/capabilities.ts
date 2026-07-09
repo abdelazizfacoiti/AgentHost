@@ -164,6 +164,21 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Lists stored Forge validation summaries."
     },
     {
+      name: "forge.run_validation_harness",
+      riskLevel: "medium" as const,
+      description: "Runs a controlled inert validation harness for a generated Forge project and stores a harness record."
+    },
+    {
+      name: "forge.get_harness_run",
+      riskLevel: "low" as const,
+      description: "Returns one stored Forge harness run record."
+    },
+    {
+      name: "forge.list_harness_runs",
+      riskLevel: "low" as const,
+      description: "Lists stored Forge harness run summaries."
+    },
+    {
       name: "app.detect",
       riskLevel: "low" as const,
       description: "Detects a Linux app generically and reports available automation strategies."
