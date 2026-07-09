@@ -134,6 +134,36 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Applies eligible session-only grants from a reviewed inert Tool Forge artifact."
     },
     {
+      name: "forge.scaffold_project",
+      riskLevel: "medium" as const,
+      description: "Creates an inert generated project scaffold under AgentHost Forge storage without registering or executing it."
+    },
+    {
+      name: "forge.validate_project",
+      riskLevel: "medium" as const,
+      description: "Validates an inert generated project scaffold and stores a non-executable validation record."
+    },
+    {
+      name: "forge.get_artifact",
+      riskLevel: "low" as const,
+      description: "Returns one stored Forge artifact record."
+    },
+    {
+      name: "forge.list_artifacts",
+      riskLevel: "low" as const,
+      description: "Lists stored Forge artifact summaries."
+    },
+    {
+      name: "forge.get_validation",
+      riskLevel: "low" as const,
+      description: "Returns one stored Forge validation record."
+    },
+    {
+      name: "forge.list_validations",
+      riskLevel: "low" as const,
+      description: "Lists stored Forge validation summaries."
+    },
+    {
       name: "app.detect",
       riskLevel: "low" as const,
       description: "Detects a Linux app generically and reports available automation strategies."
