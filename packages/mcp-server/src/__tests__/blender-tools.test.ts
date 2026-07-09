@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { ConfirmationManager } from "../confirmation.js";
 import { createAgentHostMcpServer } from "../server.js";
 import type { AgentHostMcpContext, LinuxAutomation } from "../context.js";
+import { ForgeStore } from "../forge-store.js";
 import { GrantStore } from "../grants.js";
 import { runTool } from "../tool-runner.js";
 import { createAppTools } from "../tools/app.js";
@@ -297,6 +298,7 @@ function createContext(profile: "strict" | "dev", withAdapter: boolean): AgentHo
     adapters,
     confirmations: new ConfirmationManager(),
     grants: new GrantStore({ persistentGrants: policy.grants }),
+    forge: new ForgeStore(config.agentHostDir),
     logger,
     linux: createLinuxAutomation(config),
     calls

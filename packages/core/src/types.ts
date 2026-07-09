@@ -1010,6 +1010,126 @@ export interface ToolForgeGrantProposalResult {
   warnings: string[];
 }
 
+export const TOOL_FORGE_REVIEW_DECISION_STATUSES = [
+  "pending",
+  "approved_for_session",
+  "approved_persistent",
+  "denied",
+  "expired"
+] as const;
+export type ToolForgeReviewDecisionStatus = (typeof TOOL_FORGE_REVIEW_DECISION_STATUSES)[number];
+
+export const TOOL_FORGE_ARTIFACT_STATUSES = [
+  "draft",
+  "validated",
+  "reviewed",
+  "grant_pending",
+  "approved_inert",
+  "rejected",
+  "archived"
+] as const;
+export type ToolForgeArtifactStatus = (typeof TOOL_FORGE_ARTIFACT_STATUSES)[number];
+
+export interface ToolForgeArtifactRecord {
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  kind: ToolForgeManifestKind;
+  source: ToolForgeManifestSource;
+  storagePath: string;
+  status: ToolForgeArtifactStatus;
+  executable: false;
+  registered: false;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ToolForgeReviewRecord {
+  reviewId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  timestamp: string;
+  profile: PolicyProfileName;
+  riskLevel: RiskLevel;
+  dataSensitivity: DataSensitivity;
+  dangerousPermissions: string[];
+  blockedPermissions: string[];
+  missingGrants: string[];
+  proposedGrants: CapabilityGrant[];
+  decisionStatus: ToolForgeReviewDecisionStatus;
+  explanation: string;
+  saferAlternatives: string[];
+  review: ToolForgeReviewResult;
+}
+
+export interface ToolForgeManifestSummary {
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  kind: ToolForgeManifestKind;
+  source: ToolForgeManifestSource;
+  status: ToolForgeArtifactStatus;
+  executable: false;
+  registered: false;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ToolForgeReviewSummary {
+  reviewId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  timestamp: string;
+  profile: PolicyProfileName;
+  riskLevel: RiskLevel;
+  decisionStatus: ToolForgeReviewDecisionStatus;
+}
+
+export interface ToolForgeSaveManifestResult {
+  manifest: ToolForgeManifest;
+  manifestHash: string;
+  storagePath: string;
+  artifact: ToolForgeArtifactRecord;
+}
+
+export interface ToolForgeGetManifestResult {
+  manifest: ToolForgeManifest;
+  manifestHash: string;
+  storagePath: string;
+  artifact: ToolForgeArtifactRecord;
+}
+
+export interface ToolForgeListManifestsResult {
+  manifests: ToolForgeManifestSummary[];
+}
+
+export interface ToolForgeCreateReviewResult {
+  review: ToolForgeReviewRecord;
+}
+
+export interface ToolForgeGetReviewResult {
+  review: ToolForgeReviewRecord;
+}
+
+export interface ToolForgeListReviewsResult {
+  reviews: ToolForgeReviewSummary[];
+}
+
+export interface ToolForgeArchiveManifestResult {
+  artifact: ToolForgeArtifactRecord;
+}
+
+export interface ToolForgeApplySessionGrantsResult {
+  reviewId: string;
+  manifestId: string;
+  manifestHash: string;
+  appliedGrantIds: string[];
+  grants: GrantSummary[];
+}
+
 export interface AuditLogEntry {
   timestamp: string;
   sessionId: string;

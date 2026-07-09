@@ -36,6 +36,7 @@ import type {
 } from "@agenthost/core";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
 import type { ConfirmationManager } from "./confirmation.js";
+import type { ForgeStore } from "./forge-store.js";
 import type { GrantStore } from "./grants.js";
 
 export interface LinuxAutomation {
@@ -132,5 +133,6 @@ export interface AgentHostMcpContext {
   logger: AuditLogger;
   confirmations: ConfirmationManager;
   grants: GrantStore;
+  forge: ForgeStore;
   linux: LinuxAutomation;
 }

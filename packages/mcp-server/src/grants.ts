@@ -62,6 +62,17 @@ export class GrantStore {
   listGrantSummaries(): GrantSummary[] {
     return [...this.#persistentGrants, ...this.#sessionGrants].map((grant) => summarizeGrant(grant));
   }
+
+  addSessionGrants(grants: CapabilityGrant[]): void {
+    const existingIds = new Set(this.#sessionGrants.map((grant) => grant.id));
+
+    for (const grant of grants) {
+      if (!existingIds.has(grant.id)) {
+        this.#sessionGrants.push(cloneGrant(grant));
+        existingIds.add(grant.id);
+      }
+    }
+  }
 }
 
 export function createSafetyEvaluationContext(context: AgentHostMcpContext): {
