@@ -12,6 +12,13 @@ describe("CapabilityRegistry", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
+      "browser.detect",
+      "browser.list_tabs",
+      "browser.get_active_tab",
+      "browser.current_url",
+      "browser.open_url",
+      "browser.get_page_context",
+      "browser.extract_text",
       "forge.list_dispatchable_tools",
       "forge.get_dispatchable_tool",
       "forge.dispatch_generated_tool",

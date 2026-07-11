@@ -43,6 +43,13 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
 
   for (const capability of [
+    { name: "browser.detect", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Reports local WebExtension browser bridge status." },
+    { name: "browser.list_tabs", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Lists sanitized tabs from the paired local browser." },
+    { name: "browser.get_active_tab", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Returns the active paired-browser tab metadata." },
+    { name: "browser.current_url", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Returns a sanitized paired-browser URL." },
+    { name: "browser.open_url", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated navigation in the paired local browser." },
+    { name: "browser.get_page_context", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Reads bounded, redacted page structure through the paired extension." },
+    { name: "browser.extract_text", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Reads bounded, redacted visible page text through the paired extension." },
     {
       name: "forge.list_dispatchable_tools",
       riskLevel: "observe" as const,

@@ -56,6 +56,18 @@ AGENTHOST_HOME=.agenthost npm run start:mcp
 
 ## Test
 
+## Browser bridge (Phase 25)
+
+Browser tools are disabled by default. Enable the local bridge in `~/.agenthost/config.json`:
+
+```json
+{
+  "browserBridge": { "enabled": true, "port": 43117 }
+}
+```
+
+Start AgentHost once. Copy the token from `~/.agenthost/browser/pairing-token` into the unpacked extension popup, then use the extension popup to grant each site origin. Load `packages/app-browser/extension` with either `manifest.firefox.json` or `manifest.chromium.json` renamed to `manifest.json`. The bridge binds only to `127.0.0.1`; it never exposes cookies, saved passwords, or browser debugging.
+
 Forge bounded runtime defaults to `forgeRuntimeSandboxMode: "auto"`. It uses Bubblewrap only when `bwrap` and unprivileged user namespaces are available; otherwise it keeps existing fixed child runner and records fallback warning. Set `forgeRuntimeSandboxMode` in `~/.agenthost/config.json`, or `AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE` to `auto`, `none`, `bubblewrap`, `firejail`, or `unshare`. Explicit `firejail`/`unshare` currently fail closed: no reviewed allow-only filesystem profile exists.
 
 Run unit tests:

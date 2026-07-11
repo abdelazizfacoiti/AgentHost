@@ -47,6 +47,7 @@ import {
   typeLinuxText,
   writeLinuxFile
 } from "@agenthost/os-linux";
+import { BrowserBridgeServer, createBrowserAdapter, type BrowserBridgeAdapter } from "@agenthost/app-browser";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { ConfirmationManager } from "./confirmation.js";
 import { ForgeStore } from "./forge-store.js";
@@ -65,6 +66,7 @@ import { createPolicyTools } from "./tools/policy.js";
 import { createShellTools } from "./tools/shell.js";
 import { createSystemTools } from "./tools/system.js";
 import { createWindowTools } from "./tools/window.js";
+import { createBrowserTools } from "./tools/browser.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -108,6 +110,7 @@ export interface AgentHostServerOptions {
   logger?: AuditLogger;
   sessionId?: string;
   linux?: LinuxAutomation;
+  browser?: BrowserBridgeAdapter;
   sessionGrants?: import("@agenthost/core").CapabilityGrant[];
 }
 
@@ -143,6 +146,11 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
   });
+  const browserBridge = options.browser === undefined
+    ? new BrowserBridgeServer(config.browserBridge ?? { enabled: false, port: 43117, pairingTokenFile: path.join(config.agentHostDir, "browser", "pairing-token") })
+    : undefined;
+  if (browserBridge !== undefined) await browserBridge.start();
+  const browser = options.browser ?? createBrowserAdapter(browserBridge!);
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -187,12 +195,14 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     confirmations,
     grants,
     forge,
+    browser,
     linux
   };
   const tools = [
     ...createSystemTools(),
     ...createForgeTools(),
     ...createForgeSandboxTools(),
+    ...createBrowserTools(),
     ...createAdapterTools(),
     ...createBlenderTools(),
     ...createAppTools(),
@@ -268,6 +278,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     return toMcpToolResult(result);
   });
 
+  server.onclose = () => { void browserBridge?.close(); };
   return {
     server,
     context

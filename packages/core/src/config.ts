@@ -15,6 +15,7 @@ const policyProfileNameSchema = z.enum([
 ]);
 
 const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "firejail", "unshare"]);
+const browserBridgeSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), pairingTokenFile: z.string().min(1).optional() }).strict();
 
 const automationStrategySchema = z.enum([
   "app_adapter",
@@ -102,6 +103,7 @@ const configFileSchema = z
     logFile: z.string().min(1).optional(),
     profile: policyProfileNameSchema.optional(),
     forgeRuntimeSandboxMode: forgeRuntimeSandboxModeSchema.optional(),
+    browserBridge: browserBridgeSchema.optional(),
     grants: z.array(capabilityGrantSchema).max(500).optional()
   })
   .strict();
@@ -209,6 +211,9 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     (env.AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE ?? fileConfig.forgeRuntimeSandboxMode ?? "auto") as ForgeRuntimeSandboxMode
   );
   const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
+  const browserEnabled = env.AGENTHOST_BROWSER_BRIDGE_ENABLED === undefined ? fileConfig.browserBridge?.enabled ?? false : env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1";
+  const browserPort = env.AGENTHOST_BROWSER_BRIDGE_PORT === undefined ? fileConfig.browserBridge?.port ?? 43117 : Number(env.AGENTHOST_BROWSER_BRIDGE_PORT);
+  const browserBridge = { enabled: browserEnabled, port: z.number().int().min(1024).max(65535).parse(browserPort), pairingTokenFile: resolveLocalPath(env.AGENTHOST_BROWSER_PAIRING_TOKEN_FILE ?? fileConfig.browserBridge?.pairingTokenFile ?? path.join(agentHostDir, "browser", "pairing-token"), homeDir) };
   const logFile = resolveLocalPath(
     env.AGENTHOST_LOG_FILE ?? fileConfig.logFile ?? path.join(agentHostDir, "logs", "agenthost.jsonl"),
     homeDir
@@ -220,6 +225,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     logFile,
     profile: parsedProfile,
     forgeRuntimeSandboxMode,
+    browserBridge,
     policy: getPolicyProfile(parsedProfile, { grants })
   };
 }

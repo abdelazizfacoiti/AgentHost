@@ -36,6 +36,7 @@ import type {
   SystemInfo,
   SandboxSupportProbeResult
 } from "@agenthost/core";
+import type { BrowserBridgeAdapter } from "@agenthost/app-browser";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
 import type { ConfirmationManager } from "./confirmation.js";
 import type { ForgeStore } from "./forge-store.js";
@@ -138,5 +139,6 @@ export interface AgentHostMcpContext {
   confirmations: ConfirmationManager;
   grants: GrantStore;
   forge: ForgeStore;
+  browser?: BrowserBridgeAdapter;
   linux: LinuxAutomation;
 }

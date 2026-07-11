@@ -12,6 +12,9 @@
     },
     {
       "path": "../os-linux"
+    },
+    {
+      "path": "../app-browser"
     }
   ]
 }
