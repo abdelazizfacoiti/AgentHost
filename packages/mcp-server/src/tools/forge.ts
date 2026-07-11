@@ -5,6 +5,7 @@ import {
   canApplySessionGrantsFromReview,
   createToolForgeArtifactRecord,
   createToolForgeHarnessRunRecord,
+  createToolForgeRegistrationRecord,
   createToolForgeReviewRecord,
   createToolForgeValidationRecord,
   evaluateSafety,
@@ -15,6 +16,7 @@ import {
   summarizeToolForgeArtifact,
   summarizeToolForgeArtifactRecord,
   summarizeToolForgeHarnessRun,
+  summarizeToolForgeRegistration,
   summarizeToolForgeReview,
   summarizeToolForgeValidation,
   toolFailure,
@@ -29,18 +31,24 @@ import {
   type ToolForgeCreateReviewResult,
   type ToolForgeGetHarnessRunResult,
   type ToolForgeGetManifestResult,
+  type ToolForgeGetRegistrationResult,
   type ToolForgeGetReviewResult,
   type ToolForgeGetValidationResult,
   type ToolForgeGrantProposalResult,
   type ToolForgeListArtifactsResult,
   type ToolForgeListHarnessRunsResult,
   type ToolForgeListManifestsResult,
+  type ToolForgeListRegistrationsResult,
   type ToolForgeListReviewsResult,
   type ToolForgeListValidationsResult,
   type ToolForgeHarnessMode,
   type ToolForgeHarnessRunRecord,
   type ToolForgeManifest,
+  type ToolForgeRegistrationEligibilityResult,
+  type ToolForgeRegistrationRecord,
   type ToolForgeProjectFilePlanEntry,
+  type ToolForgeRegisterArtifactResult,
+  type ToolForgeRevokeRegistrationResult,
   type ToolForgeRunValidationHarnessResult,
   type ToolForgeReviewRecord,
   type ToolForgeReviewResult,
@@ -292,6 +300,44 @@ const listHarnessRunsInputSchema = z
   })
   .strict();
 
+const registrationArtifactInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300)
+  })
+  .strict();
+
+const registerArtifactInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300),
+    dryRun: z.boolean().optional(),
+    confirmationToken: optionalConfirmationSchema
+  })
+  .strict();
+
+const getRegistrationInputSchema = z
+  .object({
+    registrationId: z.string().trim().min(1).max(400)
+  })
+  .strict();
+
+const listRegistrationsInputSchema = z
+  .object({
+    artifactId: z.string().trim().min(1).max(300).optional(),
+    manifestId: z.string().trim().min(1).max(200).optional(),
+    status: z.enum(["pending", "registered_inert", "rejected", "revoked", "expired"]).optional(),
+    limit: z.number().int().min(1).max(500).optional()
+  })
+  .strict();
+
+const revokeRegistrationInputSchema = z
+  .object({
+    registrationId: z.string().trim().min(1).max(400),
+    reason: z.string().trim().min(1).max(1000).optional(),
+    dryRun: z.boolean().optional(),
+    confirmationToken: optionalConfirmationSchema
+  })
+  .strict();
+
 type ValidateReviewProposeInput = z.infer<typeof validateReviewProposeInputSchema>;
 type SaveManifestInput = z.infer<typeof saveManifestInputSchema>;
 type ListManifestsInput = z.infer<typeof listManifestsInputSchema>;
@@ -310,6 +356,11 @@ type ListValidationsInput = z.infer<typeof listValidationsInputSchema>;
 type RunHarnessInput = z.infer<typeof runHarnessInputSchema>;
 type GetHarnessRunInput = z.infer<typeof getHarnessRunInputSchema>;
 type ListHarnessRunsInput = z.infer<typeof listHarnessRunsInputSchema>;
+type RegistrationArtifactInput = z.infer<typeof registrationArtifactInputSchema>;
+type RegisterArtifactInput = z.infer<typeof registerArtifactInputSchema>;
+type GetRegistrationInput = z.infer<typeof getRegistrationInputSchema>;
+type ListRegistrationsInput = z.infer<typeof listRegistrationsInputSchema>;
+type RevokeRegistrationInput = z.infer<typeof revokeRegistrationInputSchema>;
 
 const validateReviewProposeMcpInputSchema = {
   type: "object",
@@ -513,6 +564,58 @@ const listHarnessRunsMcpInputSchema = {
     mode: { type: "string", enum: ["static-plus", "contract"] },
     limit: { type: "integer", minimum: 1, maximum: 500 }
   },
+  additionalProperties: false
+};
+
+const registrationArtifactMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 }
+  },
+  required: ["artifactId"],
+  additionalProperties: false
+};
+
+const registerArtifactMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 },
+    dryRun: { type: "boolean" },
+    confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
+  },
+  required: ["artifactId"],
+  additionalProperties: false
+};
+
+const getRegistrationMcpInputSchema = {
+  type: "object",
+  properties: {
+    registrationId: { type: "string", minLength: 1, maxLength: 400 }
+  },
+  required: ["registrationId"],
+  additionalProperties: false
+};
+
+const listRegistrationsMcpInputSchema = {
+  type: "object",
+  properties: {
+    artifactId: { type: "string", minLength: 1, maxLength: 300 },
+    manifestId: { type: "string", minLength: 1, maxLength: 200 },
+    status: { type: "string", enum: ["pending", "registered_inert", "rejected", "revoked", "expired"] },
+    limit: { type: "integer", minimum: 1, maximum: 500 }
+  },
+  additionalProperties: false
+};
+
+const revokeRegistrationMcpInputSchema = {
+  type: "object",
+  properties: {
+    registrationId: { type: "string", minLength: 1, maxLength: 400 },
+    reason: { type: "string", minLength: 1, maxLength: 1000 },
+    dryRun: { type: "boolean" },
+    confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
+  },
+  required: ["registrationId"],
   additionalProperties: false
 };
 
@@ -1042,6 +1145,44 @@ function determineHarnessStatus(checks: Array<{ level: "info" | "warning" | "err
   return "passed" as const;
 }
 
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right));
+  return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(",")}}`;
+}
+
+function grantSemanticsEqual(left: CapabilityGrant, right: CapabilityGrant): boolean {
+  return (
+    left.effect === right.effect &&
+    stableStringify(left.match) === stableStringify(right.match) &&
+    stableStringify(left.requirements ?? {}) === stableStringify(right.requirements ?? {})
+  );
+}
+
+function resolveEffectiveRegistrationStatus(
+  registration: ToolForgeRegistrationRecord
+): ToolForgeRegistrationRecord {
+  if (
+    registration.status === "registered_inert" &&
+    registration.expiresAt !== undefined &&
+    Date.now() > Date.parse(registration.expiresAt)
+  ) {
+    return {
+      ...registration,
+      status: "expired"
+    };
+  }
+
+  return registration;
+}
+
 async function resolveValidationByProject(
   context: AgentHostMcpContext,
   artifact: ToolForgeArtifactRecord
@@ -1050,6 +1191,183 @@ async function resolveValidationByProject(
   return validations
     .filter((validation) => validation.artifactId === artifact.artifactId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+}
+
+async function resolveHarnessRunsByArtifact(
+  context: AgentHostMcpContext,
+  artifact: ToolForgeArtifactRecord
+): Promise<ToolForgeHarnessRunRecord[]> {
+  return (await context.forge.listHarnessRuns())
+    .filter((harnessRun) => harnessRun.artifactId === artifact.artifactId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+async function resolveReviewByArtifact(
+  context: AgentHostMcpContext,
+  artifact: ToolForgeArtifactRecord
+): Promise<ToolForgeReviewRecord | undefined> {
+  return (await context.forge.listReviews())
+    .filter(
+      (review) =>
+        review.manifestId === artifact.manifestId &&
+        review.manifestVersion === artifact.manifestVersion &&
+        review.manifestHash === artifact.manifestHash
+    )
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))[0];
+}
+
+async function resolveRegistrationsByArtifact(
+  context: AgentHostMcpContext,
+  artifact: ToolForgeArtifactRecord
+): Promise<ToolForgeRegistrationRecord[]> {
+  return (await context.forge.listRegistrations())
+    .map((registration) => resolveEffectiveRegistrationStatus(registration))
+    .filter(
+      (registration) =>
+        registration.artifactId === artifact.artifactId &&
+        registration.manifestHash === artifact.manifestHash
+    )
+    .sort((left, right) => right.registeredAt.localeCompare(left.registeredAt));
+}
+
+function activeGrantForProposal(
+  proposal: CapabilityGrant,
+  activeGrants: CapabilityGrant[]
+): CapabilityGrant | undefined {
+  return activeGrants.find((grant) => grant.id === proposal.id && grantSemanticsEqual(grant, proposal));
+}
+
+async function evaluateRegistrationEligibility(
+  context: AgentHostMcpContext,
+  artifact: ToolForgeArtifactRecord
+): Promise<ToolForgeRegistrationEligibilityResult> {
+  const missingRequirements: string[] = [];
+  const reasons: string[] = [];
+
+  const manifest = await context.forge.loadManifestByPath(artifact.storagePath);
+  const validation = validateToolForgeManifest(manifest);
+  const currentHash = hashToolForgeManifest(manifest);
+  const review = await resolveReviewByArtifact(context, artifact);
+  const projectPath = artifact.projectPath;
+  const activeGrants = context.grants.listActiveGrants();
+  const latestValidation = await resolveValidationByProject(context, artifact);
+  const harnessRuns = await resolveHarnessRunsByArtifact(context, artifact);
+  const latestHarnessRun = harnessRuns[0];
+  const existingRegistrations = await resolveRegistrationsByArtifact(context, artifact);
+  const activeRegistration = existingRegistrations.find(
+    (registration) => registration.status === "registered_inert"
+  );
+  const requiredGrantIds = review?.proposedGrants.map((grant) => grant.id) ?? [];
+  const matchedGrants = review?.proposedGrants
+    .map((proposal) => activeGrantForProposal(proposal, activeGrants))
+    .filter((grant): grant is CapabilityGrant => grant !== undefined) ?? [];
+
+  if (currentHash !== artifact.manifestHash) {
+    missingRequirements.push("Manifest hash changed.");
+    reasons.push("Saved manifest content no longer matches the artifact hash.");
+  }
+
+  if (!validation.valid || validation.manifest === undefined) {
+    missingRequirements.push("Manifest validation must pass.");
+    reasons.push("Saved manifest is no longer valid for Forge registration.");
+  }
+
+  if (review === undefined) {
+    missingRequirements.push("Review record is required.");
+    reasons.push("No matching Forge review exists for this artifact hash.");
+  } else {
+    if (review.manifestHash !== artifact.manifestHash) {
+      missingRequirements.push("Review hash must match artifact hash.");
+      reasons.push("Review record no longer matches the current artifact hash.");
+    }
+
+    if (review.blockedPermissions.length > 0) {
+      missingRequirements.push("Blocked permissions must be absent.");
+      reasons.push("Review contains blocked permissions.");
+    }
+
+    if (review.decisionStatus === "denied" || review.decisionStatus === "expired") {
+      missingRequirements.push("Review must not be denied or expired.");
+      reasons.push(`Review status ${review.decisionStatus} is not eligible for registration.`);
+    }
+  }
+
+  if (projectPath === undefined || !(await pathExists(projectPath))) {
+    missingRequirements.push("Scaffolded project is required.");
+    reasons.push("Artifact does not have a current scaffolded project path.");
+  }
+
+  if (projectPath !== undefined && !isInsideOrEqual(projectPath, context.forge.generatedRootDir())) {
+    missingRequirements.push("Project path must remain inside Forge generated storage.");
+    reasons.push("Scaffolded project path is outside the approved Forge generated folder.");
+  }
+
+  if (latestValidation === undefined) {
+    missingRequirements.push("Static validation must exist.");
+    reasons.push("No static validation record exists for this artifact.");
+  } else {
+    if (latestValidation.manifestHash !== artifact.manifestHash) {
+      missingRequirements.push("Static validation hash must match artifact hash.");
+      reasons.push("Latest static validation no longer matches the artifact hash.");
+    }
+
+    if (latestValidation.status !== "passed" || !latestValidation.safeToConsiderRegistration) {
+      missingRequirements.push("Static validation must pass.");
+      reasons.push("Latest static validation is not in a passing registration-ready state.");
+    }
+  }
+
+  if (latestHarnessRun === undefined) {
+    missingRequirements.push("Harness validation must exist.");
+    reasons.push("No harness run exists for this artifact.");
+  } else {
+    if (latestHarnessRun.manifestHash !== artifact.manifestHash) {
+      missingRequirements.push("Harness validation hash must match artifact hash.");
+      reasons.push("Latest harness run no longer matches the artifact hash.");
+    }
+
+    if (latestHarnessRun.status !== "passed" || !latestHarnessRun.safeToConsiderRegistration) {
+      missingRequirements.push("Harness validation must pass.");
+      reasons.push("Latest harness run is not in a passing registration-ready state.");
+    }
+  }
+
+  if (artifact.executable !== false) {
+    missingRequirements.push("Artifact must remain non-executable.");
+    reasons.push("Artifact executable flag is no longer inert.");
+  }
+
+  if (artifact.registered !== false) {
+    missingRequirements.push("Artifact must remain non-registered.");
+    reasons.push("Artifact registered flag is unexpectedly set.");
+  }
+
+  if (requiredGrantIds.length > matchedGrants.length) {
+    missingRequirements.push("Required grants must be active for the current session/profile.");
+    reasons.push("One or more proposed grants are missing or broader than the approved active grants.");
+  }
+
+  if (activeRegistration !== undefined) {
+    missingRequirements.push("Artifact already has an active inert registration.");
+    reasons.push("A registered_inert record already exists for this artifact hash.");
+  }
+
+  return {
+    eligible: missingRequirements.length === 0,
+    active: matchedGrants.length === requiredGrantIds.length,
+    artifactId: artifact.artifactId,
+    manifestId: artifact.manifestId,
+    manifestVersion: artifact.manifestVersion,
+    manifestHash: artifact.manifestHash,
+    registeredTools: manifest.tools.map((tool) => ({ ...tool })),
+    requiredGrantIds,
+    activeGrantIds: matchedGrants.map((grant) => grant.id),
+    missingRequirements,
+    reasons,
+    ...(review === undefined ? {} : { reviewId: review.reviewId }),
+    validationIds: latestValidation === undefined ? [] : [latestValidation.validationId],
+    harnessRunIds: latestHarnessRun === undefined ? [] : [latestHarnessRun.harnessRunId]
+  };
 }
 
 async function resolveHarnessInput(
@@ -2964,6 +3282,455 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     }
   };
 
+  const checkRegistrationEligibility: AgentHostToolDefinition<
+    RegistrationArtifactInput,
+    ToolForgeRegistrationEligibilityResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.check_registration_eligibility",
+    description: "Checks whether a generated Forge artifact is eligible for inert registration.",
+    riskLevel: "low",
+    inputSchema: registrationArtifactInputSchema,
+    mcpInputSchema: registrationArtifactMcpInputSchema,
+    inputSummary: "Check Forge registration eligibility",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeRegistrationEligibilityResult>> {
+      try {
+        const artifact = await context.forge.loadArtifact(input.artifactId);
+        const eligibility = await evaluateRegistrationEligibility(context, artifact);
+        return toolSuccess({
+          tool: "forge.check_registration_eligibility",
+          riskLevel: "low",
+          data: eligibility,
+          observations: [
+            eligibility.eligible
+              ? "Registration eligibility passed without exposing or executing generated tools."
+              : "Registration eligibility reported missing prerequisites without mutating any Forge records."
+          ]
+        });
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.check_registration_eligibility",
+          riskLevel: "low",
+          error: {
+            code: "artifact_not_found",
+            message: error instanceof Error ? error.message : "Stored artifact was not found."
+          },
+          observations: ["No stored artifact matched the requested artifact id."]
+        });
+      }
+    }
+  };
+
+  const registerArtifact: AgentHostToolDefinition<
+    RegisterArtifactInput,
+    ToolForgeRegisterArtifactResult | (ActionPreviewResult & { eligibility: ToolForgeRegistrationEligibilityResult }),
+    AgentHostMcpContext
+  > = {
+    name: "forge.register_artifact",
+    description: "Creates a registered_inert Forge registration record without making generated tools callable.",
+    riskLevel: "medium",
+    inputSchema: registerArtifactInputSchema,
+    mcpInputSchema: registerArtifactMcpInputSchema,
+    inputSummary: "Register Forge artifact inertly",
+    safety: {
+      actionType: "file_write"
+    },
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(
+      input,
+      context,
+      runtime
+    ): Promise<ToolResult<ToolForgeRegisterArtifactResult | (ActionPreviewResult & { eligibility: ToolForgeRegistrationEligibilityResult })>> {
+      let artifact: ToolForgeArtifactRecord;
+
+      try {
+        artifact = await context.forge.loadArtifact(input.artifactId);
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.register_artifact",
+          riskLevel: "medium",
+          error: {
+            code: "artifact_not_found",
+            message: error instanceof Error ? error.message : "Stored artifact was not found."
+          },
+          observations: ["No stored artifact matched the requested artifact id."]
+        });
+      }
+
+      const eligibility = await evaluateRegistrationEligibility(context, artifact);
+      const safetyDecision =
+        runtime?.safetyDecision ??
+        evaluateSafety(
+          {
+            tool: "forge.register_artifact",
+            actionType: "file_write",
+            filePath: context.forge.registrationPath(`preview.${artifact.artifactId}`),
+            generatedTool: true,
+            generatedToolId: artifact.manifestId
+          },
+          context.policy,
+          createSafetyEvaluationContext(context)
+        );
+      const targetSummary = `Register inert artifact ${artifact.manifestId}@${artifact.manifestVersion}`;
+      const target = {
+        artifactId: artifact.artifactId,
+        manifestHash: artifact.manifestHash,
+        reviewId: eligibility.reviewId,
+        validationIds: eligibility.validationIds,
+        harnessRunIds: eligibility.harnessRunIds,
+        requiredGrantIds: eligibility.requiredGrantIds,
+        registeredToolNames: eligibility.registeredTools.map((tool) => tool.name).sort()
+      };
+
+      if (runtime?.isDryRun) {
+        const preview = buildPreviewResult({
+          tool: "forge.register_artifact",
+          riskLevel: "medium",
+          safety: safetyDecision,
+          targetSummary,
+          target: toFilePreviewTarget(context.forge.registrationPath(`preview.${artifact.artifactId}`), targetSummary),
+          wouldExecute: eligibility.eligible && safetyDecision.allowed,
+          ...(eligibility.eligible
+            ? {
+                confirmation: {
+                  manager: context.confirmations,
+                  sessionId: context.sessionId,
+                  input,
+                  target,
+                  explanation: "Use this token to write the exact previewed inert registration record before it expires.",
+                  riskLevel: safetyDecision.riskLevel,
+                  appSensitivity: safetyDecision.appSensitivity
+                }
+              }
+            : {}),
+          reasons: previewReasons(
+            eligibility.eligible
+              ? "Prepared an inert registration record preview without exposing generated tools."
+              : eligibility.reasons[0] ?? "Registration eligibility is not satisfied.",
+            safetyDecision.reasons
+          ),
+          observations: ["Previewed inert registration without mutating Forge records or exposing callable tools."]
+        });
+
+        return {
+          ...preview,
+          data: {
+            ...(preview.data as ActionPreviewResult),
+            eligibility
+          }
+        };
+      }
+
+      if (!eligibility.eligible) {
+        return toolFailure({
+          tool: "forge.register_artifact",
+          riskLevel: safetyDecision.riskLevel,
+          error: {
+            code: "registration_ineligible",
+            message: eligibility.reasons.join(" ")
+          },
+          observations: eligibility.reasons
+        });
+      }
+
+      if (input.confirmationToken === undefined) {
+        const { code, reason } = missingConfirmationReason(safetyDecision);
+        return toolFailure({
+          tool: "forge.register_artifact",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: confirmationRequired(reason),
+          error: {
+            code,
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "forge.register_artifact",
+        input,
+        target,
+        riskLevel: safetyDecision.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "forge.register_artifact",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
+      const manifest = await context.forge.loadManifestByPath(artifact.storagePath);
+      const activeGrants = context.grants.listActiveGrants().filter((grant) =>
+        eligibility.requiredGrantIds.includes(grant.id)
+      );
+      const registration = createToolForgeRegistrationRecord({
+        artifact,
+        eligibility,
+        registeredTools: manifest.tools,
+        permissionsSnapshot: manifest.requestedPermissions,
+        grantsSnapshot: activeGrants,
+        explanation: "Registered as inert Forge metadata after review, grants, scaffold, validation, and harness prerequisites passed.",
+        status: "registered_inert"
+      });
+      await context.forge.saveRegistration(registration);
+
+      return toolSuccess({
+        tool: "forge.register_artifact",
+        riskLevel: safetyDecision.riskLevel,
+        confirmation: acceptedConfirmation(
+          verification.tokenId,
+          true,
+          "Confirmation token accepted and inert registration executed."
+        ),
+        data: {
+          eligibility,
+          registration
+        },
+        observations: ["Stored a registered_inert record without loading, executing, or exposing generated tool handlers."]
+      });
+    }
+  };
+
+  const getRegistration: AgentHostToolDefinition<GetRegistrationInput, ToolForgeGetRegistrationResult, AgentHostMcpContext> = {
+    name: "forge.get_registration",
+    description: "Returns one stored Forge registration record.",
+    riskLevel: "low",
+    inputSchema: getRegistrationInputSchema,
+    mcpInputSchema: getRegistrationMcpInputSchema,
+    inputSummary: "Get Forge registration",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeGetRegistrationResult>> {
+      try {
+        const registration = resolveEffectiveRegistrationStatus(
+          await context.forge.loadRegistration(input.registrationId)
+        );
+        return toolSuccess({
+          tool: "forge.get_registration",
+          riskLevel: "low",
+          data: { registration },
+          observations: ["Returned one stored Forge registration record."]
+        });
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.get_registration",
+          riskLevel: "low",
+          error: {
+            code: "registration_not_found",
+            message: error instanceof Error ? error.message : "Stored registration was not found."
+          },
+          observations: ["No stored registration matched the requested registration id."]
+        });
+      }
+    }
+  };
+
+  const listRegistrations: AgentHostToolDefinition<
+    ListRegistrationsInput,
+    ToolForgeListRegistrationsResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.list_registrations",
+    description: "Lists stored Forge registration summaries.",
+    riskLevel: "low",
+    inputSchema: listRegistrationsInputSchema,
+    mcpInputSchema: listRegistrationsMcpInputSchema,
+    inputSummary: "List Forge registrations",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeListRegistrationsResult>> {
+      const registrations = (await context.forge.listRegistrations())
+        .map((registration) => resolveEffectiveRegistrationStatus(registration))
+        .filter((registration) => input.artifactId === undefined || registration.artifactId === input.artifactId)
+        .filter((registration) => input.manifestId === undefined || registration.manifestId === input.manifestId)
+        .filter((registration) => input.status === undefined || registration.status === input.status)
+        .sort((left, right) => right.registeredAt.localeCompare(left.registeredAt))
+        .slice(0, input.limit ?? 100)
+        .map((registration) => summarizeToolForgeRegistration(registration));
+
+      return toolSuccess({
+        tool: "forge.list_registrations",
+        riskLevel: "low",
+        data: { registrations },
+        observations: ["Listed stored Forge registration summaries."]
+      });
+    }
+  };
+
+  const revokeRegistration: AgentHostToolDefinition<
+    RevokeRegistrationInput,
+    ToolForgeRevokeRegistrationResult | ActionPreviewResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.revoke_registration",
+    description: "Marks a Forge registration record revoked without deleting it or exposing generated tools.",
+    riskLevel: "medium",
+    inputSchema: revokeRegistrationInputSchema,
+    mcpInputSchema: revokeRegistrationMcpInputSchema,
+    inputSummary: "Revoke Forge registration",
+    safety: {
+      actionType: "file_write"
+    },
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(
+      input,
+      context,
+      runtime
+    ): Promise<ToolResult<ToolForgeRevokeRegistrationResult | ActionPreviewResult>> {
+      let registration: ToolForgeRegistrationRecord;
+      try {
+        registration = resolveEffectiveRegistrationStatus(await context.forge.loadRegistration(input.registrationId));
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.revoke_registration",
+          riskLevel: "medium",
+          error: {
+            code: "registration_not_found",
+            message: error instanceof Error ? error.message : "Stored registration was not found."
+          },
+          observations: ["No stored registration matched the requested registration id."]
+        });
+      }
+
+      const safetyDecision =
+        runtime?.safetyDecision ??
+        evaluateSafety(
+          {
+            tool: "forge.revoke_registration",
+            actionType: "file_write",
+            filePath: context.forge.registrationPath(registration.registrationId),
+            generatedTool: true,
+            generatedToolId: registration.manifestId
+          },
+          context.policy,
+          createSafetyEvaluationContext(context)
+        );
+      const targetSummary = `Revoke inert registration ${registration.registrationId}`;
+      const target = {
+        registrationId: registration.registrationId,
+        manifestHash: registration.manifestHash,
+        status: registration.status
+      };
+
+      if (runtime?.isDryRun) {
+        return buildPreviewResult({
+          tool: "forge.revoke_registration",
+          riskLevel: "medium",
+          safety: safetyDecision,
+          targetSummary,
+          target: toFilePreviewTarget(context.forge.registrationPath(registration.registrationId), targetSummary),
+          wouldExecute: registration.status !== "revoked" && safetyDecision.allowed,
+          ...(registration.status === "revoked"
+            ? {}
+            : {
+                confirmation: {
+                  manager: context.confirmations,
+                  sessionId: context.sessionId,
+                  input,
+                  target,
+                  explanation: "Use this token to revoke the exact previewed inert registration before it expires.",
+                  riskLevel: safetyDecision.riskLevel,
+                  appSensitivity: safetyDecision.appSensitivity
+                }
+              }),
+          reasons: previewReasons(
+            registration.status === "revoked"
+              ? "Registration is already revoked."
+              : "Prepared a revocation preview without mutating registration metadata.",
+            safetyDecision.reasons
+          ),
+          observations: ["Previewed registration revocation without changing Forge records."]
+        });
+      }
+
+      if (registration.status === "revoked") {
+        return toolFailure({
+          tool: "forge.revoke_registration",
+          riskLevel: safetyDecision.riskLevel,
+          error: {
+            code: "registration_already_revoked",
+            message: "Registration is already revoked."
+          },
+          observations: ["The requested registration was already revoked."]
+        });
+      }
+
+      if (input.confirmationToken === undefined) {
+        const { code, reason } = missingConfirmationReason(safetyDecision);
+        return toolFailure({
+          tool: "forge.revoke_registration",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: confirmationRequired(reason),
+          error: {
+            code,
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "forge.revoke_registration",
+        input,
+        target,
+        riskLevel: safetyDecision.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "forge.revoke_registration",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
+      const revokedRegistration: ToolForgeRegistrationRecord = {
+        ...registration,
+        status: "revoked",
+        explanation: input.reason ?? "Registration revoked explicitly."
+      };
+      await context.forge.saveRegistration(revokedRegistration);
+
+      return toolSuccess({
+        tool: "forge.revoke_registration",
+        riskLevel: safetyDecision.riskLevel,
+        confirmation: acceptedConfirmation(
+          verification.tokenId,
+          true,
+          "Confirmation token accepted and inert registration revocation executed."
+        ),
+        data: {
+          registration: revokedRegistration
+        },
+        observations: ["Revoked the inert registration record without exposing or executing generated tools."]
+      });
+    }
+  };
+
   return [
     validateManifest,
     reviewManifest,
@@ -2984,6 +3751,11 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     listValidations,
     runValidationHarness,
     getHarnessRun,
-    listHarnessRuns
+    listHarnessRuns,
+    checkRegistrationEligibility,
+    registerArtifact,
+    getRegistration,
+    listRegistrations,
+    revokeRegistration
   ];
 }

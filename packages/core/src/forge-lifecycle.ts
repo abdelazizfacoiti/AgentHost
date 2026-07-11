@@ -12,6 +12,10 @@ import type {
   ToolForgeHarnessStatus,
   ToolForgeManifest,
   ToolForgeManifestSummary,
+  ToolForgeRegistrationEligibilityResult,
+  ToolForgeRegistrationRecord,
+  ToolForgeRegistrationStatus,
+  ToolForgeRegistrationSummary,
   ToolForgeValidationCheck,
   ToolForgeValidationRecord,
   ToolForgeValidationStatus,
@@ -21,6 +25,7 @@ import type {
   ToolForgeReviewResult,
   ToolForgeReviewSummary
 } from "./types.js";
+import { summarizeGrant } from "./grants.js";
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") {
@@ -64,6 +69,14 @@ export function createToolForgeHarnessRunId(input: {
 }): string {
   const timestampSegment = (input.now ?? new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
   return `harness.${input.artifact.manifestId}.${input.artifact.manifestVersion}.${input.mode}.${input.artifact.manifestHash.slice(0, 12)}.${timestampSegment}`;
+}
+
+export function createToolForgeRegistrationId(input: {
+  artifact: Pick<ToolForgeArtifactRecord, "manifestId" | "manifestVersion" | "manifestHash">;
+  now?: string;
+}): string {
+  const timestampSegment = (input.now ?? new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
+  return `registration.${input.artifact.manifestId}.${input.artifact.manifestVersion}.${input.artifact.manifestHash.slice(0, 12)}.${timestampSegment}`;
 }
 
 export function createToolForgeArtifactRecord(input: {
@@ -261,6 +274,63 @@ export function summarizeToolForgeHarnessRun(
     durationMs: record.durationMs,
     safeToConsiderRegistration: record.safeToConsiderRegistration,
     createdAt: record.createdAt
+  };
+}
+
+export function createToolForgeRegistrationRecord(input: {
+  artifact: ToolForgeArtifactRecord;
+  eligibility: ToolForgeRegistrationEligibilityResult;
+  registeredTools: ToolForgeManifest["tools"];
+  permissionsSnapshot: ToolForgeManifest["requestedPermissions"];
+  grantsSnapshot: CapabilityGrant[];
+  explanation: string;
+  status: ToolForgeRegistrationStatus;
+  now?: string;
+}): ToolForgeRegistrationRecord {
+  const now = input.now ?? new Date().toISOString();
+  const activeGrantExpiries = input.grantsSnapshot
+    .map((grant) => grant.expiresAt)
+    .filter((value): value is string => value !== undefined)
+    .sort((left, right) => Date.parse(left) - Date.parse(right));
+
+  return {
+    registrationId: createToolForgeRegistrationId({
+      artifact: input.artifact,
+      now
+    }),
+    artifactId: input.artifact.artifactId,
+    manifestId: input.artifact.manifestId,
+    manifestVersion: input.artifact.manifestVersion,
+    manifestHash: input.artifact.manifestHash,
+    registeredAt: now,
+    status: input.status,
+    registeredTools: input.registeredTools.map((tool) => ({ ...tool })),
+    permissionsSnapshot: input.permissionsSnapshot.map((permission) => ({ ...permission })),
+    grantsSnapshot: input.grantsSnapshot.map((grant) => summarizeGrant(grant)),
+    ...(input.eligibility.reviewId === undefined ? {} : { reviewId: input.eligibility.reviewId }),
+    validationIds: [...input.eligibility.validationIds],
+    harnessRunIds: [...input.eligibility.harnessRunIds],
+    executable: false,
+    live: false,
+    explanation: input.explanation,
+    ...(activeGrantExpiries[0] === undefined ? {} : { expiresAt: activeGrantExpiries[0] })
+  };
+}
+
+export function summarizeToolForgeRegistration(
+  record: ToolForgeRegistrationRecord
+): ToolForgeRegistrationSummary {
+  return {
+    registrationId: record.registrationId,
+    artifactId: record.artifactId,
+    manifestId: record.manifestId,
+    manifestVersion: record.manifestVersion,
+    manifestHash: record.manifestHash,
+    registeredAt: record.registeredAt,
+    status: record.status,
+    executable: false,
+    live: false,
+    ...(record.expiresAt === undefined ? {} : { expiresAt: record.expiresAt })
   };
 }
 

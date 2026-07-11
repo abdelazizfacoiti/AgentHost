@@ -5,6 +5,7 @@ import type {
   ToolForgeArtifactRecord,
   ToolForgeHarnessRunRecord,
   ToolForgeManifest,
+  ToolForgeRegistrationRecord,
   ToolForgeReviewRecord,
   ToolForgeValidationRecord
 } from "@agenthost/core";
@@ -41,6 +42,7 @@ export class ForgeStore {
   readonly #generatedDir: string;
   readonly #validationsDir: string;
   readonly #harnessRunsDir: string;
+  readonly #registrationsDir: string;
 
   constructor(agentHostDir: string) {
     this.#rootDir = path.resolve(agentHostDir, "forge");
@@ -51,6 +53,7 @@ export class ForgeStore {
     this.#generatedDir = path.join(this.#rootDir, "generated");
     this.#validationsDir = path.join(this.#rootDir, "validations");
     this.#harnessRunsDir = path.join(this.#rootDir, "harness-runs");
+    this.#registrationsDir = path.join(this.#rootDir, "registrations");
   }
 
   rootDir(): string {
@@ -93,6 +96,10 @@ export class ForgeStore {
 
   harnessRunPath(harnessRunId: string): string {
     return path.join(this.#harnessRunsDir, `${sanitizeSegment(harnessRunId)}.json`);
+  }
+
+  registrationPath(registrationId: string): string {
+    return path.join(this.#registrationsDir, `${sanitizeSegment(registrationId)}.json`);
   }
 
   async saveManifest(manifest: ToolForgeManifest, manifestHash: string): Promise<string> {
@@ -176,6 +183,18 @@ export class ForgeStore {
     return this.#readJsonDirectory<ToolForgeHarnessRunRecord>(this.#harnessRunsDir);
   }
 
+  async saveRegistration(record: ToolForgeRegistrationRecord): Promise<void> {
+    await writeJson(this.registrationPath(record.registrationId), record);
+  }
+
+  async loadRegistration(registrationId: string): Promise<ToolForgeRegistrationRecord> {
+    return readJson<ToolForgeRegistrationRecord>(this.registrationPath(registrationId));
+  }
+
+  async listRegistrations(): Promise<ToolForgeRegistrationRecord[]> {
+    return this.#readJsonDirectory<ToolForgeRegistrationRecord>(this.#registrationsDir);
+  }
+
   async saveProposalRecord(record: ForgeProposalRecord): Promise<void> {
     await writeJson(this.proposalPath(record.reviewId), record);
   }
@@ -188,7 +207,8 @@ export class ForgeStore {
       mkdir(this.#proposalsDir, { recursive: true }),
       mkdir(this.#generatedDir, { recursive: true }),
       mkdir(this.#validationsDir, { recursive: true }),
-      mkdir(this.#harnessRunsDir, { recursive: true })
+      mkdir(this.#harnessRunsDir, { recursive: true }),
+      mkdir(this.#registrationsDir, { recursive: true })
     ]);
   }
 
