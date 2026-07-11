@@ -8,7 +8,7 @@ describe("CapabilityRegistry", () => {
     expect(registry.listStrategies()).toEqual([...AUTOMATION_STRATEGIES]);
   });
 
-  it("registers base AgentHost tools through Phase 17", () => {
+  it("registers base AgentHost tools through Phase 18", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
@@ -44,6 +44,10 @@ describe("CapabilityRegistry", () => {
       "forge.get_registration",
       "forge.list_registrations",
       "forge.revoke_registration",
+      "forge.check_runtime_eligibility",
+      "forge.run_sandboxed_tool",
+      "forge.get_runtime_run",
+      "forge.list_runtime_runs",
       "app.detect",
       "app.list_installed",
       "app.open",

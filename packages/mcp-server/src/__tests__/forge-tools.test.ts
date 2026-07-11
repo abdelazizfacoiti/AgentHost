@@ -1,5 +1,6 @@
 import { access, readFile, rm, writeFile } from "node:fs/promises";
 import {
+  type CapabilityGrant,
   createAdapterRegistry,
   createBaseCapabilityRegistry,
   getPolicyProfile,
@@ -52,6 +53,34 @@ const validManifest: ToolForgeManifest = {
     }
   ],
   riskDeclaration: "medium",
+  dataSensitivityDeclaration: "low",
+  requirements: {
+    requiresDryRun: true,
+    requiresConfirmationToken: true
+  }
+};
+
+const runtimeSafeManifest: ToolForgeManifest = {
+  schemaVersion: "agenthost.forge.v1",
+  id: "example.runtime-tool",
+  displayName: "Example Runtime Tool",
+  version: "0.1.0",
+  description: "Manifest for the Phase 18 metadata-only runtime stub.",
+  kind: "tool",
+  source: "generated",
+  tools: [
+    {
+      name: "example.runtime.inspect",
+      description: "Read-only runtime stub declaration.",
+      inputSchema: { type: "object", additionalProperties: false },
+      outputSchema: { type: "object" },
+      riskLevel: "low",
+      actionType: "inspect",
+      strategy: "guide_only"
+    }
+  ],
+  requestedPermissions: [],
+  riskDeclaration: "low",
   dataSensitivityDeclaration: "low",
   requirements: {
     requiresDryRun: true,
@@ -127,7 +156,13 @@ function createLinuxStub(config: AgentHostConfig, registry = createBaseCapabilit
 }
 
 function createContext(
-  options: { profile?: "strict" | "dev"; blockHighRiskByDefault?: boolean } = {}
+  options: {
+    profile?: "strict" | "dev";
+    blockHighRiskByDefault?: boolean;
+    agentHostDir?: string;
+    persistentGrants?: CapabilityGrant[];
+    sessionGrants?: CapabilityGrant[];
+  } = {}
 ): AgentHostMcpContext & { logger: MemoryLogger } {
   const registry = createBaseCapabilityRegistry();
   const basePolicy = getPolicyProfile(options.profile ?? "dev");
@@ -139,9 +174,9 @@ function createContext(
   };
   const testId = `agenthost-forge-tests-${Math.random().toString(36).slice(2, 10)}`;
   const config: AgentHostConfig = {
-    agentHostDir: `/tmp/${testId}`,
-    configPath: `/tmp/${testId}/config.json`,
-    logFile: `/tmp/${testId}/logs/agenthost.jsonl`,
+    agentHostDir: options.agentHostDir ?? `/tmp/${testId}`,
+    configPath: `${options.agentHostDir ?? `/tmp/${testId}`}/config.json`,
+    logFile: `${options.agentHostDir ?? `/tmp/${testId}`}/logs/agenthost.jsonl`,
     profile: options.profile ?? "dev",
     policy
   };
@@ -155,7 +190,14 @@ function createContext(
     adapters: createAdapterRegistry({ platform: "linux" }),
     logger,
     confirmations: new ConfirmationManager(),
-    grants: new GrantStore({ persistentGrants: policy.grants }),
+    grants: new GrantStore(
+      options.sessionGrants === undefined
+        ? { persistentGrants: options.persistentGrants ?? policy.grants }
+        : {
+            persistentGrants: options.persistentGrants ?? policy.grants,
+            sessionGrants: options.sessionGrants
+          }
+    ),
     forge: new ForgeStore(config.agentHostDir),
     linux: createLinuxStub(config, registry)
   };
@@ -179,6 +221,81 @@ async function previewThenExecute(
   const previewData = previewResult.data as { confirmationToken?: string };
   expect(previewData.confirmationToken).toBeTruthy();
   return runTool(tool, { ...executeInput, confirmationToken: previewData.confirmationToken }, context);
+}
+
+async function createRuntimeReadyRegistration(
+  context: AgentHostMcpContext,
+  manifest: ToolForgeManifest = runtimeSafeManifest
+) {
+  const saved = await previewThenExecute(
+    context,
+    "forge.save_manifest",
+    { manifest, dryRun: true },
+    { manifest }
+  );
+  const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+  const review = await previewThenExecute(
+    context,
+    "forge.create_review",
+    { manifestId: manifest.id, version: manifest.version, manifestHash, dryRun: true },
+    { manifestId: manifest.id, version: manifest.version, manifestHash }
+  );
+  const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+  const scaffold = await previewThenExecute(
+    context,
+    "forge.scaffold_project",
+    { reviewId, dryRun: true },
+    { reviewId }
+  );
+  const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+  const validation = await runTool(getTool("forge.validate_project"), { projectPath }, context);
+  const validationId = (validation.data as { validation: { validationId: string } }).validation.validationId;
+  const harness = await previewThenExecute(
+    context,
+    "forge.run_validation_harness",
+    { validationId, mode: "contract", dryRun: true },
+    { validationId, mode: "contract" }
+  );
+  const artifact = await context.forge.findArtifact({
+    manifestId: manifest.id,
+    version: manifest.version,
+    manifestHash
+  });
+  expect(artifact).toBeDefined();
+  const registration = await previewThenExecute(
+    context,
+    "forge.register_artifact",
+    { artifactId: artifact!.artifactId, dryRun: true },
+    { artifactId: artifact!.artifactId }
+  );
+
+  return {
+    manifest,
+    manifestHash,
+    reviewId,
+    projectPath,
+    artifact: artifact!,
+    validationId,
+    harnessRunId: (harness.data as { harnessRun: { harnessRunId: string } }).harnessRun.harnessRunId,
+    registrationId: (registration.data as { registration: { registrationId: string } }).registration.registrationId
+  };
+}
+
+function createRuntimeExecutionGrant(generatedToolId: string): CapabilityGrant {
+  return {
+    id: `runtime.execute.${generatedToolId}`,
+    scope: "session",
+    effect: "allow",
+    match: {
+      tools: ["forge.run_sandboxed_tool"],
+      actionTypes: ["file_write"],
+      generatedToolIds: [generatedToolId]
+    },
+    requirements: {
+      requiresDryRun: true,
+      requiresConfirmationToken: true
+    }
+  };
 }
 
 beforeEach(async () => {
@@ -1518,5 +1635,349 @@ describe("forge MCP tools", () => {
 
     const getRegistration = await runTool(getTool("forge.get_registration"), { registrationId: stored }, context);
     expect((getRegistration.data as { registration: { status: string } }).registration.status).toBe("expired");
+  });
+
+  it("runtime eligibility passes for a fully valid registered_inert artifact", async () => {
+    const context = createContext();
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+
+    const result = await runTool(
+      getTool("forge.check_runtime_eligibility"),
+      { registrationId: runtimeReady.registrationId, toolName: runtimeReady.manifest.tools[0]!.name },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      eligibility: { eligible: boolean; toolName: string; sandbox: { childProcess: boolean; envBlocked: string[] } };
+    };
+    expect(data.eligibility.eligible).toBe(true);
+    expect(data.eligibility.toolName).toBe(runtimeReady.manifest.tools[0]!.name);
+    expect(data.eligibility.sandbox.childProcess).toBe(false);
+    expect(data.eligibility.sandbox.envBlocked).toContain("DISPLAY");
+  });
+
+  it("runtime eligibility fails when the registration is missing", async () => {
+    const context = createContext();
+    const result = await runTool(
+      getTool("forge.check_runtime_eligibility"),
+      { registrationId: "registration.missing", toolName: "example.runtime.inspect" },
+      context
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("registration_not_found");
+  });
+
+  it("runtime eligibility fails when the registration is revoked", async () => {
+    const context = createContext();
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const stored = await context.forge.loadRegistration(runtimeReady.registrationId);
+    await context.forge.saveRegistration({
+      ...stored,
+      status: "revoked"
+    });
+
+    const result = await runTool(
+      getTool("forge.check_runtime_eligibility"),
+      { registrationId: runtimeReady.registrationId, toolName: runtimeReady.manifest.tools[0]!.name },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { eligibility: { eligible: boolean; missingRequirements: string[] } };
+    expect(data.eligibility.eligible).toBe(false);
+    expect(data.eligibility.missingRequirements).toContain("Registration must be active registered_inert.");
+  });
+
+  it("runtime eligibility fails when the manifest hash changes", async () => {
+    const context = createContext();
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    await context.forge.saveManifest(
+      {
+        ...runtimeReady.manifest,
+        description: "Hash changed after inert registration."
+      },
+      runtimeReady.manifestHash
+    );
+
+    const result = await runTool(
+      getTool("forge.check_runtime_eligibility"),
+      { registrationId: runtimeReady.registrationId, toolName: runtimeReady.manifest.tools[0]!.name },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { eligibility: { eligible: boolean; missingRequirements: string[] } };
+    expect(data.eligibility.eligible).toBe(false);
+    expect(data.eligibility.missingRequirements).toContain("Manifest hash must remain unchanged.");
+  });
+
+  it("runtime eligibility fails when grants are missing or expired", async () => {
+    const manifestWithGrant: ToolForgeManifest = {
+      ...runtimeSafeManifest,
+      id: "example.runtime-tool-granted",
+      requestedPermissions: [
+        {
+          id: "runtime-session-grant",
+          requiresDryRun: true,
+          requiresConfirmationToken: true
+        }
+      ]
+    };
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: manifestWithGrant, dryRun: true },
+      { manifest: manifestWithGrant }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: manifestWithGrant.id, version: manifestWithGrant.version, manifestHash, dryRun: true },
+      { manifestId: manifestWithGrant.id, version: manifestWithGrant.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const grantsPreview = await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      { reviewId, dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      {
+        reviewId,
+        confirmationToken: (grantsPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    const validation = await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const validationId = (validation.data as { validation: { validationId: string } }).validation.validationId;
+    await previewThenExecute(
+      context,
+      "forge.run_validation_harness",
+      { validationId, mode: "contract", dryRun: true },
+      { validationId, mode: "contract" }
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: manifestWithGrant.id,
+      version: manifestWithGrant.version,
+      manifestHash
+    });
+    expect(artifact).toBeDefined();
+    const registered = await previewThenExecute(
+      context,
+      "forge.register_artifact",
+      { artifactId: artifact!.artifactId, dryRun: true },
+      { artifactId: artifact!.artifactId }
+    );
+    const registrationId = (registered.data as { registration: { registrationId: string } }).registration.registrationId;
+
+    const missingGrantContext = createContext({
+      agentHostDir: context.config.agentHostDir,
+      persistentGrants: context.policy.grants,
+      sessionGrants: []
+    });
+    const missingGrantResult = await runTool(
+      getTool("forge.check_runtime_eligibility"),
+      { registrationId, toolName: manifestWithGrant.tools[0]!.name },
+      missingGrantContext
+    );
+    expect(missingGrantResult.ok).toBe(true);
+    expect(
+      (missingGrantResult.data as { eligibility: { missingRequirements: string[] } }).eligibility.missingRequirements
+    ).toContain("Required grants must stay active.");
+
+    const expiredSessionGrants = context.grants.listSessionGrants().map((grant) => ({
+      ...grant,
+      expiresAt: "2000-01-01T00:00:00.000Z"
+    }));
+    const expiredGrantContext = createContext({
+      agentHostDir: context.config.agentHostDir,
+      persistentGrants: context.policy.grants,
+      sessionGrants: expiredSessionGrants
+    });
+    const expiredGrantResult = await runTool(
+      getTool("forge.check_runtime_eligibility"),
+      { registrationId, toolName: manifestWithGrant.tools[0]!.name },
+      expiredGrantContext
+    );
+    expect(expiredGrantResult.ok).toBe(true);
+    expect(
+      (expiredGrantResult.data as { eligibility: { missingRequirements: string[] } }).eligibility.missingRequirements
+    ).toContain("Required grants must stay active.");
+  });
+
+  it("runtime eligibility fails when validation or harness records are missing or failed", async () => {
+    const context = createContext();
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const registration = await context.forge.loadRegistration(runtimeReady.registrationId);
+    await context.forge.saveRegistration({
+      ...registration,
+      validationIds: ["validation.missing"],
+      harnessRunIds: ["harness.missing"]
+    });
+
+    const result = await runTool(
+      getTool("forge.check_runtime_eligibility"),
+      { registrationId: runtimeReady.registrationId, toolName: runtimeReady.manifest.tools[0]!.name },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { eligibility: { eligible: boolean; missingRequirements: string[] } };
+    expect(data.eligibility.eligible).toBe(false);
+    expect(data.eligibility.missingRequirements).toContain("Static validation must exist.");
+    expect(data.eligibility.missingRequirements).toContain("Harness validation must exist.");
+  });
+
+  it("run_sandboxed_tool dryRun previews without executing or exposing generated tools", async () => {
+    const context = createContext({
+      persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)]
+    });
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+
+    const preview = await runTool(
+      getTool("forge.run_sandboxed_tool"),
+      {
+        registrationId: runtimeReady.registrationId,
+        toolName: runtimeReady.manifest.tools[0]!.name,
+        dryRun: true,
+        input: { secret: "do-not-log-me" }
+      },
+      context
+    );
+
+    expect(preview.ok).toBe(true);
+    const data = preview.data as {
+      wouldExecute: boolean;
+      confirmationToken?: string;
+      eligibility: { eligible: boolean; sandbox: { envBlocked: string[]; childProcess: boolean } };
+    };
+    expect(data.wouldExecute).toBe(true);
+    expect(data.confirmationToken).toBeTruthy();
+    expect(data.eligibility.eligible).toBe(true);
+    expect(data.eligibility.sandbox.childProcess).toBe(false);
+    expect(data.eligibility.sandbox.envBlocked).toEqual(expect.arrayContaining(["DISPLAY", "XAUTHORITY"]));
+    expect(await context.forge.listRuntimeRuns()).toHaveLength(0);
+    expect(context.registry.listTools().some((entry) => entry.name === runtimeReady.manifest.tools[0]!.name)).toBe(false);
+    expect(context.logger.entries.some((entry) => JSON.stringify(entry).includes("do-not-log-me"))).toBe(false);
+  });
+
+  it("run_sandboxed_tool rejects non-eligible runtime targets", async () => {
+    const context = createContext({
+      persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)]
+    });
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const registration = await context.forge.loadRegistration(runtimeReady.registrationId);
+    await context.forge.saveRegistration({
+      ...registration,
+      status: "revoked"
+    });
+
+    const result = await runTool(
+      getTool("forge.run_sandboxed_tool"),
+      {
+        registrationId: runtimeReady.registrationId,
+        toolName: runtimeReady.manifest.tools[0]!.name
+      },
+      context
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("runtime_ineligible");
+  });
+
+  it("run_sandboxed_tool stores a metadata-only runtime run after confirmation", async () => {
+    const context = createContext({
+      persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)]
+    });
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const preview = await runTool(
+      getTool("forge.run_sandboxed_tool"),
+      {
+        registrationId: runtimeReady.registrationId,
+        toolName: runtimeReady.manifest.tools[0]!.name,
+        dryRun: true,
+        input: { secret: "super-secret-runtime-input" }
+      },
+      context
+    );
+
+    const token = (preview.data as { confirmationToken: string }).confirmationToken;
+    expect(context.logger.entries.some((entry) => JSON.stringify(entry).includes(token))).toBe(false);
+
+    const executed = await runTool(
+      getTool("forge.run_sandboxed_tool"),
+      {
+        registrationId: runtimeReady.registrationId,
+        toolName: runtimeReady.manifest.tools[0]!.name,
+        input: { secret: "super-secret-runtime-input" },
+        confirmationToken: token
+      },
+      context
+    );
+
+    expect(executed.ok).toBe(true);
+    const data = executed.data as {
+      runtimeRun: { runtimeRunId: string; executedGeneratedCode: boolean; metadataOnly: boolean };
+      output: { generatedCodeExecuted: boolean; metadataOnly: boolean; sandbox: { childProcess: boolean; envBlocked: string[] } };
+    };
+    expect(data.runtimeRun.executedGeneratedCode).toBe(false);
+    expect(data.runtimeRun.metadataOnly).toBe(true);
+    expect(data.output.generatedCodeExecuted).toBe(false);
+    expect(data.output.metadataOnly).toBe(true);
+    expect(data.output.sandbox.childProcess).toBe(false);
+    expect(data.output.sandbox.envBlocked).toContain("DISPLAY");
+    expect((await context.forge.listRuntimeRuns()).map((run) => run.runtimeRunId)).toContain(data.runtimeRun.runtimeRunId);
+    expect(context.registry.listTools().some((entry) => entry.name === runtimeReady.manifest.tools[0]!.name)).toBe(false);
+    expect(context.logger.entries.some((entry) => JSON.stringify(entry).includes("super-secret-runtime-input"))).toBe(false);
+  });
+
+  it("get/list runtime runs return stored metadata-only summaries", async () => {
+    const context = createContext({
+      persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)]
+    });
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const preview = await runTool(
+      getTool("forge.run_sandboxed_tool"),
+      {
+        registrationId: runtimeReady.registrationId,
+        toolName: runtimeReady.manifest.tools[0]!.name,
+        dryRun: true
+      },
+      context
+    );
+    const executed = await runTool(
+      getTool("forge.run_sandboxed_tool"),
+      {
+        registrationId: runtimeReady.registrationId,
+        toolName: runtimeReady.manifest.tools[0]!.name,
+        confirmationToken: (preview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const runtimeRunId = (executed.data as { runtimeRun: { runtimeRunId: string } }).runtimeRun.runtimeRunId;
+
+    const getRuntimeRun = await runTool(getTool("forge.get_runtime_run"), { runtimeRunId }, context);
+    const listRuntimeRuns = await runTool(
+      getTool("forge.list_runtime_runs"),
+      { registrationId: runtimeReady.registrationId },
+      context
+    );
+
+    expect((getRuntimeRun.data as { runtimeRun: { runtimeRunId: string } }).runtimeRun.runtimeRunId).toBe(runtimeRunId);
+    expect((listRuntimeRuns.data as { runtimeRuns: Array<{ runtimeRunId: string }> }).runtimeRuns).toEqual(
+      expect.arrayContaining([expect.objectContaining({ runtimeRunId })])
+    );
   });
 });
