@@ -33,7 +33,8 @@ import type {
   InstalledAppSummary,
   PolicyProfile,
   ShellRunResult,
-  SystemInfo
+  SystemInfo,
+  SandboxSupportProbeResult
 } from "@agenthost/core";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
 import type { ConfirmationManager } from "./confirmation.js";
@@ -72,6 +73,7 @@ export interface LinuxAutomation {
     activeWindow: DesktopWindowContext;
   }): Promise<DesktopClickResult>;
   pointer?(input: { action: "move_mouse" | "scroll" | "double_click" | "right_click" | "drag"; activeWindow: DesktopWindowContext; x?: number; y?: number; direction?: "up" | "down" | "left" | "right"; amount?: number; startX?: number; startY?: number; endX?: number; endY?: number; durationMs?: number }): Promise<DesktopPointerResult>;
+  checkSandboxSupport?(): Promise<SandboxSupportProbeResult>;
   getAccessibilityTree(input: {
     appName?: string;
     windowId?: string;
