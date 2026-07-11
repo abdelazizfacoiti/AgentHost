@@ -41,6 +41,7 @@ export interface AgentHostToolDefinition<
   inputSummary: string;
   /** Safe per-call audit label; must never include unredacted user payloads or tokens. */
   auditInputSummary?(input: TInput): string;
+  auditOutputSummary?(result: ToolResult<TData>): string;
   safety?: {
     actionType: SafetyInput["actionType"];
     getInput?: (input: TInput) => Partial<SafetyInput>;
@@ -62,7 +63,8 @@ function createAuditLogEntry(
   result: ToolResult,
   context: ToolExecutionContext,
   inputSummary: string,
-  durationMs: number
+  durationMs: number,
+  outputSummary?: string
 ): AuditLogEntry {
   const entry: AuditLogEntry = {
     timestamp: new Date().toISOString(),
@@ -95,7 +97,7 @@ function createAuditLogEntry(
     approvalStatus: result.approval.status,
     ok: result.ok,
     durationMs,
-    outputSummary: summarizeToolResult(result)
+    outputSummary: outputSummary ?? summarizeToolResult(result)
   };
 
   if (result.strategy !== undefined) {
@@ -203,6 +205,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
   const inputSummary = parsed.success && definition.auditInputSummary !== undefined
     ? definition.auditInputSummary(parsed.data)
     : definition.inputSummary;
-  await context.logger.log(createAuditLogEntry(result, context, inputSummary, durationMs));
+  const outputSummary = definition.auditOutputSummary?.(result);
+  await context.logger.log(createAuditLogEntry(result, context, inputSummary, durationMs, outputSummary));
   return result;
 }

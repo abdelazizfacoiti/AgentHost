@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@agenthost/core": "file:../core",
+    "@agenthost/app-browser": "file:../app-browser",
     "@agenthost/os-linux": "file:../os-linux",
     "@modelcontextprotocol/sdk": "^1.13.0",
     "zod": "^3.25.76"

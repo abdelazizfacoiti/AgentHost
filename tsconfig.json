@@ -5,6 +5,9 @@
       "path": "./packages/app-blender"
     },
     {
+      "path": "./packages/app-browser"
+    },
+    {
       "path": "./packages/core"
     },
     {

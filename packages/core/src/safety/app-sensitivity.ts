@@ -58,6 +58,8 @@ const SYSTEM_SETTINGS_PATTERNS = [
   /\bsoftware updater\b/i
 ];
 
+const URL_SECURITY_PATTERNS = [/\/login\b/i, /\/signin\b/i, /\/mfa\b/i, /\/2fa\b/i, /\/security\b/i, /\/admin\b/i, /\/console\b/i];
+
 const NORMAL_APP_PATTERNS = [
   /\bblender\b/i,
   /\bgimp\b/i,
@@ -88,6 +90,8 @@ export function classifyAppSensitivity(input: Pick<SafetyInput, "appId" | "appNa
   if (matchesAny(value, CREDENTIAL_OR_SECURITY_PATTERNS)) {
     return "credential_or_security";
   }
+
+  if (matchesAny(value, URL_SECURITY_PATTERNS)) return "credential_or_security";
 
   if (matchesAny(value, FINANCIAL_PATTERNS)) {
     return "financial";

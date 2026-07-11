@@ -244,7 +244,59 @@ export interface AgentHostConfig {
   profile: PolicyProfileName;
   /** Undefined only for older in-memory callers; loader always supplies `auto` by default. */
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
+  browserBridge?: BrowserBridgeConfig;
   policy: PolicyProfile;
+}
+
+export interface BrowserBridgeConfig {
+  enabled: boolean;
+  port: number;
+  pairingTokenFile: string;
+}
+
+export type BrowserFamily = "firefox" | "chromium";
+export type BrowserBridgeStatus = "disabled" | "pairing_required" | "connected" | "unavailable";
+
+export interface BrowserDetectResult {
+  supported: boolean;
+  enabled: boolean;
+  paired: boolean;
+  connected: boolean;
+  status: BrowserBridgeStatus;
+  backend: "webextension_loopback";
+  browser?: { family: BrowserFamily; version?: string };
+  reason: string;
+}
+
+export interface BrowserTabSummary {
+  tabId: string;
+  windowId: string;
+  active: boolean;
+  url: string;
+  origin: string;
+  title?: string;
+  appSensitivity: AppSensitivity;
+  sitePermission: "granted" | "missing" | "not_required";
+  urlRedacted: boolean;
+}
+
+export interface BrowserPageContext {
+  tab: BrowserTabSummary;
+  language?: string;
+  headings: string[];
+  landmarks: string[];
+  links: Array<{ text: string; url: string }>;
+  controls: Array<{ role: string; name: string; disabled: boolean }>;
+  truncated: boolean;
+  redactionCounts: Record<string, number>;
+}
+
+export interface BrowserTextResult {
+  tab: BrowserTabSummary;
+  text: string;
+  characterCount: number;
+  truncated: boolean;
+  redactionCounts: Record<string, number>;
 }
 
 /** OS isolation preference for the fixed Forge JSON runner. */
@@ -863,7 +915,8 @@ export type PreviewTargetKind =
   | "desktop_window"
   | "shell_command"
   | "file_path"
-  | "app";
+  | "app"
+  | "browser";
 
 export interface ActionPreviewTarget {
   kind: PreviewTargetKind;

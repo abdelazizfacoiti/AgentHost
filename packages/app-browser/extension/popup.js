@@ -1,0 +1,3 @@
+const api = globalThis.browser ?? globalThis.chrome; const port = document.querySelector("#port"); const token = document.querySelector("#token"); const status = document.querySelector("#status");
+api.storage.local.get(["agenthostPort", "agenthostToken"]).then((v) => { port.value = v.agenthostPort ?? 43117; token.value = v.agenthostToken ?? ""; });
+document.querySelector("#save").addEventListener("click", async () => { const value = Number(port.value); if (!Number.isInteger(value) || value < 1024 || value > 65535 || token.value.length < 32) { status.textContent = "Enter local port and pairing token."; return; } await api.storage.local.set({ agenthostPort: value, agenthostToken: token.value }); status.textContent = "Saved. Background bridge will pair."; });
