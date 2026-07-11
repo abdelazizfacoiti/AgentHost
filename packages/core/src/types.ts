@@ -178,6 +178,12 @@ export interface CapabilityGrantRequirements {
   requiresExactTarget?: boolean;
   maxRiskLevel?: RiskLevel;
   allowedRoots?: string[];
+  sandboxRoots?: Array<"run" | "temp">;
+  outputRoots?: Array<"run">;
+  maxInputBytes?: number;
+  maxOutputBytes?: number;
+  maxRuntimeMs?: number;
+  allowedOperations?: ToolForgeRuntimeOperation[];
 }
 
 export interface CapabilityGrantMatch {
@@ -193,6 +199,9 @@ export interface CapabilityGrantMatch {
   networkDomains?: string[];
   oauthScopes?: string[];
   generatedToolIds?: string[];
+  registrationIds?: string[];
+  runtimeToolNames?: string[];
+  runtimeCapabilities?: ToolForgeRuntimeCapability[];
 }
 
 export interface CapabilityGrant {
@@ -938,6 +947,33 @@ export interface ToolForgePermissionRequest {
   requiresApproval?: boolean | undefined;
 }
 
+export const TOOL_FORGE_RUNTIME_CAPABILITIES = [
+  "pure_compute", "read_runtime_input", "write_runtime_output", "use_manifest_metadata", "use_registration_metadata",
+  "read_sandbox_file", "write_sandbox_file", "list_sandbox_files",
+  "read_user_file", "write_user_file", "network_fetch", "shell_command", "gui_action", "private_data_read", "communication_send"
+] as const;
+export type ToolForgeRuntimeCapability = (typeof TOOL_FORGE_RUNTIME_CAPABILITIES)[number];
+
+export const TOOL_FORGE_RUNTIME_OPERATIONS = [
+  "const", "input", "object", "array", "concat", "length", "get", "equals", "if", "join", "sum", "map", "filter", "var", "manifest", "registration"
+] as const;
+export type ToolForgeRuntimeOperation = (typeof TOOL_FORGE_RUNTIME_OPERATIONS)[number];
+
+export interface ToolForgeRuntimePermissionRequest {
+  id: string;
+  toolNames: string[];
+  capabilities: ToolForgeRuntimeCapability[];
+  allowedOperations: ToolForgeRuntimeOperation[];
+  maxInputBytes?: number;
+  maxOutputBytes?: number;
+  maxRuntimeMs?: number;
+  sandboxRoots?: Array<"run" | "temp">;
+  outputRoots?: Array<"run">;
+  requiresDryRun?: boolean;
+  requiresConfirmationToken?: boolean;
+  requiresApproval?: boolean;
+}
+
 export interface ToolForgeManifest {
   schemaVersion: "agenthost.forge.v1";
   id: string;
@@ -948,6 +984,7 @@ export interface ToolForgeManifest {
   source: ToolForgeManifestSource;
   tools: ToolForgeToolDeclaration[];
   requestedPermissions: ToolForgePermissionRequest[];
+  runtimePermissions?: ToolForgeRuntimePermissionRequest[];
   riskDeclaration: RiskLevel;
   dataSensitivityDeclaration: DataSensitivity;
   requirements: ToolForgeRequirements;
@@ -1343,6 +1380,16 @@ export interface ToolForgeRuntimeEligibilityResult {
   activeGrantIds: string[];
   requestedPermissionIds: string[];
   blockedPermissionIds: string[];
+  requestedRuntimeCapabilities: ToolForgeRuntimeCapability[];
+  grantedRuntimeCapabilities: ToolForgeRuntimeCapability[];
+  deniedRuntimeCapabilities: ToolForgeRuntimeCapability[];
+  unsupportedRuntimeCapabilities: ToolForgeRuntimeCapability[];
+  runtimeGrantIds: string[];
+  requestedOperations: ToolForgeRuntimeOperation[];
+  allowedOperations: ToolForgeRuntimeOperation[];
+  blockedOperations: ToolForgeRuntimeOperation[];
+  enforcedLimits: { maxInputBytes: number; maxOutputBytes: number; maxRuntimeMs: number };
+  runtimeRequirements: { requiresDryRun: boolean; requiresConfirmationToken: boolean; requiresApproval: boolean };
   missingRequirements: string[];
   reasons: string[];
   sandbox: ToolForgeRuntimeSandboxPolicy;
@@ -1399,6 +1446,8 @@ export interface ToolForgeRuntimeRunRecord {
   outputSizeBytes?: number;
   resultSummary?: string;
   errorSummary?: string;
+  runtimeCapabilitiesUsed?: ToolForgeRuntimeCapability[];
+  enforcedLimits?: { maxInputBytes: number; maxOutputBytes: number; maxRuntimeMs: number };
   executableStillFalse: true;
   liveStillFalse: true;
   createdAt: string;

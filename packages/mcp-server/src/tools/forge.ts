@@ -10,6 +10,7 @@ import {
   createToolForgeReviewRecord,
   createToolForgeValidationRecord,
   evaluateSafety,
+  evaluateRuntimeGrantCoverage,
   hashToolForgeManifest,
   proposeToolForgeGrants,
   reviewToolForgeManifest,
@@ -1728,6 +1729,18 @@ async function evaluateRuntimeEligibility(input: {
     reasons.push("One or more grants required by the inert registration are missing or expired.");
   }
 
+  const runtimePermission = tool === undefined ? undefined : (manifest.runtimePermissions ?? []).find((permission) => permission.toolNames.includes(tool.name));
+  const requestedRuntimeCapabilities = runtimePermission?.capabilities ?? [];
+  const requestedOperations = runtimePermission?.allowedOperations ?? [];
+  const coverage = evaluateRuntimeGrantCoverage({ generatedToolId: manifest.id, registrationId: registration.registrationId, toolName: requestedToolName ?? "", capabilities: requestedRuntimeCapabilities, operations: requestedOperations }, activeGrants);
+  const unsupportedRuntimeCapabilities = requestedRuntimeCapabilities.filter((capability) => !["pure_compute", "read_runtime_input", "write_runtime_output", "use_manifest_metadata", "use_registration_metadata"].includes(capability));
+  const blockedOperations = requestedOperations.filter((operation) => !coverage.allowedOperations.includes(operation));
+  if (input.mode === "subprocess") {
+    if (runtimePermission === undefined) { missingRequirements.push("Subprocess tools must declare runtime permissions."); reasons.push("Phase 20 requires explicit runtime capability declaration."); }
+    if (coverage.grantedCapabilities.length !== requestedRuntimeCapabilities.length || coverage.deniedCapabilities.length > 0) { missingRequirements.push("Runtime capabilities must have active allow grants."); reasons.push("One or more requested runtime capabilities lack grant coverage or are denied."); }
+    if (unsupportedRuntimeCapabilities.length > 0 || blockedOperations.length > 0) { missingRequirements.push("Runtime capabilities and operations must be supported and granted."); reasons.push("Requested runtime capability or operation is unsupported or not allowlisted."); }
+  }
+
   return {
     eligibility: {
       eligible: missingRequirements.length === 0,
@@ -1746,9 +1759,19 @@ async function evaluateRuntimeEligibility(input: {
       validationIds: presentValidationRecords.map((record) => record.validationId),
       harnessRunIds: presentHarnessRunRecords.map((record) => record.harnessRunId),
       requiredGrantIds,
-      activeGrantIds: matchedGrants.map((grant) => grant.id),
+      activeGrantIds: [...new Set([...matchedGrants.map((grant) => grant.id), ...coverage.activeGrantIds])],
       requestedPermissionIds: manifest.requestedPermissions.map((permission) => permission.id),
       blockedPermissionIds,
+      requestedRuntimeCapabilities,
+      grantedRuntimeCapabilities: coverage.grantedCapabilities,
+      deniedRuntimeCapabilities: coverage.deniedCapabilities,
+      unsupportedRuntimeCapabilities,
+      runtimeGrantIds: coverage.activeGrantIds,
+      requestedOperations,
+      allowedOperations: coverage.allowedOperations,
+      blockedOperations,
+      enforcedLimits: coverage.limits,
+      runtimeRequirements: { requiresDryRun: coverage.requiresDryRun, requiresConfirmationToken: coverage.requiresConfirmationToken, requiresApproval: coverage.requiresApproval },
       missingRequirements,
       reasons,
       sandbox
@@ -4410,10 +4433,10 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
         try {
           await mkdir(runDirectory, { recursive: true, mode: 0o700 });
           const paths = await prepareRuntimeRun({ runDirectory, payload: input.input ?? null });
-          const processResult = await runForgeSubprocess({ projectPath: rechecked.artifact.projectPath, manifestPath, handlerPath, toolName: rechecked.tool!.name, inputPath: paths.inputPath, outputPath: paths.outputPath, tempDirectory: paths.tempDirectory });
+          const processResult = await runForgeSubprocess({ projectPath: rechecked.artifact.projectPath, manifestPath, handlerPath, toolName: rechecked.tool!.name, inputPath: paths.inputPath, outputPath: paths.outputPath, tempDirectory: paths.tempDirectory, timeoutMs: rechecked.eligibility.enforcedLimits.maxRuntimeMs, allowedOperations: rechecked.eligibility.allowedOperations });
           await rm(paths.inputPath, { force: true });
           await rm(paths.tempDirectory, { recursive: true, force: true });
-          const runtimeRun: ToolForgeRuntimeRunRecord = { runtimeRunId: runId, registrationId: rechecked.registration.registrationId, artifactId: rechecked.artifact.artifactId, manifestId: rechecked.artifact.manifestId, manifestVersion: rechecked.artifact.manifestVersion, manifestHash: rechecked.artifact.manifestHash, toolName: rechecked.tool!.name, mode: "subprocess", status: processResult.status, executedGeneratedCode: false, metadataOnly: false, runnerMode: "subprocess", projectPath: rechecked.artifact.projectPath, outputRoot: runDirectory, inputFingerprint: context.confirmations.fingerprintInput(input), summary: processResult.status === "passed" ? "Fixed runner evaluated bounded JSON handler." : "Fixed runner did not complete successfully.", sandbox: rechecked.eligibility.sandbox, durationMs: processResult.durationMs, commandSummary: processResult.commandSummary, cwd: processResult.cwd, envKeys: processResult.envKeys, timeoutMs: RUNTIME_TIMEOUT_MS, outputSizeBytes: processResult.outputSizeBytes, ...(processResult.status === "passed" ? { resultSummary: "JSON result returned." } : {}), ...(processResult.errorSummary === undefined ? {} : { errorSummary: processResult.errorSummary }), executableStillFalse: true, liveStillFalse: true, createdAt: new Date().toISOString() };
+          const runtimeRun: ToolForgeRuntimeRunRecord = { runtimeRunId: runId, registrationId: rechecked.registration.registrationId, artifactId: rechecked.artifact.artifactId, manifestId: rechecked.artifact.manifestId, manifestVersion: rechecked.artifact.manifestVersion, manifestHash: rechecked.artifact.manifestHash, toolName: rechecked.tool!.name, mode: "subprocess", status: processResult.status, executedGeneratedCode: false, metadataOnly: false, runnerMode: "subprocess", projectPath: rechecked.artifact.projectPath, outputRoot: runDirectory, inputFingerprint: context.confirmations.fingerprintInput(input), summary: processResult.status === "passed" ? "Fixed runner evaluated bounded JSON handler." : "Fixed runner did not complete successfully.", sandbox: rechecked.eligibility.sandbox, durationMs: processResult.durationMs, commandSummary: processResult.commandSummary, cwd: processResult.cwd, envKeys: processResult.envKeys, timeoutMs: rechecked.eligibility.enforcedLimits.maxRuntimeMs, outputSizeBytes: processResult.outputSizeBytes, runtimeCapabilitiesUsed: rechecked.eligibility.grantedRuntimeCapabilities, enforcedLimits: rechecked.eligibility.enforcedLimits, ...(processResult.status === "passed" ? { resultSummary: "JSON result returned." } : {}), ...(processResult.errorSummary === undefined ? {} : { errorSummary: processResult.errorSummary }), executableStillFalse: true, liveStillFalse: true, createdAt: new Date().toISOString() };
           await context.forge.saveRuntimeRun(runtimeRun);
           if (processResult.status !== "passed") return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted; subprocess failed safely."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, error: { code: processResult.status === "timeout" ? "runtime_timeout" : "runtime_failed", message: processResult.errorSummary ?? "Runner failed." }, observations: [processResult.errorSummary ?? "Runner failed."] });
           return toolSuccess({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and fixed subprocess runner completed."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, data: { eligibility: rechecked.eligibility, runtimeRun, output: { mode: "subprocess", generatedCodeExecuted: false, metadataOnly: false, result: processResult.result ?? null, sandbox: rechecked.eligibility.sandbox } }, observations: ["Fixed runner evaluated bounded JSON handler; no live tool registered."] });

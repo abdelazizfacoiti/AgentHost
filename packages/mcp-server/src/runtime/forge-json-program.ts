@@ -52,6 +52,15 @@ export function evaluateProgram(program: Program, toolName: string, input: JsonV
   return evaluate(expression, input);
 }
 
+export function collectProgramOperations(program: Program, toolName: string): string[] {
+  const expression = program.tools[toolName];
+  if (expression === undefined) throw new ForgeProgramError("tool_not_found", "Handler does not declare requested tool.");
+  const operations = new Set<string>();
+  const walk = (node: Expression): void => { operations.add(node.op); if (node.op === "object") Object.values(node.entries).forEach(walk); else if (node.op === "array") node.items.forEach(walk); else if (node.op === "concat") node.values.forEach(walk); else if (node.op === "length") walk(node.value); };
+  walk(expression);
+  return [...operations];
+}
+
 export function validateSchema(schema: unknown, value: JsonValue): void {
   validateSchemaNode(schema, value, "$");
 }

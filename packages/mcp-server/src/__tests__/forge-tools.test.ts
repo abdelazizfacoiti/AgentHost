@@ -80,6 +80,19 @@ const runtimeSafeManifest: ToolForgeManifest = {
     }
   ],
   requestedPermissions: [],
+  runtimePermissions: [
+    {
+      id: "runtime-basic",
+      toolNames: ["example.runtime.inspect"],
+      capabilities: ["pure_compute", "read_runtime_input", "write_runtime_output"],
+      allowedOperations: ["const", "input", "object"],
+      maxInputBytes: 1024,
+      maxOutputBytes: 1024,
+      maxRuntimeMs: 1000,
+      requiresDryRun: true,
+      requiresConfirmationToken: true
+    }
+  ],
   riskDeclaration: "low",
   dataSensitivityDeclaration: "low",
   requirements: {
@@ -262,6 +275,9 @@ async function createRuntimeReadyRegistration(
     manifestHash
   });
   expect(artifact).toBeDefined();
+  if ((manifest.runtimePermissions?.length ?? 0) > 0) {
+    await previewThenExecute(context, "forge.apply_session_grants_from_review", { reviewId, dryRun: true }, { reviewId });
+  }
   const registration = await previewThenExecute(
     context,
     "forge.register_artifact",

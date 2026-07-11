@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { evaluateProgram, ForgeProgramError, FORGE_JSON_BYTES_MAX, parseJsonValue, parseProgram, validateSchema } from "./forge-json-program.js";
+import { collectProgramOperations, evaluateProgram, ForgeProgramError, FORGE_JSON_BYTES_MAX, parseJsonValue, parseProgram, validateSchema } from "./forge-json-program.js";
 
-interface Args { manifest: string; project: string; tool: string; input: string; output: string; handler: string; }
+interface Args { manifest: string; project: string; tool: string; input: string; output: string; handler: string; allowedOperations?: string[]; }
 function argument(name: string): string { const index = process.argv.indexOf(`--${name}`); const value = index < 0 ? undefined : process.argv[index + 1]; if (value === undefined || value.startsWith("--")) throw new ForgeProgramError("invalid_arguments", `Missing --${name}.`); return value; }
-function parseArgs(): Args { return { manifest: argument("manifest"), project: argument("project"), tool: argument("tool"), input: argument("input"), output: argument("output"), handler: argument("handler") }; }
+function parseArgs(): Args { const raw = process.argv.includes("--allowed-operations") ? argument("allowed-operations") : undefined; return { manifest: argument("manifest"), project: argument("project"), tool: argument("tool"), input: argument("input"), output: argument("output"), handler: argument("handler"), ...(raw === undefined ? {} : { allowedOperations: JSON.parse(raw) as string[] }) }; }
 function fail(code: string, message: string): never { process.stderr.write(`${JSON.stringify({ ok: false, error: { code, message } })}\n`); process.exitCode = 1; throw new Error(message); }
 async function main(): Promise<void> {
   const args = parseArgs();
@@ -24,7 +24,10 @@ async function main(): Promise<void> {
   if (tool.inputSchema === undefined || tool.outputSchema === undefined) throw new ForgeProgramError("schema_missing", "Tool must declare input and output schemas.");
   const input = parseJsonValue(inputText);
   validateSchema(tool.inputSchema, input);
-  const result = evaluateProgram(parseProgram(handlerText), args.tool, input);
+  const program = parseProgram(handlerText);
+  const operations = collectProgramOperations(program, args.tool);
+  if (args.allowedOperations !== undefined && operations.some((operation) => !args.allowedOperations!.includes(operation))) throw new ForgeProgramError("operation_not_allowed", "Handler operation is not granted.");
+  const result = evaluateProgram(program, args.tool, input);
   validateSchema(tool.outputSchema, result);
   const output = JSON.stringify({ ok: true, toolName: args.tool, result });
   if (Buffer.byteLength(output, "utf8") > FORGE_JSON_BYTES_MAX) throw new ForgeProgramError("output_too_large", "Runner output exceeds sandbox size limit.");

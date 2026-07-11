@@ -13,6 +13,7 @@ import type {
   ToolForgeGrantProposalResult,
   ToolForgeManifest,
   ToolForgePermissionRequest,
+  ToolForgeRuntimePermissionRequest,
   ToolForgePermissionReview,
   ToolForgeRequirements,
   ToolForgeReviewResult,
@@ -37,6 +38,19 @@ const requirementsSchema = z
     requiresApproval: z.boolean().optional()
   })
   .strict();
+
+const runtimePermissionSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  toolNames: z.array(z.string().trim().min(1).max(200)).min(1).max(100),
+  capabilities: z.array(z.enum(["pure_compute", "read_runtime_input", "write_runtime_output", "use_manifest_metadata", "use_registration_metadata", "read_sandbox_file", "write_sandbox_file", "list_sandbox_files", "read_user_file", "write_user_file", "network_fetch", "shell_command", "gui_action", "private_data_read", "communication_send"])).min(1).max(30),
+  allowedOperations: z.array(z.enum(["const", "input", "object", "array", "concat", "length"])).min(1).max(30),
+  maxInputBytes: z.number().int().positive().max(64 * 1024).optional(),
+  maxOutputBytes: z.number().int().positive().max(64 * 1024).optional(),
+  maxRuntimeMs: z.number().int().positive().max(5_000).optional(),
+  sandboxRoots: z.array(z.enum(["run", "temp"])).max(2).optional(),
+  outputRoots: z.array(z.literal("run")).max(1).optional(),
+  requiresDryRun: z.boolean().optional(), requiresConfirmationToken: z.boolean().optional(), requiresApproval: z.boolean().optional()
+}).strict();
 
 const manifestToolSchema = z
   .object({
@@ -165,6 +179,7 @@ const manifestSchema = z
     source: z.enum(["generated", "user", "built-in"]),
     tools: z.array(manifestToolSchema).max(100),
     requestedPermissions: z.array(permissionRequestSchema).max(100),
+    runtimePermissions: z.array(runtimePermissionSchema).max(100).optional(),
     riskDeclaration: z.enum(["observe", "low", "medium", "high", "blocked"]),
     dataSensitivityDeclaration: z.enum(["none", "low", "sensitive", "secret"]),
     requirements: requirementsSchema.default({})
@@ -199,8 +214,9 @@ function normalizeRequirements(input: ToolForgeRequirements): ToolForgeRequireme
 }
 
 function normalizeManifest(manifest: ToolForgeManifest): ToolForgeManifest {
+  const { runtimePermissions, ...manifestBase } = manifest;
   return {
-    ...manifest,
+    ...manifestBase,
     id: manifest.id.trim(),
     displayName: manifest.displayName.trim(),
     version: manifest.version.trim(),
@@ -240,6 +256,7 @@ function normalizeManifest(manifest: ToolForgeManifest): ToolForgeManifest {
         ...(normalizedOauthScopes === undefined ? {} : { oauthScopes: normalizedOauthScopes })
       };
     }),
+    ...(runtimePermissions === undefined ? {} : { runtimePermissions: runtimePermissions.map((permission) => ({ ...permission, id: permission.id.trim(), toolNames: [...new Set(permission.toolNames)], capabilities: [...new Set(permission.capabilities)], allowedOperations: [...new Set(permission.allowedOperations)], ...(permission.sandboxRoots === undefined ? {} : { sandboxRoots: [...new Set(permission.sandboxRoots)] }), ...(permission.outputRoots === undefined ? {} : { outputRoots: [...new Set(permission.outputRoots)] }) })) }),
     requirements: normalizeRequirements(manifest.requirements)
   };
 }
@@ -267,7 +284,7 @@ function parseManifestInput(input: unknown): { value?: ToolForgeManifest; errors
   }
 
   return {
-    value: normalizeManifest(parsed.data),
+    value: normalizeManifest(parsed.data as ToolForgeManifest),
     errors: []
   };
 }
@@ -441,6 +458,18 @@ function validatePermissionRequest(
   }
 }
 
+function validateRuntimePermissionRequest(permission: ToolForgeRuntimePermissionRequest, manifest: ToolForgeManifest, errors: ToolForgeValidationIssue[], blocked: string[]): void {
+  if (!MANIFEST_ID_PATTERN.test(permission.id)) errors.push(issue("manifest.runtime_permission.id.invalid", "Runtime permission id is invalid.", `runtimePermissions.${permission.id}.id`));
+  for (const toolName of permission.toolNames) if (!manifest.tools.some((tool) => tool.name === toolName)) errors.push(issue("manifest.runtime_permission.tool_missing", `Runtime permission references unknown tool ${toolName}.`, `runtimePermissions.${permission.id}.toolNames`));
+  const deferred = permission.capabilities.filter((capability) => !["pure_compute", "read_runtime_input", "write_runtime_output", "use_manifest_metadata", "use_registration_metadata"].includes(capability));
+  if (deferred.length > 0) { blocked.push(permission.id); errors.push(issue("manifest.runtime_permission.unsupported", "Requested runtime capability is deferred or blocked in Phase 20.", `runtimePermissions.${permission.id}.capabilities`)); }
+  const required = new Set<string>(["pure_compute", "write_runtime_output"]);
+  if (permission.allowedOperations.includes("input")) required.add("read_runtime_input");
+  if (permission.allowedOperations.includes("manifest")) required.add("use_manifest_metadata");
+  if (permission.allowedOperations.includes("registration")) required.add("use_registration_metadata");
+  for (const capability of required) if (!permission.capabilities.includes(capability as ToolForgeRuntimePermissionRequest["capabilities"][number])) errors.push(issue("manifest.runtime_permission.capability_missing", `Runtime operation requires ${capability}.`, `runtimePermissions.${permission.id}.capabilities`));
+}
+
 export function validateToolForgeManifest(input: unknown): ToolForgeValidationResult {
   const { value: manifest, errors } = parseManifestInput(input);
   const warnings: ToolForgeValidationIssue[] = [];
@@ -463,6 +492,7 @@ export function validateToolForgeManifest(input: unknown): ToolForgeValidationRe
   for (const permission of manifest.requestedPermissions) {
     validatePermissionRequest(permission, manifest, errors, warnings, dangerousPermissions, blockedPermissions);
   }
+  for (const permission of manifest.runtimePermissions ?? []) validateRuntimePermissionRequest(permission, manifest, errors, blockedPermissions);
 
   return {
     valid: errors.length === 0,
@@ -761,9 +791,7 @@ export function proposeToolForgeGrants(
 
   return {
     manifestId: manifest.id,
-    proposals: manifest.requestedPermissions.map((permission) =>
-      proposeGrantForPermission(manifest, permission, options.scope ?? "session", options.expiresAt)
-    ),
+    proposals: [...manifest.requestedPermissions.map((permission) => proposeGrantForPermission(manifest, permission, options.scope ?? "session", options.expiresAt)), ...(manifest.runtimePermissions ?? []).map((permission) => ({ permissionId: permission.id, reasons: ["Runtime capability declaration requires explicit grant."], grant: { id: `forge.runtime.${manifest.id}.${permission.id}`, scope: options.scope ?? "session", effect: "allow" as const, ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }), match: { generatedToolIds: [manifest.id], runtimeToolNames: permission.toolNames, runtimeCapabilities: permission.capabilities }, requirements: { requiresDryRun: permission.requiresDryRun ?? true, requiresConfirmationToken: permission.requiresConfirmationToken ?? true, requiresApproval: permission.requiresApproval ?? false, ...(permission.maxInputBytes === undefined ? {} : { maxInputBytes: permission.maxInputBytes }), ...(permission.maxOutputBytes === undefined ? {} : { maxOutputBytes: permission.maxOutputBytes }), ...(permission.maxRuntimeMs === undefined ? {} : { maxRuntimeMs: permission.maxRuntimeMs }), allowedOperations: permission.allowedOperations } } }))],
     warnings: validation.warnings.map((entry) => entry.message)
   };
 }

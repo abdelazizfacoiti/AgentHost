@@ -19,7 +19,10 @@ function cloneGrant(grant: CapabilityGrant): CapabilityGrant {
       ...(grant.match.oauthScopes === undefined ? {} : { oauthScopes: [...grant.match.oauthScopes] }),
       ...(grant.match.generatedToolIds === undefined
         ? {}
-        : { generatedToolIds: [...grant.match.generatedToolIds] })
+        : { generatedToolIds: [...grant.match.generatedToolIds] }),
+      ...(grant.match.registrationIds === undefined ? {} : { registrationIds: [...grant.match.registrationIds] }),
+      ...(grant.match.runtimeToolNames === undefined ? {} : { runtimeToolNames: [...grant.match.runtimeToolNames] }),
+      ...(grant.match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: [...grant.match.runtimeCapabilities] })
     },
     ...(grant.requirements === undefined
       ? {}
@@ -28,7 +31,10 @@ function cloneGrant(grant: CapabilityGrant): CapabilityGrant {
             ...grant.requirements,
             ...(grant.requirements.allowedRoots === undefined
               ? {}
-              : { allowedRoots: [...grant.requirements.allowedRoots] })
+              : { allowedRoots: [...grant.requirements.allowedRoots] }),
+            ...(grant.requirements.allowedOperations === undefined ? {} : { allowedOperations: [...grant.requirements.allowedOperations] }),
+            ...(grant.requirements.sandboxRoots === undefined ? {} : { sandboxRoots: [...grant.requirements.sandboxRoots] }),
+            ...(grant.requirements.outputRoots === undefined ? {} : { outputRoots: [...grant.requirements.outputRoots] })
           }
         })
   };
