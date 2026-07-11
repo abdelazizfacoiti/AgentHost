@@ -374,9 +374,10 @@ export function createToolForgeRuntimeRunRecord(input: {
     manifestHash: input.artifact.manifestHash,
     toolName: input.toolName,
     mode: input.sandbox.mode,
-    status: input.status ?? "completed",
+    status: input.status ?? "passed",
     executedGeneratedCode: false,
     metadataOnly: true,
+    runnerMode: "metadata_stub",
     projectPath: input.projectPath,
     outputRoot: input.outputRoot,
     inputFingerprint: input.inputFingerprint,
@@ -388,6 +389,8 @@ export function createToolForgeRuntimeRunRecord(input: {
       envBlocked: [...input.sandbox.envBlocked]
     },
     durationMs: input.durationMs,
+    executableStillFalse: true,
+    liveStillFalse: true,
     createdAt: now
   };
 }
@@ -406,7 +409,8 @@ export function summarizeToolForgeRuntimeRun(
     mode: record.mode,
     status: record.status,
     executedGeneratedCode: false,
-    metadataOnly: true,
+    metadataOnly: record.metadataOnly,
+    runnerMode: record.runnerMode,
     createdAt: record.createdAt
   };
 }

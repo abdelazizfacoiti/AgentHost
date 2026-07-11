@@ -602,7 +602,7 @@ describe("forge MCP tools", () => {
     await access(`${data.projectPath}/package.json`);
     await access(`${data.projectPath}/src/index.ts`);
     await access(`${data.projectPath}/tests/generated.test.ts`);
-    expect(data.files).toHaveLength(10);
+    expect(data.files).toHaveLength(12);
   });
 
   it("scaffold_project refuses overwrite unless it was explicitly previewed", async () => {
@@ -1941,6 +1941,26 @@ describe("forge MCP tools", () => {
     expect((await context.forge.listRuntimeRuns()).map((run) => run.runtimeRunId)).toContain(data.runtimeRun.runtimeRunId);
     expect(context.registry.listTools().some((entry) => entry.name === runtimeReady.manifest.tools[0]!.name)).toBe(false);
     expect(context.logger.entries.some((entry) => JSON.stringify(entry).includes("super-secret-runtime-input"))).toBe(false);
+  });
+
+  it("run_sandboxed_tool runs bounded JSON handler in subprocess after preview confirmation", async () => {
+    const context = createContext({ persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)] });
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const preview = await runTool(getTool("forge.run_sandboxed_tool"), { registrationId: runtimeReady.registrationId, toolName: runtimeReady.manifest.tools[0]!.name, mode: "subprocess", input: {}, dryRun: true }, context);
+    expect(preview.ok).toBe(true);
+    const previewData = preview.data as { confirmationToken: string; eligibility: { sandbox: { childProcess: boolean; envBlocked: string[] } } };
+    expect(previewData.eligibility.sandbox.childProcess).toBe(true);
+    expect(previewData.eligibility.sandbox.envBlocked).toContain("DISPLAY");
+    const result = await runTool(getTool("forge.run_sandboxed_tool"), { registrationId: runtimeReady.registrationId, toolName: runtimeReady.manifest.tools[0]!.name, mode: "subprocess", input: {}, confirmationToken: previewData.confirmationToken }, context);
+    expect(result.ok).toBe(true);
+    const data = result.data as { runtimeRun: { runnerMode: string; status: string; executableStillFalse: boolean; liveStillFalse: boolean; envKeys: string[] }; output: { mode: string; result: unknown } };
+    expect(data.runtimeRun.runnerMode).toBe("subprocess");
+    expect(data.runtimeRun.status).toBe("passed");
+    expect(data.runtimeRun.executableStillFalse).toBe(true);
+    expect(data.runtimeRun.liveStillFalse).toBe(true);
+    expect(data.runtimeRun.envKeys).not.toContain("DISPLAY");
+    expect(data.output).toMatchObject({ mode: "subprocess", result: { tool: runtimeSafeManifest.tools[0]!.name, input: {} } });
+    expect(context.registry.listTools().some((entry) => entry.name === runtimeSafeManifest.tools[0]!.name)).toBe(false);
   });
 
   it("get/list runtime runs return stored metadata-only summaries", async () => {

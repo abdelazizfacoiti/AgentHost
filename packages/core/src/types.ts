@@ -1050,17 +1050,10 @@ export const TOOL_FORGE_REGISTRATION_STATUSES = [
 ] as const;
 export type ToolForgeRegistrationStatus = (typeof TOOL_FORGE_REGISTRATION_STATUSES)[number];
 
-export const TOOL_FORGE_RUNTIME_MODES = ["stub"] as const;
+export const TOOL_FORGE_RUNTIME_MODES = ["stub", "subprocess"] as const;
 export type ToolForgeRuntimeMode = (typeof TOOL_FORGE_RUNTIME_MODES)[number];
 
-export const TOOL_FORGE_RUNTIME_STATUSES = [
-  "eligible",
-  "ineligible",
-  "dry_run",
-  "completed",
-  "rejected",
-  "timed_out"
-] as const;
+export const TOOL_FORGE_RUNTIME_STATUSES = ["passed", "failed", "blocked", "timeout", "completed", "timed_out"] as const;
 export type ToolForgeRuntimeStatus = (typeof TOOL_FORGE_RUNTIME_STATUSES)[number];
 
 export interface ToolForgeArtifactRecord {
@@ -1391,13 +1384,23 @@ export interface ToolForgeRuntimeRunRecord {
   mode: ToolForgeRuntimeMode;
   status: ToolForgeRuntimeStatus;
   executedGeneratedCode: false;
-  metadataOnly: true;
+  metadataOnly: boolean;
+  runnerMode: "metadata_stub" | "subprocess";
   projectPath: string;
   outputRoot: string;
   inputFingerprint: string;
   summary: string;
   sandbox: ToolForgeRuntimeSandboxPolicy;
   durationMs: number;
+  commandSummary?: string;
+  cwd?: string;
+  envKeys?: string[];
+  timeoutMs?: number;
+  outputSizeBytes?: number;
+  resultSummary?: string;
+  errorSummary?: string;
+  executableStillFalse: true;
+  liveStillFalse: true;
   createdAt: string;
 }
 
@@ -1412,7 +1415,8 @@ export interface ToolForgeRuntimeRunSummary {
   mode: ToolForgeRuntimeMode;
   status: ToolForgeRuntimeStatus;
   executedGeneratedCode: false;
-  metadataOnly: true;
+  metadataOnly: boolean;
+  runnerMode: "metadata_stub" | "subprocess";
   createdAt: string;
 }
 
@@ -1423,7 +1427,7 @@ export interface ToolForgeCheckRuntimeEligibilityResult {
 export interface ToolForgeRunSandboxedToolResult {
   eligibility: ToolForgeRuntimeEligibilityResult;
   runtimeRun: ToolForgeRuntimeRunRecord;
-  output: ToolForgeSandboxStubOutput;
+  output: ToolForgeSandboxStubOutput | { mode: "subprocess"; generatedCodeExecuted: false; metadataOnly: false; result: unknown; sandbox: ToolForgeRuntimeSandboxPolicy };
 }
 
 export interface ToolForgeGetRuntimeRunResult {
