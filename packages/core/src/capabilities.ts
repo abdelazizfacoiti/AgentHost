@@ -209,6 +209,11 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Checks whether a registered inert Forge artifact is eligible for limited sandbox runtime handling."
     },
     {
+      name: "forge.check_sandbox_support",
+      riskLevel: "observe" as const,
+      description: "Reports read-only OS-level sandbox support without enabling sandbox execution."
+    },
+    {
       name: "forge.run_sandboxed_tool",
       riskLevel: "medium" as const,
       description: "Runs a confirmation-gated metadata stub for one registered inert Forge tool without executing generated code."

@@ -45,6 +45,7 @@ describe("CapabilityRegistry", () => {
       "forge.list_registrations",
       "forge.revoke_registration",
       "forge.check_runtime_eligibility",
+      "forge.check_sandbox_support",
       "forge.run_sandboxed_tool",
       "forge.get_runtime_run",
       "forge.list_runtime_runs",

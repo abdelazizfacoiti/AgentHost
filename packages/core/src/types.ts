@@ -630,6 +630,54 @@ export interface DesktopPointerResult {
   reason: string;
 }
 
+export type SandboxBackendId =
+  | "bubblewrap"
+  | "firejail"
+  | "unshare"
+  | "flatpak-spawn"
+  | "nsjail"
+  | "systemd-run";
+
+export type SandboxFeatureStatus = {
+  status: "available" | "unavailable" | "unknown";
+  reason: string;
+};
+
+export interface SandboxBackendSupport {
+  id: SandboxBackendId;
+  commandName: string;
+  commandPath: string;
+  detected: true;
+  usability: "candidate" | "limited" | "informational";
+  reason: string;
+  limitations: string[];
+}
+
+export interface SandboxBackendUnavailable {
+  id: SandboxBackendId;
+  detected: false;
+  reason: string;
+}
+
+export interface SandboxSupportProbeResult {
+  platform: string;
+  supported: boolean;
+  availableBackends: SandboxBackendSupport[];
+  unavailableBackends: SandboxBackendUnavailable[];
+  recommendedBackend: SandboxBackendId | null;
+  kernelFeatures: {
+    userNamespaces: SandboxFeatureStatus;
+    seccomp: SandboxFeatureStatus;
+    appArmor: SandboxFeatureStatus;
+    flatpakContainer: SandboxFeatureStatus;
+  };
+  limitations: string[];
+  requiresInstall: boolean;
+  requiresSudo: false;
+  safeForAgentHostUse: boolean;
+  notes: string[];
+}
+
 export interface DesktopCapabilitySupport {
   supported: boolean;
   backend: string;

@@ -40,6 +40,7 @@ import {
   listLinuxDirectory,
   openLinuxApp,
   readLinuxFile,
+  probeLinuxSandboxSupport,
   runSafeLinuxCommand,
   sendLinuxHotkey,
   setLinuxAccessibilityValue,
@@ -58,6 +59,7 @@ import { BLENDER_RUN_PYTHON_TOOL, createBlenderTools } from "./tools/blender.js"
 import { createDesktopTools } from "./tools/desktop.js";
 import { createFileTools } from "./tools/file.js";
 import { createForgeTools } from "./tools/forge.js";
+import { createForgeSandboxTools } from "./tools/forge-sandbox.js";
 import { createGuideTools } from "./tools/guide.js";
 import { createPolicyTools } from "./tools/policy.js";
 import { createShellTools } from "./tools/shell.js";
@@ -164,6 +166,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       typeText: (input) => typeLinuxText(input, { agentHostDir: config.agentHostDir }),
       click: (input) => clickLinuxDesktop(input, { agentHostDir: config.agentHostDir }),
       pointer: (input) => performLinuxPointerAction(input, { agentHostDir: config.agentHostDir }),
+      checkSandboxSupport: () => probeLinuxSandboxSupport({ env: process.env }),
       getAccessibilityTree: (input) => getLinuxAccessibilityTree(input, { agentHostDir: config.agentHostDir }),
       findAccessibilityElement: (input) => findLinuxAccessibilityElements(input, { agentHostDir: config.agentHostDir }),
       inspectAccessibilityElement: (input) =>
@@ -189,6 +192,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const tools = [
     ...createSystemTools(),
     ...createForgeTools(),
+    ...createForgeSandboxTools(),
     ...createAdapterTools(),
     ...createBlenderTools(),
     ...createAppTools(),
