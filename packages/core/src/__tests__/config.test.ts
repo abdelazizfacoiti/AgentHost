@@ -12,6 +12,7 @@ describe("loadAgentHostConfig", () => {
     expect(config.agentHostDir).toBe(path.join(homeDir, ".agenthost"));
     expect(config.profile).toBe("strict");
     expect(config.policy.name).toBe("strict");
+    expect(config.forgeRuntimeSandboxMode).toBe("auto");
   });
 
   it("loads profile and paths from a config file", async () => {
@@ -23,6 +24,7 @@ describe("loadAgentHostConfig", () => {
       configPath,
       JSON.stringify({
         profile: "dev",
+        forgeRuntimeSandboxMode: "none",
         logFile: "~/agenthost-test-log.jsonl"
       }),
       "utf8"
@@ -31,6 +33,7 @@ describe("loadAgentHostConfig", () => {
     const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
 
     expect(config.profile).toBe("dev");
+    expect(config.forgeRuntimeSandboxMode).toBe("none");
     expect(config.logFile).toBe(path.join(homeDir, "agenthost-test-log.jsonl"));
   });
 
@@ -88,5 +91,11 @@ describe("loadAgentHostConfig", () => {
     expect(config.policy.name).toBe("demo-unlocked-local");
     expect(config.policy.allowFileWriteRoots).toContain("~/Desktop/agenthost-demo");
     expect(config.policy.grants.some((grant) => grant.id === "demo-unlocked-local.runtime-supported")).toBe(true);
+  });
+
+  it("allows environment to override Forge sandbox mode", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-sandbox-"));
+    const config = await loadAgentHostConfig({ env: { AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE: "bubblewrap" }, homeDir });
+    expect(config.forgeRuntimeSandboxMode).toBe("bubblewrap");
   });
 });

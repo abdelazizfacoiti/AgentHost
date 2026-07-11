@@ -378,6 +378,8 @@ export function createToolForgeRuntimeRunRecord(input: {
     executedGeneratedCode: false,
     metadataOnly: true,
     runnerMode: "metadata_stub",
+    sandboxBackend: "none",
+    sandboxLimitations: ["Metadata stub does not launch a child process or OS sandbox backend."],
     projectPath: input.projectPath,
     outputRoot: input.outputRoot,
     inputFingerprint: input.inputFingerprint,

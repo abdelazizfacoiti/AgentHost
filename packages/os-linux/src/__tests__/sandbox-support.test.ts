@@ -32,7 +32,7 @@ describe("Linux sandbox support probe", () => {
       recommendedBackend: "bubblewrap",
       requiresInstall: false,
       requiresSudo: false,
-      safeForAgentHostUse: false,
+      safeForAgentHostUse: true,
       kernelFeatures: {
         userNamespaces: { status: "available" },
         seccomp: { status: "available" },

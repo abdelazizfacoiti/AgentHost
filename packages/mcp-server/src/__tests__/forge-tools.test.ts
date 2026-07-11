@@ -1969,8 +1969,10 @@ describe("forge MCP tools", () => {
     expect(previewData.eligibility.sandbox.envBlocked).toContain("DISPLAY");
     const result = await runTool(getTool("forge.run_sandboxed_tool"), { registrationId: runtimeReady.registrationId, toolName: runtimeReady.manifest.tools[0]!.name, mode: "subprocess", input: {}, confirmationToken: previewData.confirmationToken }, context);
     expect(result.ok).toBe(true);
-    const data = result.data as { runtimeRun: { runnerMode: string; status: string; executableStillFalse: boolean; liveStillFalse: boolean; envKeys: string[] }; output: { mode: string; result: unknown } };
+    const data = result.data as { runtimeRun: { runnerMode: string; sandboxBackend: string; sandboxLimitations: string[]; status: string; executableStillFalse: boolean; liveStillFalse: boolean; envKeys: string[] }; output: { mode: string; result: unknown } };
     expect(data.runtimeRun.runnerMode).toBe("subprocess");
+    expect(data.runtimeRun.sandboxBackend).toBe("none");
+    expect(data.runtimeRun.sandboxLimitations.length).toBeGreaterThan(0);
     expect(data.runtimeRun.status).toBe("passed");
     expect(data.runtimeRun.executableStillFalse).toBe(true);
     expect(data.runtimeRun.liveStillFalse).toBe(true);
