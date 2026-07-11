@@ -26,7 +26,7 @@ const DEV_DEFAULTS: PermissionDefaults = {
   fileWrite: "allow",
   appOpen: "allow",
   screenshots: "allow",
-  windowFocus: "deny",
+  windowFocus: "allow",
   accessibilityRead: "allow",
   accessibilityActions: "allow",
   guiClick: "deny",
