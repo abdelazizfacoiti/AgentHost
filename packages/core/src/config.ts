@@ -9,6 +9,7 @@ const policyProfileNameSchema = z.enum([
   "strict",
   "dev",
   "gui-dev",
+  "demo-unlocked-local",
   "private-data",
   "autopilot-future-disabled-by-default"
 ]);

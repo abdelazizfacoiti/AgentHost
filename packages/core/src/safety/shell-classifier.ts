@@ -94,6 +94,7 @@ const SHELL_RULES: ShellRule[] = [
 const PATH_FRAGMENT_PATTERN = /(?:~\/[^\s'"|;&]+|\/[A-Za-z0-9._~+/@:-]+)/g;
 
 const RISK_ORDER: RiskLevel[] = ["observe", "low", "medium", "high", "blocked"];
+const DEMO_COMMANDS = new Set(["node", "npm", "npx", "git", "ls", "cat", "pwd", "mkdir", "cp", "mv", "touch", "echo", "sed", "awk", "grep", "find", "python", "python3"]);
 
 function maxRiskLevel(a: RiskLevel, b: RiskLevel): RiskLevel {
   return RISK_ORDER.indexOf(a) >= RISK_ORDER.indexOf(b) ? a : b;
@@ -112,6 +113,15 @@ export function classifyShellCommand(
     riskLevel = maxRiskLevel(riskLevel, "high");
     reasons.push("Shell is disabled by this policy profile.");
     matchedRules.push("policy.shell.disabled");
+  }
+
+  if (policy.name === "demo-unlocked-local") {
+    const executable = command.trim().split(/\s+/)[0] ?? "";
+    if (!DEMO_COMMANDS.has(executable)) {
+      riskLevel = "blocked";
+      reasons.push("Demo profile only permits approved local development commands.");
+      matchedRules.push("demo.shell.command_not_allowlisted");
+    }
   }
 
   for (const rule of SHELL_RULES) {

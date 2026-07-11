@@ -334,6 +334,12 @@ export function createAppTools(): AnyAgentHostToolDefinition<AgentHostMcpContext
         context.adapters.detectForApp({ appName: input.appName, appId: linuxResult.appId })
       );
 
+      if (context.policy.name === "demo-unlocked-local" && data.appSensitivity === "communication" && data.recommendedStrategy === "guide_only" && (input.taskType === "inspect" || input.taskType === "automate")) {
+        data.availableStrategies = [...new Set(["accessibility" as const, ...data.availableStrategies])];
+        data.recommendedStrategy = "accessibility";
+        data.reason = `${data.reason} Demo profile permits accessibility-based local inspection; external sends remain blocked.`;
+      }
+
       return toolSuccess({
         tool: "app.get_strategy",
         riskLevel: "low",

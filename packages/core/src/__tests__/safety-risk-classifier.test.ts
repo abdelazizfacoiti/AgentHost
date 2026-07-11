@@ -46,6 +46,27 @@ describe("evaluateSafety", () => {
     expect(devResult.approval.status).toBe("not_required");
   });
 
+  it("demo profile allows normal local actions but keeps sensitive apps blocked", () => {
+    const demo = getPolicyProfile("demo-unlocked-local");
+    const write = evaluateSafety({ tool: "file.write", actionType: "file_write", filePath: "~/Desktop/agenthost-demo/test.txt" }, demo, { homeDir });
+    const outside = evaluateSafety({ tool: "file.write", actionType: "file_write", filePath: "~/Documents/private.txt" }, demo, { homeDir });
+    const normalApp = evaluateSafety({ tool: "app.open", actionType: "app_launch", appName: "GIMP" }, demo, { homeDir });
+    const financial = evaluateSafety({ tool: "desktop.click", actionType: "gui_click", appName: "My Bank" }, demo, { homeDir });
+    expect(write.allowed).toBe(true);
+    expect(outside.allowed).toBe(false);
+    expect(normalApp.allowed).toBe(true);
+    expect(financial.blocked).toBe(true);
+  });
+
+  it("demo profile allows communication reads but blocks sends", () => {
+    const demo = getPolicyProfile("demo-unlocked-local");
+    const read = evaluateSafety({ tool: "accessibility.inspect_element", actionType: "inspect", appName: "Gmail", dataSensitivity: "sensitive" }, demo, { homeDir });
+    const send = evaluateSafety({ tool: "email.send", actionType: "communication_send", appName: "Gmail", communicative: true, externalEffect: true }, demo, { homeDir });
+    expect(read.allowed).toBe(true);
+    expect(read.grantDecision.allowedByGrantIds).toContain("demo-unlocked-local.communication-read");
+    expect(send.blocked).toBe(true);
+  });
+
   it("blocks communication sending and uploads by policy", () => {
     const sendResult = evaluateSafety(
       {

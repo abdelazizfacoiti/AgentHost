@@ -81,4 +81,12 @@ describe("loadAgentHostConfig", () => {
       }
     });
   });
+
+  it("loads local demo profile", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-demo-"));
+    const config = await loadAgentHostConfig({ env: { AGENTHOST_PROFILE: "demo-unlocked-local" }, homeDir });
+    expect(config.policy.name).toBe("demo-unlocked-local");
+    expect(config.policy.allowFileWriteRoots).toContain("~/Desktop/agenthost-demo");
+    expect(config.policy.grants.some((grant) => grant.id === "demo-unlocked-local.runtime-supported")).toBe(true);
+  });
 });
