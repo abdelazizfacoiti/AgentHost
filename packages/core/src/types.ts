@@ -1041,6 +1041,15 @@ export type ToolForgeHarnessMode = (typeof TOOL_FORGE_HARNESS_MODES)[number];
 export const TOOL_FORGE_HARNESS_STATUSES = ["passed", "failed", "skipped", "blocked"] as const;
 export type ToolForgeHarnessStatus = (typeof TOOL_FORGE_HARNESS_STATUSES)[number];
 
+export const TOOL_FORGE_REGISTRATION_STATUSES = [
+  "pending",
+  "registered_inert",
+  "rejected",
+  "revoked",
+  "expired"
+] as const;
+export type ToolForgeRegistrationStatus = (typeof TOOL_FORGE_REGISTRATION_STATUSES)[number];
+
 export interface ToolForgeArtifactRecord {
   artifactId: string;
   manifestId: string;
@@ -1226,6 +1235,73 @@ export interface ToolForgeGetHarnessRunResult {
 
 export interface ToolForgeListHarnessRunsResult {
   harnessRuns: ToolForgeHarnessRunSummary[];
+}
+
+export interface ToolForgeRegistrationEligibilityResult {
+  eligible: boolean;
+  active: boolean;
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  registeredTools: ToolForgeToolDeclaration[];
+  requiredGrantIds: string[];
+  activeGrantIds: string[];
+  missingRequirements: string[];
+  reasons: string[];
+  reviewId?: string;
+  validationIds: string[];
+  harnessRunIds: string[];
+}
+
+export interface ToolForgeRegistrationRecord {
+  registrationId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  registeredAt: string;
+  status: ToolForgeRegistrationStatus;
+  registeredTools: ToolForgeToolDeclaration[];
+  permissionsSnapshot: ToolForgePermissionRequest[];
+  grantsSnapshot: GrantSummary[];
+  reviewId?: string;
+  validationIds: string[];
+  harnessRunIds: string[];
+  executable: false;
+  live: false;
+  explanation: string;
+  expiresAt?: string;
+}
+
+export interface ToolForgeRegistrationSummary {
+  registrationId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  registeredAt: string;
+  status: ToolForgeRegistrationStatus;
+  executable: false;
+  live: false;
+  expiresAt?: string;
+}
+
+export interface ToolForgeRegisterArtifactResult {
+  eligibility: ToolForgeRegistrationEligibilityResult;
+  registration: ToolForgeRegistrationRecord;
+}
+
+export interface ToolForgeGetRegistrationResult {
+  registration: ToolForgeRegistrationRecord;
+}
+
+export interface ToolForgeListRegistrationsResult {
+  registrations: ToolForgeRegistrationSummary[];
+}
+
+export interface ToolForgeRevokeRegistrationResult {
+  registration: ToolForgeRegistrationRecord;
 }
 
 export interface ToolForgeSaveManifestResult {

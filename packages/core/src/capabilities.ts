@@ -179,6 +179,31 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Lists stored Forge harness run summaries."
     },
     {
+      name: "forge.check_registration_eligibility",
+      riskLevel: "low" as const,
+      description: "Checks whether a generated Forge artifact is eligible for inert registration."
+    },
+    {
+      name: "forge.register_artifact",
+      riskLevel: "medium" as const,
+      description: "Creates a registered_inert Forge registration record without making generated tools callable."
+    },
+    {
+      name: "forge.get_registration",
+      riskLevel: "low" as const,
+      description: "Returns one stored Forge registration record."
+    },
+    {
+      name: "forge.list_registrations",
+      riskLevel: "low" as const,
+      description: "Lists stored Forge registration summaries."
+    },
+    {
+      name: "forge.revoke_registration",
+      riskLevel: "medium" as const,
+      description: "Marks a Forge registration record revoked without deleting it or exposing generated tools."
+    },
+    {
       name: "app.detect",
       riskLevel: "low" as const,
       description: "Detects a Linux app generically and reports available automation strategies."

@@ -1021,4 +1021,502 @@ describe("forge MCP tools", () => {
       expect.arrayContaining([expect.objectContaining({ harnessRunId })])
     );
   });
+
+  it("registration eligibility fails without review", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash: (saved.data as { manifestHash: string }).manifestHash
+    });
+
+    const result = await runTool(
+      getTool("forge.check_registration_eligibility"),
+      { artifactId: artifact!.artifactId },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result.data as { eligible: boolean }).eligible).toBe(false);
+    expect((result.data as { missingRequirements: string[] }).missingRequirements).toContain("Review record is required.");
+  });
+
+  it("registration eligibility fails without scaffold, static validation, and harness pass", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+
+    const result = await runTool(
+      getTool("forge.check_registration_eligibility"),
+      { artifactId: artifact!.artifactId },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { missingRequirements: string[] };
+    expect(data.missingRequirements).toContain("Scaffolded project is required.");
+    expect(data.missingRequirements).toContain("Static validation must exist.");
+    expect(data.missingRequirements).toContain("Harness validation must exist.");
+  });
+
+  it("registration eligibility fails on manifest hash mismatch", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+    await context.forge.saveManifest({ ...validManifest, description: "tampered" }, manifestHash);
+
+    const result = await runTool(
+      getTool("forge.check_registration_eligibility"),
+      { artifactId: artifact!.artifactId },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result.data as { missingRequirements: string[] }).missingRequirements).toContain("Manifest hash changed.");
+  });
+
+  it("registration eligibility fails when grants are missing", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const harnessPreview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "contract", dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.run_validation_harness"),
+      {
+        projectPath,
+        mode: "contract",
+        confirmationToken: (harnessPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+
+    const result = await runTool(
+      getTool("forge.check_registration_eligibility"),
+      { artifactId: artifact!.artifactId },
+      context
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result.data as { eligible: boolean }).eligible).toBe(false);
+    expect((result.data as { missingRequirements: string[] }).missingRequirements).toContain(
+      "Required grants must be active for the current session/profile."
+    );
+  });
+
+  it("register_artifact dryRun writes nothing and actual execution creates a registered_inert record", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const harnessPreview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "contract", dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.run_validation_harness"),
+      {
+        projectPath,
+        mode: "contract",
+        confirmationToken: (harnessPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const grantsPreview = await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      { reviewId, dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      {
+        reviewId,
+        confirmationToken: (grantsPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+
+    const preview = await runTool(
+      getTool("forge.register_artifact"),
+      { artifactId: artifact!.artifactId, dryRun: true },
+      context
+    );
+    expect(preview.ok).toBe(true);
+    expect((await context.forge.listRegistrations()).length).toBe(0);
+
+    const noToken = await runTool(
+      getTool("forge.register_artifact"),
+      { artifactId: artifact!.artifactId },
+      context
+    );
+    expect(noToken.ok).toBe(false);
+    expect(noToken.error?.code).toBe("dry_run_required");
+
+    const execute = await runTool(
+      getTool("forge.register_artifact"),
+      {
+        artifactId: artifact!.artifactId,
+        confirmationToken: (preview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    expect(execute.ok).toBe(true);
+    const data = execute.data as {
+      registration: { status: string; executable: boolean; live: boolean };
+      eligibility: { eligible: boolean };
+    };
+    expect(data.eligibility.eligible).toBe(true);
+    expect(data.registration.status).toBe("registered_inert");
+    expect(data.registration.executable).toBe(false);
+    expect(data.registration.live).toBe(false);
+    expect(context.registry.listTools().some((tool) => tool.name === "example.generated.preview")).toBe(false);
+  });
+
+  it("get/list registrations work and active registration blocks repeat registration", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const harnessPreview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "contract", dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.run_validation_harness"),
+      {
+        projectPath,
+        mode: "contract",
+        confirmationToken: (harnessPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const grantsPreview = await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      { reviewId, dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      {
+        reviewId,
+        confirmationToken: (grantsPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+    const registrationPreview = await runTool(
+      getTool("forge.register_artifact"),
+      { artifactId: artifact!.artifactId, dryRun: true },
+      context
+    );
+    const registrationExecute = await runTool(
+      getTool("forge.register_artifact"),
+      {
+        artifactId: artifact!.artifactId,
+        confirmationToken: (registrationPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const registrationId = (registrationExecute.data as { registration: { registrationId: string } }).registration.registrationId;
+
+    const getRegistration = await runTool(getTool("forge.get_registration"), { registrationId }, context);
+    const listRegistrations = await runTool(
+      getTool("forge.list_registrations"),
+      { artifactId: artifact!.artifactId },
+      context
+    );
+    const eligibility = await runTool(
+      getTool("forge.check_registration_eligibility"),
+      { artifactId: artifact!.artifactId },
+      context
+    );
+
+    expect(getRegistration.ok).toBe(true);
+    expect((getRegistration.data as { registration: { registrationId: string } }).registration.registrationId).toBe(
+      registrationId
+    );
+    expect((listRegistrations.data as { registrations: Array<{ registrationId: string }> }).registrations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ registrationId })])
+    );
+    expect((eligibility.data as { eligible: boolean }).eligible).toBe(false);
+  });
+
+  it("revoke_registration dryRun writes nothing and execution marks the record revoked", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const harnessPreview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "contract", dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.run_validation_harness"),
+      {
+        projectPath,
+        mode: "contract",
+        confirmationToken: (harnessPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const grantsPreview = await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      { reviewId, dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      {
+        reviewId,
+        confirmationToken: (grantsPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+    const registerPreview = await runTool(
+      getTool("forge.register_artifact"),
+      { artifactId: artifact!.artifactId, dryRun: true },
+      context
+    );
+    const registered = await runTool(
+      getTool("forge.register_artifact"),
+      {
+        artifactId: artifact!.artifactId,
+        confirmationToken: (registerPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const registrationId = (registered.data as { registration: { registrationId: string } }).registration.registrationId;
+
+    const revokePreview = await runTool(
+      getTool("forge.revoke_registration"),
+      { registrationId, dryRun: true },
+      context
+    );
+    expect(revokePreview.ok).toBe(true);
+
+    const revoked = await runTool(
+      getTool("forge.revoke_registration"),
+      {
+        registrationId,
+        confirmationToken: (revokePreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    expect(revoked.ok).toBe(true);
+    expect((revoked.data as { registration: { status: string } }).registration.status).toBe("revoked");
+  });
+
+  it("expired registrations are returned as expired", async () => {
+    const context = createContext();
+    const saved = await previewThenExecute(
+      context,
+      "forge.save_manifest",
+      { manifest: validManifest, dryRun: true },
+      { manifest: validManifest }
+    );
+    const manifestHash = (saved.data as { manifestHash: string }).manifestHash;
+    const review = await previewThenExecute(
+      context,
+      "forge.create_review",
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash, dryRun: true },
+      { manifestId: validManifest.id, version: validManifest.version, manifestHash }
+    );
+    const reviewId = (review.data as { review: { reviewId: string } }).review.reviewId;
+    const scaffold = await previewThenExecute(
+      context,
+      "forge.scaffold_project",
+      { reviewId, dryRun: true },
+      { reviewId }
+    );
+    const projectPath = (scaffold.data as { projectPath: string }).projectPath;
+    await runTool(getTool("forge.validate_project"), { projectPath }, context);
+    const harnessPreview = await runTool(
+      getTool("forge.run_validation_harness"),
+      { projectPath, mode: "contract", dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.run_validation_harness"),
+      {
+        projectPath,
+        mode: "contract",
+        confirmationToken: (harnessPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const grantsPreview = await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      { reviewId, dryRun: true },
+      context
+    );
+    await runTool(
+      getTool("forge.apply_session_grants_from_review"),
+      {
+        reviewId,
+        confirmationToken: (grantsPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const artifact = await context.forge.findArtifact({
+      manifestId: validManifest.id,
+      version: validManifest.version,
+      manifestHash
+    });
+    const registerPreview = await runTool(
+      getTool("forge.register_artifact"),
+      { artifactId: artifact!.artifactId, dryRun: true },
+      context
+    );
+    const registered = await runTool(
+      getTool("forge.register_artifact"),
+      {
+        artifactId: artifact!.artifactId,
+        confirmationToken: (registerPreview.data as { confirmationToken: string }).confirmationToken
+      },
+      context
+    );
+    const stored = (registered.data as { registration: { registrationId: string } }).registration.registrationId;
+    const registration = await context.forge.loadRegistration(stored);
+    await context.forge.saveRegistration({
+      ...registration,
+      expiresAt: "2000-01-01T00:00:00.000Z"
+    });
+
+    const getRegistration = await runTool(getTool("forge.get_registration"), { registrationId: stored }, context);
+    expect((getRegistration.data as { registration: { status: string } }).registration.status).toBe("expired");
+  });
 });
