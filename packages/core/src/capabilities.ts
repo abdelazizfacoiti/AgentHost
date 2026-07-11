@@ -309,6 +309,12 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       strategy: "gui_control" as const,
       description: "Clicks screen coordinates when policy and active-window context allow it."
     },
+    ...["desktop.move_mouse", "desktop.scroll", "desktop.double_click", "desktop.right_click", "desktop.drag"].map((name) => ({
+      name,
+      riskLevel: "medium" as const,
+      strategy: "gui_control" as const,
+      description: "Performs a bounded confirmation-gated desktop pointer action on X11."
+    })),
     {
       name: "window.list",
       riskLevel: "low" as const,

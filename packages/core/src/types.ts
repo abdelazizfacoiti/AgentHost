@@ -620,6 +620,16 @@ export interface DesktopClickResult {
   reason: string;
 }
 
+export type DesktopPointerAction = "move_mouse" | "scroll" | "double_click" | "right_click" | "drag";
+export interface DesktopPointerResult {
+  supported: boolean;
+  backend: string;
+  performed: boolean;
+  action: DesktopPointerAction;
+  activeWindow: DesktopWindowContext;
+  reason: string;
+}
+
 export interface DesktopCapabilitySupport {
   supported: boolean;
   backend: string;
