@@ -49,6 +49,14 @@ const GUI_DEV_DEFAULTS: PermissionDefaults = {
   guiHotkey: "allow"
 };
 
+// Local demo only. Hard safety classifiers and confirmation tokens still apply.
+const DEMO_UNLOCKED_LOCAL_DEFAULTS: PermissionDefaults = {
+  ...GUI_DEV_DEFAULTS,
+  browserAutomation: "allow",
+  privateDataReads: "allow",
+  generatedTools: "allow"
+};
+
 const PRIVATE_DATA_DEFAULTS: PermissionDefaults = {
   ...STRICT_DEFAULTS,
   fileRead: "approval_required",
@@ -178,6 +186,53 @@ export const GUI_DEV_POLICY_PROFILE: PolicyProfile = {
   grants: []
 };
 
+export const DEMO_UNLOCKED_LOCAL_POLICY_PROFILE: PolicyProfile = {
+  name: "demo-unlocked-local",
+  description: "Local demo/testing profile. Broad local access; destructive, private, external, credential, and system actions stay blocked.",
+  enabled: true,
+  allowScreenshots: true,
+  allowAppLaunch: true,
+  allowShell: true,
+  allowFileWriteRoots: ["~/.agenthost", "~/.agenthost/outputs", "~/.agenthost/forge", "~/Desktop/agenthost-demo"],
+  allowGenericClick: true,
+  allowGenericType: true,
+  allowEmailSend: false,
+  allowUploads: false,
+  requireApprovalForMediumRisk: false,
+  blockHighRiskByDefault: true,
+  requireDryRunForStateChanging: true,
+  requireConfirmationForStateChanging: true,
+  requireExactTargetForStateChanging: true,
+  defaults: DEMO_UNLOCKED_LOCAL_DEFAULTS,
+  grants: [{
+    id: "demo-unlocked-local.communication-read",
+    scope: "persistent",
+    effect: "allow",
+    description: "Local demo-only read/inspect grant for communication apps. Does not permit sends or external effects.",
+    match: {
+      actionTypes: ["observe", "inspect", "file_read"],
+      appSensitivities: ["communication"]
+    },
+    requirements: { maxRiskLevel: "medium" }
+  }, {
+    id: "demo-unlocked-local.runtime-supported",
+    scope: "persistent",
+    effect: "allow",
+    description: "Local demo-only allow grant for bounded generated runtime capabilities.",
+    match: {
+      runtimeCapabilities: ["pure_compute", "read_runtime_input", "write_runtime_output", "use_manifest_metadata", "use_registration_metadata"]
+    },
+    requirements: {
+      requiresDryRun: true,
+      requiresConfirmationToken: true,
+      maxInputBytes: 64 * 1024,
+      maxOutputBytes: 64 * 1024,
+      maxRuntimeMs: 5_000,
+      allowedOperations: ["const", "input", "object", "array", "concat", "length"]
+    }
+  }]
+};
+
 export const PRIVATE_DATA_POLICY_PROFILE: PolicyProfile = {
   name: "private-data",
   description: "Restricted profile for private-data inspection with explicit grants.",
@@ -225,7 +280,7 @@ function clonePolicyProfile(profile: PolicyProfile, grants: CapabilityGrant[] = 
     ...profile,
     allowFileWriteRoots: [...profile.allowFileWriteRoots],
     defaults: cloneDefaults(profile.defaults),
-    grants: cloneGrants(grants)
+    grants: cloneGrants([...profile.grants, ...grants])
   };
 }
 
@@ -239,6 +294,8 @@ export function getPolicyProfile(name: PolicyProfileName, options: { grants?: Ca
       return clonePolicyProfile(DEV_POLICY_PROFILE, grants);
     case "gui-dev":
       return clonePolicyProfile(GUI_DEV_POLICY_PROFILE, grants);
+    case "demo-unlocked-local":
+      return clonePolicyProfile(DEMO_UNLOCKED_LOCAL_POLICY_PROFILE, grants);
     case "private-data":
       return clonePolicyProfile(PRIVATE_DATA_POLICY_PROFILE, grants);
     case "autopilot-future-disabled-by-default":
@@ -251,6 +308,7 @@ export function listPolicyProfiles(): PolicyProfile[] {
     getPolicyProfile("strict"),
     getPolicyProfile("dev"),
     getPolicyProfile("gui-dev"),
+    getPolicyProfile("demo-unlocked-local"),
     getPolicyProfile("private-data"),
     getPolicyProfile("autopilot-future-disabled-by-default")
   ];

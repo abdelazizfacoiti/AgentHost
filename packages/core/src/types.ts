@@ -74,6 +74,7 @@ export type PolicyProfileName =
   | "strict"
   | "dev"
   | "gui-dev"
+  | "demo-unlocked-local"
   | "private-data"
   | "autopilot-future-disabled-by-default";
 
