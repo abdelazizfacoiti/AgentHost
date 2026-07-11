@@ -15,6 +15,7 @@ import type {
   CapabilityRegistrySnapshot,
   DesktopCapabilitiesResult,
   DesktopClickResult,
+  DesktopPointerResult,
   DesktopGetActiveWindowResult,
   DesktopHotkeyResult,
   DesktopScreenshotResult,
@@ -70,6 +71,7 @@ export interface LinuxAutomation {
     button?: "left" | "middle" | "right";
     activeWindow: DesktopWindowContext;
   }): Promise<DesktopClickResult>;
+  pointer?(input: { action: "move_mouse" | "scroll" | "double_click" | "right_click" | "drag"; activeWindow: DesktopWindowContext; x?: number; y?: number; direction?: "up" | "down" | "left" | "right"; amount?: number; startX?: number; startY?: number; endX?: number; endY?: number; durationMs?: number }): Promise<DesktopPointerResult>;
   getAccessibilityTree(input: {
     appName?: string;
     windowId?: string;

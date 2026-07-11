@@ -277,10 +277,15 @@ describe("desktop MCP tools", () => {
   it("declares safety metadata for every desktop tool", () => {
     expect(allTools().map((tool) => tool.name).sort()).toEqual([
       "desktop.click",
+      "desktop.double_click",
+      "desktop.drag",
       "desktop.get_active_window",
       "desktop.get_capabilities",
       "desktop.hotkey",
+      "desktop.move_mouse",
+      "desktop.right_click",
       "desktop.screenshot",
+      "desktop.scroll",
       "desktop.type_text"
     ]);
     expect(allTools().every((tool) => tool.safety !== undefined)).toBe(true);
@@ -513,5 +518,21 @@ describe("desktop MCP tools", () => {
         accepted: true
       }
     });
+  });
+
+  it("previews bounded pointer tools without executing", async () => {
+    const context = createContext({ allowGenericClick: true });
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["desktop.move_mouse", { x: 10, y: 20 }],
+      ["desktop.scroll", { direction: "down", amount: 2 }],
+      ["desktop.double_click", { x: 10, y: 20 }],
+      ["desktop.right_click", {}],
+      ["desktop.drag", { startX: 1, startY: 2, endX: 10, endY: 20, durationMs: 100 }]
+    ];
+    for (const [name, input] of cases) {
+      const result = await callTool(context, name, { ...input, activeWindow: { appName: "Notes" }, dryRun: true });
+      expect(result.preview).toBe(true);
+    }
+    expect(context.calls).toEqual(["desktop.get_active_window", "desktop.get_active_window", "desktop.get_active_window", "desktop.get_active_window", "desktop.get_active_window"]);
   });
 });

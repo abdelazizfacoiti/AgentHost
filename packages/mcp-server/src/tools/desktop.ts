@@ -8,6 +8,7 @@ import {
   type DataSensitivity,
   type DesktopCapabilitiesResult,
   type DesktopClickResult,
+  type DesktopPointerResult,
   type DesktopGetActiveWindowResult,
   type DesktopHotkeyResult,
   type DesktopMouseButton,
@@ -95,6 +96,13 @@ type ScreenshotInput = z.infer<typeof screenshotInputSchema>;
 type HotkeyInput = z.infer<typeof hotkeyInputSchema>;
 type TypeTextInput = z.infer<typeof typeTextInputSchema>;
 type ClickInput = z.infer<typeof clickInputSchema>;
+const pointerInputSchema = z.object({
+  x: z.number().int().min(0).optional(), y: z.number().int().min(0).optional(),
+  direction: z.enum(["up", "down", "left", "right"]).optional(), amount: z.number().int().min(1).max(20).optional(),
+  startX: z.number().int().min(0).optional(), startY: z.number().int().min(0).optional(), endX: z.number().int().min(0).optional(), endY: z.number().int().min(0).optional(), durationMs: z.number().int().min(0).max(2000).optional(),
+  activeWindow: activeWindowSchema, dryRun: z.boolean().optional(), confirmationToken: z.string().trim().min(1).max(500).optional()
+}).strict();
+type PointerInput = z.infer<typeof pointerInputSchema>;
 
 const emptyMcpInputSchema = {
   type: "object",
@@ -934,5 +942,36 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     }
   };
 
-  return [getActiveWindow, getCapabilities, screenshot, hotkey, typeText, click];
+  function pointerTool(name: "desktop.move_mouse" | "desktop.scroll" | "desktop.double_click" | "desktop.right_click" | "desktop.drag", action: "move_mouse" | "scroll" | "double_click" | "right_click" | "drag", required: string[]): AgentHostToolDefinition<PointerInput, DesktopPointerResult | ActionPreviewResult, AgentHostMcpContext> {
+    return {
+      name, description: `Performs safe bounded desktop pointer action: ${action}.`, riskLevel: "medium", inputSchema: pointerInputSchema,
+      mcpInputSchema: { type: "object", properties: { x: { type: "integer", minimum: 0 }, y: { type: "integer", minimum: 0 }, direction: { type: "string", enum: ["up", "down", "left", "right"] }, amount: { type: "integer", minimum: 1, maximum: 20 }, startX: { type: "integer", minimum: 0 }, startY: { type: "integer", minimum: 0 }, endX: { type: "integer", minimum: 0 }, endY: { type: "integer", minimum: 0 }, durationMs: { type: "integer", minimum: 0, maximum: 2000 }, activeWindow: activeWindowMcpSchema, dryRun: { type: "boolean" }, confirmationToken: { type: "string", minLength: 1, maxLength: 500 } }, required: ["activeWindow", ...required], additionalProperties: false },
+      inputSummary: `Desktop pointer ${action}`,
+      safety: { actionType: "inspect", getInput: (input) => input.activeWindow.appName === undefined ? {} : { appName: input.activeWindow.appName } },
+      preview: { isDryRun: (input) => input.dryRun === true },
+      async handler(input, context, runtime): Promise<ToolResult<DesktopPointerResult | ActionPreviewResult>> {
+        const activeWindow = toActiveWindowContext(input.activeWindow);
+        const missing = required.some((key) => input[key as keyof PointerInput] === undefined) || ((action === "double_click" || action === "right_click") && ((input.x === undefined) !== (input.y === undefined)));
+        if (missing) return toolFailure({ tool: name, riskLevel: "medium", error: { code: "invalid_input", message: "Pointer action is missing required coordinates or has incomplete coordinate pair." }, observations: ["Rejected pointer action before desktop access."] });
+        const validation = await validateActiveWindowForPreview(context, activeWindow);
+        const safety = evaluateSafety({ tool: name, actionType: "gui_click", strategy: "gui_control", ...(validation.supported && "activeWindow" in validation && validation.activeWindow.appName !== undefined ? { appName: validation.activeWindow.appName } : activeWindow.appName === undefined ? {} : { appName: activeWindow.appName }) }, context.policy, createSafetyEvaluationContext(context));
+        const target = { activeWindow: validation.supported && "activeWindow" in validation ? validation.activeWindow : activeWindow, action, x: input.x, y: input.y, direction: input.direction, amount: input.amount, startX: input.startX, startY: input.startY, endX: input.endX, endY: input.endY, durationMs: input.durationMs };
+        if (runtime?.isDryRun) return buildPreviewResult({ tool: name, riskLevel: "medium", strategy: "gui_control", safety, targetSummary: summarizeWindow(target.activeWindow), target: toWindowPreviewTarget(target.activeWindow), supported: validation.supported && "matched" in validation && validation.matched, backend: validation.backend, wouldExecute: validation.supported && "matched" in validation && validation.matched && safety.allowed, confirmation: validation.supported && "matched" in validation && validation.matched && safety.allowed ? { manager: context.confirmations, sessionId: context.sessionId, input, target, explanation: "Use token only for exact previewed pointer action.", riskLevel: safety.riskLevel, appSensitivity: safety.appSensitivity } : undefined, reasons: previewReasons(`Would perform ${action}; prefer accessibility action when semantic element exists.`, safety.reasons), saferAlternative: guideAlternative("Prefer accessibility.find_element and accessibility.invoke_action for named controls."), observations: ["Previewed pointer action without moving pointer or clicking."] });
+        if (!validation.supported || !("matched" in validation) || !validation.matched) return toolFailure({ tool: name, riskLevel: safety.riskLevel, error: { code: "active_window_mismatch", message: validation.reason }, observations: [validation.reason] });
+        if (!safety.allowed) return safetyFailure(name, safety);
+        if (input.confirmationToken === undefined) { const { code, reason } = missingConfirmationReason(safety); return toolFailure({ tool: name, riskLevel: safety.riskLevel, confirmation: confirmationRequired(reason), error: { code, message: reason }, observations: [reason] }); }
+        const verification = context.confirmations.verifyAndConsume(input.confirmationToken, { sessionId: context.sessionId, tool: name, input, target, riskLevel: safety.riskLevel });
+        if (!verification.ok) return toolFailure({ tool: name, riskLevel: safety.riskLevel, confirmation: rejectedConfirmation(verification.tokenId, verification.reason), error: { code: "confirmation_rejected", message: verification.reason }, observations: [verification.reason] });
+        const data = context.linux.pointer === undefined ? { supported: false, backend: "unavailable", performed: false, action, activeWindow: validation.activeWindow, reason: "Pointer backend is unavailable." } : await context.linux.pointer({ action, activeWindow: validation.activeWindow, ...(input.x === undefined ? {} : { x: input.x }), ...(input.y === undefined ? {} : { y: input.y }), ...(input.direction === undefined ? {} : { direction: input.direction }), ...(input.amount === undefined ? {} : { amount: input.amount }), ...(input.startX === undefined ? {} : { startX: input.startX }), ...(input.startY === undefined ? {} : { startY: input.startY }), ...(input.endX === undefined ? {} : { endX: input.endX }), ...(input.endY === undefined ? {} : { endY: input.endY }), ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }) });
+        return toolSuccess({ tool: name, riskLevel: safety.riskLevel, strategy: "gui_control", confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and pointer action executed."), data, observations: [`${action} on ${summarizeWindow(validation.activeWindow)} executed with bounded pointer parameters.`] });
+      }
+    };
+  }
+
+  const moveMouse = pointerTool("desktop.move_mouse", "move_mouse", ["x", "y"]);
+  const scroll = pointerTool("desktop.scroll", "scroll", ["direction", "amount"]);
+  const doubleClick = pointerTool("desktop.double_click", "double_click", []);
+  const rightClick = pointerTool("desktop.right_click", "right_click", []);
+  const drag = pointerTool("desktop.drag", "drag", ["startX", "startY", "endX", "endY"]);
+  return [getActiveWindow, getCapabilities, screenshot, hotkey, typeText, click, moveMouse, scroll, doubleClick, rightClick, drag];
 }

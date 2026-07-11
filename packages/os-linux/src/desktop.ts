@@ -7,6 +7,7 @@ import {
   type DesktopCapabilitiesResult,
   type DesktopCapabilitySupport,
   type DesktopClickResult,
+  type DesktopPointerResult,
   type DesktopGetActiveWindowResult,
   type DesktopHotkeyResult,
   type DesktopMouseButton,
@@ -48,6 +49,7 @@ export interface LinuxDesktopClickInput {
   button?: DesktopMouseButton;
   activeWindow: DesktopWindowContext;
 }
+export interface LinuxDesktopPointerInput { action: "move_mouse" | "scroll" | "double_click" | "right_click" | "drag"; activeWindow: DesktopWindowContext; x?: number; y?: number; direction?: "up" | "down" | "left" | "right"; amount?: number; startX?: number; startY?: number; endX?: number; endY?: number; durationMs?: number; }
 
 export interface LinuxWindowListInput {
   limit?: number;
@@ -686,6 +688,31 @@ export async function clickLinuxDesktop(
     activeWindow: verification.activeWindow,
     reason: result.exitCode === 0 ? "Clicked the active X11 window at the requested coordinates." : "The click backend did not complete successfully."
   };
+}
+
+async function x11Geometry(xdotoolPath: string, context: LinuxDesktopContext): Promise<{ width: number; height: number } | undefined> {
+  const result = await runDesktopCommand(xdotoolPath, ["getdisplaygeometry"], context);
+  const [width, height] = result.stdout.trim().split(/\s+/).map(Number);
+  return width !== undefined && height !== undefined && Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 ? { width, height } : undefined;
+}
+
+function inside(x: number, y: number, geometry: { width: number; height: number }): boolean { return x >= 0 && y >= 0 && x < geometry.width && y < geometry.height; }
+
+export async function performLinuxPointerAction(input: LinuxDesktopPointerInput, context: LinuxDesktopContext = {}): Promise<DesktopPointerResult> {
+  const verification = await verifyX11ActionContext(input.activeWindow, context);
+  if (!verification.ok) return { supported: false, backend: verification.backend, performed: false, action: input.action, activeWindow: input.activeWindow, reason: verification.reason };
+  const geometry = await x11Geometry(verification.xdotoolPath, context);
+  if (geometry === undefined) return { supported: false, backend: verification.backend, performed: false, action: input.action, activeWindow: verification.activeWindow, reason: "Unable to determine safe X11 screen bounds." };
+  const points = input.action === "drag" ? [[input.startX, input.startY], [input.endX, input.endY]] : input.x === undefined ? [] : [[input.x, input.y]];
+  if (points.some(([x, y]) => x === undefined || y === undefined || !inside(x, y, geometry))) return { supported: false, backend: verification.backend, performed: false, action: input.action, activeWindow: verification.activeWindow, reason: "Pointer coordinates are outside safe X11 screen bounds." };
+  let args: string[];
+  if (input.action === "move_mouse") args = ["mousemove", "--sync", String(input.x), String(input.y)];
+  else if (input.action === "scroll") { const button = input.direction === "up" ? "4" : input.direction === "down" ? "5" : input.direction === "left" ? "6" : "7"; args = ["click", "--repeat", String(input.amount), button]; }
+  else if (input.action === "double_click") args = input.x === undefined ? ["click", "--repeat", "2", "--delay", "100", "1"] : ["mousemove", "--sync", String(input.x), String(input.y), "click", "--repeat", "2", "--delay", "100", "1"];
+  else if (input.action === "right_click") args = input.x === undefined ? ["click", "3"] : ["mousemove", "--sync", String(input.x), String(input.y), "click", "3"];
+  else args = ["mousemove", "--sync", String(input.startX), String(input.startY), "mousedown", "1", "mousemove", "--sync", String(input.endX), String(input.endY), "mouseup", "1"];
+  const result = await runDesktopCommand(verification.xdotoolPath, args, context);
+  return { supported: result.exitCode === 0, backend: verification.backend, performed: result.exitCode === 0, action: input.action, activeWindow: verification.activeWindow, reason: result.exitCode === 0 ? "Performed bounded X11 pointer action." : "Pointer backend did not complete successfully." };
 }
 
 function parseWmctrlLine(line: string): RawWindowSummary | undefined {

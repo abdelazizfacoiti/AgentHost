@@ -20,6 +20,7 @@ import {
   checkLinuxDependency,
   captureLinuxScreenshot,
   clickLinuxDesktop,
+  performLinuxPointerAction,
   detectLinuxApp,
   detectLinuxAccessibilitySupport,
   ensureLinuxDir,
@@ -162,6 +163,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       hotkey: (input) => sendLinuxHotkey(input, { agentHostDir: config.agentHostDir }),
       typeText: (input) => typeLinuxText(input, { agentHostDir: config.agentHostDir }),
       click: (input) => clickLinuxDesktop(input, { agentHostDir: config.agentHostDir }),
+      pointer: (input) => performLinuxPointerAction(input, { agentHostDir: config.agentHostDir }),
       getAccessibilityTree: (input) => getLinuxAccessibilityTree(input, { agentHostDir: config.agentHostDir }),
       findAccessibilityElement: (input) => findLinuxAccessibilityElements(input, { agentHostDir: config.agentHostDir }),
       inspectAccessibilityElement: (input) =>
