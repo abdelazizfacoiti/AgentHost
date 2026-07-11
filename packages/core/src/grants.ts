@@ -63,7 +63,7 @@ function pathMatchesRoot(inputPath: string, roots: string[], context: SafetyEval
   });
 }
 
-function isGrantExpired(grant: CapabilityGrant): boolean {
+export function isGrantExpired(grant: CapabilityGrant): boolean {
   return grant.expiresAt !== undefined && Date.now() > Date.parse(grant.expiresAt);
 }
 
@@ -356,7 +356,10 @@ export function summarizeGrant(grant: CapabilityGrant): GrantSummary {
       ...(grant.match.oauthScopes === undefined ? {} : { oauthScopes: [...grant.match.oauthScopes] }),
       ...(grant.match.generatedToolIds === undefined
         ? {}
-        : { generatedToolIds: [...grant.match.generatedToolIds] })
+        : { generatedToolIds: [...grant.match.generatedToolIds] }),
+      ...(grant.match.registrationIds === undefined ? {} : { registrationIds: [...grant.match.registrationIds] }),
+      ...(grant.match.runtimeToolNames === undefined ? {} : { runtimeToolNames: [...grant.match.runtimeToolNames] }),
+      ...(grant.match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: [...grant.match.runtimeCapabilities] })
     },
     ...(grant.requirements === undefined
       ? {}
@@ -365,7 +368,10 @@ export function summarizeGrant(grant: CapabilityGrant): GrantSummary {
             ...grant.requirements,
             ...(grant.requirements.allowedRoots === undefined
               ? {}
-              : { allowedRoots: [...grant.requirements.allowedRoots] })
+              : { allowedRoots: [...grant.requirements.allowedRoots] }),
+            ...(grant.requirements.allowedOperations === undefined ? {} : { allowedOperations: [...grant.requirements.allowedOperations] }),
+            ...(grant.requirements.sandboxRoots === undefined ? {} : { sandboxRoots: [...grant.requirements.sandboxRoots] }),
+            ...(grant.requirements.outputRoots === undefined ? {} : { outputRoots: [...grant.requirements.outputRoots] })
           }
         })
   };

@@ -26,7 +26,7 @@ export async function prepareRuntimeRun(input: { runDirectory: string; payload: 
   return { inputPath, outputPath, tempDirectory };
 }
 
-export async function runForgeSubprocess(input: { projectPath: string; manifestPath: string; handlerPath: string; toolName: string; inputPath: string; outputPath: string; tempDirectory: string; timeoutMs?: number; runnerPath?: string }): Promise<ForgeSubprocessResult> {
+export async function runForgeSubprocess(input: { projectPath: string; manifestPath: string; handlerPath: string; toolName: string; inputPath: string; outputPath: string; tempDirectory: string; timeoutMs?: number; runnerPath?: string; allowedOperations?: string[] }): Promise<ForgeSubprocessResult> {
   const startedAt = Date.now();
   let runner = input.runnerPath ?? fileURLToPath(new URL("./forge-runner.js", import.meta.url));
   if (input.runnerPath === undefined) {
@@ -34,7 +34,7 @@ export async function runForgeSubprocess(input: { projectPath: string; manifestP
   }
   const timeoutMs = input.timeoutMs ?? RUNTIME_TIMEOUT_MS;
   await Promise.all([access(runner), access(input.projectPath), access(input.manifestPath), access(input.handlerPath), access(input.inputPath)]);
-  const child = spawn(process.execPath, ["--no-addons", "--disable-proto=delete", runner, "--manifest", input.manifestPath, "--project", input.projectPath, "--tool", input.toolName, "--input", input.inputPath, "--output", input.outputPath, "--handler", input.handlerPath], { cwd: input.projectPath, env: { ...RUNTIME_ENV }, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, ["--no-addons", "--disable-proto=delete", runner, "--manifest", input.manifestPath, "--project", input.projectPath, "--tool", input.toolName, "--input", input.inputPath, "--output", input.outputPath, "--handler", input.handlerPath, ...(input.allowedOperations === undefined ? [] : ["--allowed-operations", JSON.stringify(input.allowedOperations)])], { cwd: input.projectPath, env: { ...RUNTIME_ENV }, shell: false, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = ""; let stderr = ""; let capped = false; let timedOut = false;
   const stop = (signal: NodeJS.Signals) => { if (!child.killed) child.kill(signal); };
   child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); if (Buffer.byteLength(stdout, "utf8") > RUNTIME_STDOUT_BYTES_MAX) { capped = true; stop("SIGKILL"); } });
