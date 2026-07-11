@@ -5,6 +5,7 @@ import {
   canApplySessionGrantsFromReview,
   createToolForgeArtifactRecord,
   createToolForgeHarnessRunRecord,
+  createToolForgeRuntimeRunRecord,
   createToolForgeRegistrationRecord,
   createToolForgeReviewRecord,
   createToolForgeValidationRecord,
@@ -16,6 +17,7 @@ import {
   summarizeToolForgeArtifact,
   summarizeToolForgeArtifactRecord,
   summarizeToolForgeHarnessRun,
+  summarizeToolForgeRuntimeRun,
   summarizeToolForgeRegistration,
   summarizeToolForgeReview,
   summarizeToolForgeValidation,
@@ -33,25 +35,32 @@ import {
   type ToolForgeGetManifestResult,
   type ToolForgeGetRegistrationResult,
   type ToolForgeGetReviewResult,
+  type ToolForgeGetRuntimeRunResult,
   type ToolForgeGetValidationResult,
+  type ToolForgeCheckRuntimeEligibilityResult,
   type ToolForgeGrantProposalResult,
   type ToolForgeListArtifactsResult,
   type ToolForgeListHarnessRunsResult,
   type ToolForgeListManifestsResult,
   type ToolForgeListRegistrationsResult,
   type ToolForgeListReviewsResult,
+  type ToolForgeListRuntimeRunsResult,
   type ToolForgeListValidationsResult,
   type ToolForgeHarnessMode,
   type ToolForgeHarnessRunRecord,
   type ToolForgeManifest,
+  type ToolForgeRuntimeEligibilityResult,
+  type ToolForgeRuntimeRunRecord,
   type ToolForgeRegistrationEligibilityResult,
   type ToolForgeRegistrationRecord,
   type ToolForgeProjectFilePlanEntry,
   type ToolForgeRegisterArtifactResult,
   type ToolForgeRevokeRegistrationResult,
+  type ToolForgeRunSandboxedToolResult,
   type ToolForgeRunValidationHarnessResult,
   type ToolForgeReviewRecord,
   type ToolForgeReviewResult,
+  type ToolForgeSandboxStubOutput,
   type ToolForgeScaffoldProjectResult,
   type ToolForgeSaveManifestResult,
   type ToolForgeValidationResult,
@@ -338,6 +347,40 @@ const revokeRegistrationInputSchema = z
   })
   .strict();
 
+const runtimeEligibilityInputSchema = z
+  .object({
+    registrationId: z.string().trim().min(1).max(400),
+    toolName: z.string().trim().min(1).max(200).optional()
+  })
+  .strict();
+
+const runSandboxedToolInputSchema = z
+  .object({
+    registrationId: z.string().trim().min(1).max(400),
+    toolName: z.string().trim().min(1).max(200),
+    input: z.unknown().optional(),
+    mode: z.enum(["stub"]).optional(),
+    dryRun: z.boolean().optional(),
+    confirmationToken: optionalConfirmationSchema
+  })
+  .strict();
+
+const getRuntimeRunInputSchema = z
+  .object({
+    runtimeRunId: z.string().trim().min(1).max(400)
+  })
+  .strict();
+
+const listRuntimeRunsInputSchema = z
+  .object({
+    registrationId: z.string().trim().min(1).max(400).optional(),
+    artifactId: z.string().trim().min(1).max(300).optional(),
+    manifestId: z.string().trim().min(1).max(200).optional(),
+    toolName: z.string().trim().min(1).max(200).optional(),
+    limit: z.number().int().min(1).max(500).optional()
+  })
+  .strict();
+
 type ValidateReviewProposeInput = z.infer<typeof validateReviewProposeInputSchema>;
 type SaveManifestInput = z.infer<typeof saveManifestInputSchema>;
 type ListManifestsInput = z.infer<typeof listManifestsInputSchema>;
@@ -361,6 +404,10 @@ type RegisterArtifactInput = z.infer<typeof registerArtifactInputSchema>;
 type GetRegistrationInput = z.infer<typeof getRegistrationInputSchema>;
 type ListRegistrationsInput = z.infer<typeof listRegistrationsInputSchema>;
 type RevokeRegistrationInput = z.infer<typeof revokeRegistrationInputSchema>;
+type RuntimeEligibilityInput = z.infer<typeof runtimeEligibilityInputSchema>;
+type RunSandboxedToolInput = z.infer<typeof runSandboxedToolInputSchema>;
+type GetRuntimeRunInput = z.infer<typeof getRuntimeRunInputSchema>;
+type ListRuntimeRunsInput = z.infer<typeof listRuntimeRunsInputSchema>;
 
 const validateReviewProposeMcpInputSchema = {
   type: "object",
@@ -616,6 +663,51 @@ const revokeRegistrationMcpInputSchema = {
     confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
   },
   required: ["registrationId"],
+  additionalProperties: false
+};
+
+const runtimeEligibilityMcpInputSchema = {
+  type: "object",
+  properties: {
+    registrationId: { type: "string", minLength: 1, maxLength: 400 },
+    toolName: { type: "string", minLength: 1, maxLength: 200 }
+  },
+  required: ["registrationId"],
+  additionalProperties: false
+};
+
+const runSandboxedToolMcpInputSchema = {
+  type: "object",
+  properties: {
+    registrationId: { type: "string", minLength: 1, maxLength: 400 },
+    toolName: { type: "string", minLength: 1, maxLength: 200 },
+    input: {},
+    mode: { type: "string", enum: ["stub"] },
+    dryRun: { type: "boolean" },
+    confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
+  },
+  required: ["registrationId", "toolName"],
+  additionalProperties: false
+};
+
+const getRuntimeRunMcpInputSchema = {
+  type: "object",
+  properties: {
+    runtimeRunId: { type: "string", minLength: 1, maxLength: 400 }
+  },
+  required: ["runtimeRunId"],
+  additionalProperties: false
+};
+
+const listRuntimeRunsMcpInputSchema = {
+  type: "object",
+  properties: {
+    registrationId: { type: "string", minLength: 1, maxLength: 400 },
+    artifactId: { type: "string", minLength: 1, maxLength: 300 },
+    manifestId: { type: "string", minLength: 1, maxLength: 200 },
+    toolName: { type: "string", minLength: 1, maxLength: 200 },
+    limit: { type: "integer", minimum: 1, maximum: 500 }
+  },
   additionalProperties: false
 };
 
@@ -1367,6 +1459,326 @@ async function evaluateRegistrationEligibility(
     ...(review === undefined ? {} : { reviewId: review.reviewId }),
     validationIds: latestValidation === undefined ? [] : [latestValidation.validationId],
     harnessRunIds: latestHarnessRun === undefined ? [] : [latestHarnessRun.harnessRunId]
+  };
+}
+
+const RUNTIME_ENV_ALLOWLIST = ["HOME", "LANG", "LC_ALL", "PATH", "PWD", "TMPDIR", "TZ", "NODE_ENV"] as const;
+const RUNTIME_ENV_BLOCKLIST = [
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XAUTHORITY",
+  "SSH_AUTH_SOCK",
+  "GPG_AGENT_INFO"
+] as const;
+const RUNTIME_TIMEOUT_MS = 5_000;
+const RUNTIME_STDOUT_BYTES_MAX = 8_192;
+const RUNTIME_STDERR_BYTES_MAX = 8_192;
+
+function createRuntimeOutputRoot(context: AgentHostMcpContext, artifact: ToolForgeArtifactRecord): string {
+  return path.join(context.forge.rootDir(), "runtime-output", artifact.manifestId, artifact.manifestVersion);
+}
+
+function createRuntimeSandboxPolicy(
+  context: AgentHostMcpContext,
+  artifact: ToolForgeArtifactRecord
+): ToolForgeRuntimeEligibilityResult["sandbox"] {
+  return {
+    mode: "stub",
+    childProcess: false,
+    networkAllowed: false,
+    filesystemRoots: artifact.projectPath === undefined
+      ? [createRuntimeOutputRoot(context, artifact)]
+      : [artifact.projectPath, createRuntimeOutputRoot(context, artifact)],
+    outputRoot: createRuntimeOutputRoot(context, artifact),
+    shellAllowed: false,
+    guiAllowed: false,
+    envAllowlist: [...RUNTIME_ENV_ALLOWLIST],
+    envBlocked: [...RUNTIME_ENV_BLOCKLIST],
+    timeoutMs: RUNTIME_TIMEOUT_MS,
+    stdoutBytesMax: RUNTIME_STDOUT_BYTES_MAX,
+    stderrBytesMax: RUNTIME_STDERR_BYTES_MAX
+  };
+}
+
+function isLowRiskRuntimeTool(tool: ToolForgeManifest["tools"][number]): boolean {
+  return (
+    (tool.riskLevel === "observe" || tool.riskLevel === "low") &&
+    (tool.actionType === "observe" || tool.actionType === "inspect")
+  );
+}
+
+function permissionExceedsPhase18Runtime(permission: ToolForgeManifest["requestedPermissions"][number]): boolean {
+  return (
+    (permission.tools?.length ?? 0) > 0 ||
+    (permission.strategies?.length ?? 0) > 0 ||
+    (permission.actionTypes?.length ?? 0) > 0 ||
+    (permission.appNames?.length ?? 0) > 0 ||
+    (permission.appSensitivities?.length ?? 0) > 0 ||
+    (permission.fileRoots?.length ?? 0) > 0 ||
+    (permission.commandAllowlist?.length ?? 0) > 0 ||
+    (permission.networkDomains?.length ?? 0) > 0 ||
+    (permission.oauthScopes?.length ?? 0) > 0 ||
+    permission.canReadPrivateData === true ||
+    permission.canWriteFiles === true ||
+    permission.canRunShell === true ||
+    permission.canUseGui === true ||
+    permission.canSendMessages === true ||
+    permission.canDeleteData === true ||
+    permission.canUploadFiles === true ||
+    permission.dataSensitivity === "sensitive" ||
+    permission.dataSensitivity === "secret"
+  );
+}
+
+async function evaluateRuntimeEligibility(input: {
+  context: AgentHostMcpContext;
+  registration: ToolForgeRegistrationRecord;
+  requestedToolName?: string;
+}): Promise<{
+  eligibility: ToolForgeRuntimeEligibilityResult;
+  registration: ToolForgeRegistrationRecord;
+  artifact: ToolForgeArtifactRecord;
+  manifest: ToolForgeManifest;
+  tool?: ToolForgeManifest["tools"][number];
+}> {
+  const registration = resolveEffectiveRegistrationStatus(input.registration);
+  const artifact = await input.context.forge.loadArtifact(registration.artifactId);
+  const manifest = await input.context.forge.loadManifestByPath(artifact.storagePath);
+  const manifestValidation = validateToolForgeManifest(manifest);
+  const currentHash = hashToolForgeManifest(manifest);
+  const review =
+    registration.reviewId === undefined
+      ? await resolveReviewByArtifact(input.context, artifact)
+      : await input.context.forge.loadReview(registration.reviewId).catch(() => undefined);
+  const activeGrants = input.context.grants.listActiveGrants();
+  const requestedToolName =
+    input.requestedToolName ??
+    (registration.registeredTools.length === 1 ? registration.registeredTools[0]!.name : undefined);
+  const tool = requestedToolName === undefined ? undefined : manifest.tools.find((entry) => entry.name === requestedToolName);
+  const missingRequirements: string[] = [];
+  const reasons: string[] = [];
+  const blockedPermissionIds = manifest.requestedPermissions
+    .filter((permission) => permissionExceedsPhase18Runtime(permission))
+    .map((permission) => permission.id);
+  const sandbox = createRuntimeSandboxPolicy(input.context, artifact);
+
+  if (registration.status !== "registered_inert") {
+    missingRequirements.push("Registration must be active registered_inert.");
+    reasons.push(`Registration status ${registration.status} is not eligible for Phase 18 runtime.`);
+  }
+
+  if (registration.manifestHash !== artifact.manifestHash) {
+    missingRequirements.push("Registration hash must match artifact hash.");
+    reasons.push("Registration metadata no longer matches the current artifact hash.");
+  }
+
+  if (currentHash !== artifact.manifestHash || currentHash !== registration.manifestHash) {
+    missingRequirements.push("Manifest hash must remain unchanged.");
+    reasons.push("Saved manifest content no longer matches the registered inert hash.");
+  }
+
+  if (!manifestValidation.valid || manifestValidation.manifest === undefined) {
+    missingRequirements.push("Manifest validation must still pass.");
+    reasons.push("Saved manifest is no longer valid for runtime consideration.");
+  }
+
+  if (manifest.kind !== "tool") {
+    missingRequirements.push("Manifest kind must be tool.");
+    reasons.push("Only generated tool manifests can be considered for Phase 18 runtime.");
+  }
+
+  if (review === undefined) {
+    missingRequirements.push("Review record is required.");
+    reasons.push("No matching review record exists for the registered inert artifact.");
+  } else {
+    if (review.manifestHash !== registration.manifestHash) {
+      missingRequirements.push("Review hash must match registration hash.");
+      reasons.push("Review record no longer matches the current inert registration hash.");
+    }
+
+    if (review.blockedPermissions.length > 0) {
+      missingRequirements.push("Blocked permissions must be absent.");
+      reasons.push("Review contains blocked permissions that cannot be considered for runtime.");
+    }
+
+    if (review.decisionStatus === "denied" || review.decisionStatus === "expired") {
+      missingRequirements.push("Review must stay approved or pending.");
+      reasons.push(`Review status ${review.decisionStatus} is not eligible for runtime consideration.`);
+    }
+  }
+
+  if (artifact.projectPath === undefined || !(await pathExists(artifact.projectPath))) {
+    missingRequirements.push("Scaffolded project must still exist.");
+    reasons.push("The generated project path is missing for this registered inert artifact.");
+  } else if (!isInsideOrEqual(artifact.projectPath, input.context.forge.generatedRootDir())) {
+    missingRequirements.push("Project path must stay inside Forge generated storage.");
+    reasons.push("The generated project path is outside the approved Forge generated folder.");
+  }
+
+  const validationRecords = await Promise.all(
+    registration.validationIds.map(async (validationId) =>
+      input.context.forge.loadValidation(validationId).catch(() => undefined)
+    )
+  );
+  const presentValidationRecords = validationRecords.filter(
+    (record): record is ToolForgeValidationRecord => record !== undefined
+  );
+
+  if (presentValidationRecords.length === 0) {
+    missingRequirements.push("Static validation must exist.");
+    reasons.push("The registered inert artifact no longer has a stored static validation record.");
+  } else if (presentValidationRecords.length !== registration.validationIds.length) {
+    missingRequirements.push("Static validation ids must still resolve.");
+    reasons.push("One or more stored static validation records referenced by the inert registration are missing.");
+  } else if (
+    presentValidationRecords.some(
+      (record) => record.manifestHash !== registration.manifestHash || record.status !== "passed" || !record.safeToConsiderRegistration
+    )
+  ) {
+    missingRequirements.push("Static validation must remain passed and hash-matched.");
+    reasons.push("Stored static validation is missing, stale, or no longer passing.");
+  }
+
+  const harnessRunRecords = await Promise.all(
+    registration.harnessRunIds.map(async (harnessRunId) =>
+      input.context.forge.loadHarnessRun(harnessRunId).catch(() => undefined)
+    )
+  );
+  const presentHarnessRunRecords = harnessRunRecords.filter(
+    (record): record is ToolForgeHarnessRunRecord => record !== undefined
+  );
+
+  if (presentHarnessRunRecords.length === 0) {
+    missingRequirements.push("Harness validation must exist.");
+    reasons.push("The registered inert artifact no longer has a stored harness run.");
+  } else if (presentHarnessRunRecords.length !== registration.harnessRunIds.length) {
+    missingRequirements.push("Harness validation ids must still resolve.");
+    reasons.push("One or more stored harness runs referenced by the inert registration are missing.");
+  } else if (
+    presentHarnessRunRecords.some(
+      (record) => record.manifestHash !== registration.manifestHash || record.status !== "passed" || !record.safeToConsiderRegistration
+    )
+  ) {
+    missingRequirements.push("Harness validation must remain passed and hash-matched.");
+    reasons.push("Stored harness validation is missing, stale, or no longer passing.");
+  }
+
+  if (requestedToolName === undefined) {
+    missingRequirements.push("Tool name must be specified when multiple generated tools are declared.");
+    reasons.push("Runtime dispatch could not resolve a single generated tool declaration.");
+  } else if (tool === undefined) {
+    missingRequirements.push("Requested tool must exist in the saved manifest.");
+    reasons.push("Runtime dispatch could not find the requested tool in the current manifest.");
+  } else {
+    const registrationTool = registration.registeredTools.find((entry) => entry.name === requestedToolName);
+    if (registrationTool === undefined) {
+      missingRequirements.push("Requested tool must exist in the registration record.");
+      reasons.push("Runtime dispatch could not find the requested tool in the inert registration metadata.");
+    }
+
+    if (!isLowRiskRuntimeTool(tool)) {
+      missingRequirements.push("Requested tool must be observe/inspect with low risk.");
+      reasons.push("Phase 18 runtime only supports low-risk read-only generated tool declarations.");
+    }
+  }
+
+  if (blockedPermissionIds.length > 0) {
+    missingRequirements.push("Requested permissions must stay within the Phase 18 stub boundary.");
+    reasons.push("Phase 18 runtime stub does not allow generated shell, file, GUI, network, or delegated tool permissions.");
+  }
+
+  if (manifest.riskDeclaration === "high" || manifest.riskDeclaration === "blocked") {
+    missingRequirements.push("Manifest risk declaration must not be high or blocked.");
+    reasons.push("High-risk or blocked generated manifests cannot enter the Phase 18 runtime boundary.");
+  }
+
+  if (manifest.dataSensitivityDeclaration === "sensitive" || manifest.dataSensitivityDeclaration === "secret") {
+    missingRequirements.push("Manifest data sensitivity must stay at none or low.");
+    reasons.push("Phase 18 runtime does not handle sensitive or secret generated tool data.");
+  }
+
+  if (artifact.executable !== false || artifact.registered !== false) {
+    missingRequirements.push("Artifact must remain executable:false and registered:false.");
+    reasons.push("Artifact flags are no longer inert.");
+  }
+
+  const requiredGrantIds = review?.proposedGrants.map((grant) => grant.id) ?? [];
+  const matchedGrants = review?.proposedGrants
+    .map((proposal) => activeGrantForProposal(proposal, activeGrants))
+    .filter((grant): grant is CapabilityGrant => grant !== undefined) ?? [];
+
+  if (requiredGrantIds.length > matchedGrants.length) {
+    missingRequirements.push("Required grants must stay active.");
+    reasons.push("One or more grants required by the inert registration are missing or expired.");
+  }
+
+  return {
+    eligibility: {
+      eligible: missingRequirements.length === 0,
+      active:
+        registration.status === "registered_inert" &&
+        requiredGrantIds.length === matchedGrants.length,
+      registrationId: registration.registrationId,
+      artifactId: artifact.artifactId,
+      manifestId: artifact.manifestId,
+      manifestVersion: artifact.manifestVersion,
+      manifestHash: artifact.manifestHash,
+      registrationStatus: registration.status,
+      toolName: requestedToolName ?? "",
+      ...(tool === undefined ? {} : { tool: { ...tool } }),
+      ...(review === undefined ? {} : { reviewId: review.reviewId }),
+      validationIds: presentValidationRecords.map((record) => record.validationId),
+      harnessRunIds: presentHarnessRunRecords.map((record) => record.harnessRunId),
+      requiredGrantIds,
+      activeGrantIds: matchedGrants.map((grant) => grant.id),
+      requestedPermissionIds: manifest.requestedPermissions.map((permission) => permission.id),
+      blockedPermissionIds,
+      missingRequirements,
+      reasons,
+      sandbox
+    },
+    registration,
+    artifact,
+    manifest,
+    ...(tool === undefined ? {} : { tool })
+  };
+}
+
+function buildRuntimeStubOutput(input: {
+  registration: ToolForgeRegistrationRecord;
+  manifest: ToolForgeManifest;
+  tool: ToolForgeManifest["tools"][number];
+  sandbox: ToolForgeRuntimeEligibilityResult["sandbox"];
+}): ToolForgeSandboxStubOutput {
+  return {
+    mode: "stub",
+    generatedCodeExecuted: false,
+    metadataOnly: true,
+    tool: {
+      name: input.tool.name,
+      description: input.tool.description,
+      riskLevel: input.tool.riskLevel,
+      actionType: input.tool.actionType,
+      ...(input.tool.strategy === undefined ? {} : { strategy: input.tool.strategy })
+    },
+    registration: {
+      registrationId: input.registration.registrationId,
+      status: input.registration.status,
+      manifestHash: input.registration.manifestHash
+    },
+    manifest: {
+      manifestId: input.manifest.id,
+      manifestVersion: input.manifest.version,
+      displayName: input.manifest.displayName,
+      description: input.manifest.description
+    },
+    sandbox: {
+      ...input.sandbox,
+      filesystemRoots: [...input.sandbox.filesystemRoots],
+      envAllowlist: [...input.sandbox.envAllowlist],
+      envBlocked: [...input.sandbox.envBlocked]
+    }
   };
 }
 
@@ -3731,6 +4143,357 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     }
   };
 
+  const checkRuntimeEligibility: AgentHostToolDefinition<
+    RuntimeEligibilityInput,
+    ToolForgeCheckRuntimeEligibilityResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.check_runtime_eligibility",
+    description: "Checks whether a registered inert Forge artifact is eligible for limited sandbox runtime handling.",
+    riskLevel: "low",
+    inputSchema: runtimeEligibilityInputSchema,
+    mcpInputSchema: runtimeEligibilityMcpInputSchema,
+    inputSummary: "Check Forge runtime eligibility",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeCheckRuntimeEligibilityResult>> {
+      let registration: ToolForgeRegistrationRecord;
+
+      try {
+        registration = resolveEffectiveRegistrationStatus(await context.forge.loadRegistration(input.registrationId));
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.check_runtime_eligibility",
+          riskLevel: "low",
+          error: {
+            code: "registration_not_found",
+            message: error instanceof Error ? error.message : "Stored registration was not found."
+          },
+          observations: ["No stored registration matched the requested runtime eligibility id."]
+        });
+      }
+
+      try {
+        const resolution = await evaluateRuntimeEligibility({
+          context,
+          registration,
+          ...(input.toolName === undefined ? {} : { requestedToolName: input.toolName })
+        });
+
+        return toolSuccess({
+          tool: "forge.check_runtime_eligibility",
+          riskLevel: "low",
+          data: {
+            eligibility: resolution.eligibility
+          },
+          observations: [
+            resolution.eligibility.eligible
+              ? "Runtime eligibility passed for the limited Phase 18 metadata stub."
+              : "Runtime eligibility reported why the inert registration cannot enter the Phase 18 runtime boundary."
+          ]
+        });
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.check_runtime_eligibility",
+          riskLevel: "low",
+          error: {
+            code: "runtime_eligibility_failed",
+            message: error instanceof Error ? error.message : "Runtime eligibility could not be evaluated."
+          },
+          observations: ["Runtime eligibility failed before any execution or registration change."]
+        });
+      }
+    }
+  };
+
+  const runSandboxedTool: AgentHostToolDefinition<
+    RunSandboxedToolInput,
+    ToolForgeRunSandboxedToolResult | (ActionPreviewResult & { eligibility: ToolForgeRuntimeEligibilityResult }),
+    AgentHostMcpContext
+  > = {
+    name: "forge.run_sandboxed_tool",
+    description: "Runs a confirmation-gated metadata stub for one registered inert Forge tool without executing generated code.",
+    riskLevel: "medium",
+    inputSchema: runSandboxedToolInputSchema,
+    mcpInputSchema: runSandboxedToolMcpInputSchema,
+    inputSummary: "Run Forge sandboxed metadata stub",
+    safety: {
+      actionType: "file_write",
+      getInput: () => ({})
+    },
+    preview: {
+      isDryRun: (input) => input.dryRun === true
+    },
+    async handler(
+      input,
+      context,
+      runtime
+    ): Promise<ToolResult<ToolForgeRunSandboxedToolResult | (ActionPreviewResult & { eligibility: ToolForgeRuntimeEligibilityResult })>> {
+      let registration: ToolForgeRegistrationRecord;
+
+      try {
+        registration = resolveEffectiveRegistrationStatus(await context.forge.loadRegistration(input.registrationId));
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.run_sandboxed_tool",
+          riskLevel: "medium",
+          error: {
+            code: "registration_not_found",
+            message: error instanceof Error ? error.message : "Stored registration was not found."
+          },
+          observations: ["No stored registration matched the requested sandbox runtime id."]
+        });
+      }
+
+      let resolution: Awaited<ReturnType<typeof evaluateRuntimeEligibility>>;
+      try {
+        resolution = await evaluateRuntimeEligibility({
+          context,
+          registration,
+          ...(input.toolName === undefined ? {} : { requestedToolName: input.toolName })
+        });
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.run_sandboxed_tool",
+          riskLevel: "medium",
+          error: {
+            code: "runtime_eligibility_failed",
+            message: error instanceof Error ? error.message : "Runtime eligibility could not be evaluated."
+          },
+          observations: ["Runtime execution stopped before preview or execution because eligibility resolution failed."]
+        });
+      }
+      const targetSummary = resolution.tool === undefined
+        ? `Preview Forge runtime stub ${input.toolName}`
+        : `Run Forge runtime stub ${resolution.tool.name}`;
+      const target = {
+        registrationId: resolution.registration.registrationId,
+        manifestHash: resolution.registration.manifestHash,
+        toolName: resolution.eligibility.toolName,
+        mode: input.mode ?? "stub",
+        projectPath: resolution.artifact.projectPath,
+        outputRoot: resolution.eligibility.sandbox.outputRoot
+      };
+      const runtimeRunPath = context.forge.runtimeRunPath(
+        `preview.${resolution.registration.registrationId}.${resolution.eligibility.toolName || input.toolName}`
+      );
+      const safetyDecision = evaluateSafety(
+        {
+          tool: "forge.run_sandboxed_tool",
+          actionType: "file_write",
+          filePath: runtimeRunPath,
+          generatedTool: true,
+          generatedToolId: resolution.manifest.id
+        },
+        context.policy,
+        createSafetyEvaluationContext(context)
+      );
+
+      if (runtime?.isDryRun) {
+        const preview = buildPreviewResult({
+          tool: "forge.run_sandboxed_tool",
+          riskLevel: "medium",
+          safety: safetyDecision,
+          targetSummary,
+          target: toFilePreviewTarget(runtimeRunPath, targetSummary),
+          wouldExecute: resolution.eligibility.eligible && safetyDecision.allowed,
+          ...(resolution.eligibility.eligible
+            ? {
+                confirmation: {
+                  manager: context.confirmations,
+                  sessionId: context.sessionId,
+                  input,
+                  target,
+                  explanation:
+                    "Use this token to run the exact previewed Forge metadata stub before it expires.",
+                  riskLevel: safetyDecision.riskLevel,
+                  appSensitivity: safetyDecision.appSensitivity
+                }
+              }
+            : {}),
+          reasons: previewReasons(
+            resolution.eligibility.eligible
+              ? "Prepared a Phase 18 metadata-only runtime stub preview without executing generated code."
+              : resolution.eligibility.reasons[0] ?? "Runtime eligibility is not satisfied.",
+            safetyDecision.reasons
+          ),
+          observations: ["Previewed the limited Forge runtime boundary without executing generated code."]
+        });
+
+        return {
+          ...preview,
+          grantDecision: safetyDecision.grantDecision,
+          data: {
+            ...(preview.data as ActionPreviewResult),
+            eligibility: resolution.eligibility
+          }
+        };
+      }
+
+      if (!resolution.eligibility.eligible || resolution.tool === undefined || resolution.artifact.projectPath === undefined) {
+        return toolFailure({
+          tool: "forge.run_sandboxed_tool",
+          riskLevel: safetyDecision.riskLevel,
+          grantDecision: safetyDecision.grantDecision,
+          approval: safetyDecision.approval,
+          error: {
+            code: "runtime_ineligible",
+            message: resolution.eligibility.reasons.join(" ") || "The requested Forge runtime action is not eligible."
+          },
+          observations: resolution.eligibility.reasons
+        });
+      }
+
+      if (input.confirmationToken === undefined) {
+        const { code, reason } = missingConfirmationReason(safetyDecision);
+        return toolFailure({
+          tool: "forge.run_sandboxed_tool",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: confirmationRequired(reason),
+          grantDecision: safetyDecision.grantDecision,
+          approval: safetyDecision.approval,
+          error: {
+            code,
+            message: reason
+          },
+          observations: [reason]
+        });
+      }
+
+      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+        sessionId: context.sessionId,
+        tool: "forge.run_sandboxed_tool",
+        input,
+        target,
+        riskLevel: safetyDecision.riskLevel
+      });
+
+      if (!verification.ok) {
+        return toolFailure({
+          tool: "forge.run_sandboxed_tool",
+          riskLevel: safetyDecision.riskLevel,
+          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+          grantDecision: safetyDecision.grantDecision,
+          approval: safetyDecision.approval,
+          error: {
+            code: "confirmation_rejected",
+            message: verification.reason
+          },
+          observations: [verification.reason]
+        });
+      }
+
+      const startedAt = performance.now();
+      const output = buildRuntimeStubOutput({
+        registration: resolution.registration,
+        manifest: resolution.manifest,
+        tool: resolution.tool,
+        sandbox: resolution.eligibility.sandbox
+      });
+      const runtimeRun = createToolForgeRuntimeRunRecord({
+        registration: resolution.registration,
+        artifact: resolution.artifact,
+        toolName: resolution.tool.name,
+        projectPath: resolution.artifact.projectPath,
+        outputRoot: resolution.eligibility.sandbox.outputRoot ?? createRuntimeOutputRoot(context, resolution.artifact),
+        inputFingerprint: context.confirmations.fingerprintInput(input),
+        summary: "Executed the built-in Phase 18 metadata stub without loading any generated code.",
+        sandbox: resolution.eligibility.sandbox,
+        durationMs: Math.round(performance.now() - startedAt)
+      });
+      await context.forge.saveRuntimeRun(runtimeRun);
+
+      return toolSuccess({
+        tool: "forge.run_sandboxed_tool",
+        riskLevel: safetyDecision.riskLevel,
+        confirmation: acceptedConfirmation(
+          verification.tokenId,
+          true,
+          "Confirmation token accepted and the Phase 18 metadata stub executed."
+        ),
+        grantDecision: safetyDecision.grantDecision,
+        approval: safetyDecision.approval,
+        data: {
+          eligibility: resolution.eligibility,
+          runtimeRun,
+          output
+        },
+        observations: ["Ran the built-in Forge metadata stub without executing or importing generated code."]
+      });
+    }
+  };
+
+  const getRuntimeRun: AgentHostToolDefinition<
+    GetRuntimeRunInput,
+    ToolForgeGetRuntimeRunResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.get_runtime_run",
+    description: "Returns one stored Forge runtime run record.",
+    riskLevel: "low",
+    inputSchema: getRuntimeRunInputSchema,
+    mcpInputSchema: getRuntimeRunMcpInputSchema,
+    inputSummary: "Get Forge runtime run",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeGetRuntimeRunResult>> {
+      try {
+        const runtimeRun = await context.forge.loadRuntimeRun(input.runtimeRunId);
+        return toolSuccess({
+          tool: "forge.get_runtime_run",
+          riskLevel: "low",
+          data: { runtimeRun },
+          observations: ["Returned one stored Forge runtime run record."]
+        });
+      } catch (error) {
+        return toolFailure({
+          tool: "forge.get_runtime_run",
+          riskLevel: "low",
+          error: {
+            code: "runtime_run_not_found",
+            message: error instanceof Error ? error.message : "Stored runtime run was not found."
+          },
+          observations: ["No stored runtime run matched the requested id."]
+        });
+      }
+    }
+  };
+
+  const listRuntimeRuns: AgentHostToolDefinition<
+    ListRuntimeRunsInput,
+    ToolForgeListRuntimeRunsResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.list_runtime_runs",
+    description: "Lists stored Forge runtime run summaries.",
+    riskLevel: "low",
+    inputSchema: listRuntimeRunsInputSchema,
+    mcpInputSchema: listRuntimeRunsMcpInputSchema,
+    inputSummary: "List Forge runtime runs",
+    safety: {
+      actionType: "observe"
+    },
+    async handler(input, context): Promise<ToolResult<ToolForgeListRuntimeRunsResult>> {
+      const runtimeRuns = (await context.forge.listRuntimeRuns())
+        .filter((record) => input.registrationId === undefined || record.registrationId === input.registrationId)
+        .filter((record) => input.artifactId === undefined || record.artifactId === input.artifactId)
+        .filter((record) => input.manifestId === undefined || record.manifestId === input.manifestId)
+        .filter((record) => input.toolName === undefined || record.toolName === input.toolName)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, input.limit ?? 100)
+        .map((record) => summarizeToolForgeRuntimeRun(record));
+
+      return toolSuccess({
+        tool: "forge.list_runtime_runs",
+        riskLevel: "low",
+        data: { runtimeRuns },
+        observations: ["Listed stored Forge runtime run summaries."]
+      });
+    }
+  };
+
   return [
     validateManifest,
     reviewManifest,
@@ -3756,6 +4519,10 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     registerArtifact,
     getRegistration,
     listRegistrations,
-    revokeRegistration
+    revokeRegistration,
+    checkRuntimeEligibility,
+    runSandboxedTool,
+    getRuntimeRun,
+    listRuntimeRuns
   ];
 }

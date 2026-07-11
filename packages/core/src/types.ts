@@ -1050,6 +1050,19 @@ export const TOOL_FORGE_REGISTRATION_STATUSES = [
 ] as const;
 export type ToolForgeRegistrationStatus = (typeof TOOL_FORGE_REGISTRATION_STATUSES)[number];
 
+export const TOOL_FORGE_RUNTIME_MODES = ["stub"] as const;
+export type ToolForgeRuntimeMode = (typeof TOOL_FORGE_RUNTIME_MODES)[number];
+
+export const TOOL_FORGE_RUNTIME_STATUSES = [
+  "eligible",
+  "ineligible",
+  "dry_run",
+  "completed",
+  "rejected",
+  "timed_out"
+] as const;
+export type ToolForgeRuntimeStatus = (typeof TOOL_FORGE_RUNTIME_STATUSES)[number];
+
 export interface ToolForgeArtifactRecord {
   artifactId: string;
   manifestId: string;
@@ -1302,6 +1315,123 @@ export interface ToolForgeListRegistrationsResult {
 
 export interface ToolForgeRevokeRegistrationResult {
   registration: ToolForgeRegistrationRecord;
+}
+
+export interface ToolForgeRuntimeSandboxPolicy {
+  mode: ToolForgeRuntimeMode;
+  childProcess: boolean;
+  networkAllowed: false;
+  filesystemRoots: string[];
+  outputRoot?: string;
+  shellAllowed: false;
+  guiAllowed: false;
+  envAllowlist: string[];
+  envBlocked: string[];
+  timeoutMs: number;
+  stdoutBytesMax: number;
+  stderrBytesMax: number;
+}
+
+export interface ToolForgeRuntimeEligibilityResult {
+  eligible: boolean;
+  active: boolean;
+  registrationId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  registrationStatus: ToolForgeRegistrationStatus;
+  toolName: string;
+  tool?: ToolForgeToolDeclaration;
+  reviewId?: string;
+  validationIds: string[];
+  harnessRunIds: string[];
+  requiredGrantIds: string[];
+  activeGrantIds: string[];
+  requestedPermissionIds: string[];
+  blockedPermissionIds: string[];
+  missingRequirements: string[];
+  reasons: string[];
+  sandbox: ToolForgeRuntimeSandboxPolicy;
+}
+
+export interface ToolForgeSandboxStubOutput {
+  mode: ToolForgeRuntimeMode;
+  generatedCodeExecuted: false;
+  metadataOnly: true;
+  tool: {
+    name: string;
+    description: string;
+    riskLevel: RiskLevel;
+    actionType: ActionType;
+    strategy?: AutomationStrategy;
+  };
+  registration: {
+    registrationId: string;
+    status: ToolForgeRegistrationStatus;
+    manifestHash: string;
+  };
+  manifest: {
+    manifestId: string;
+    manifestVersion: string;
+    displayName: string;
+    description: string;
+  };
+  sandbox: ToolForgeRuntimeSandboxPolicy;
+}
+
+export interface ToolForgeRuntimeRunRecord {
+  runtimeRunId: string;
+  registrationId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  toolName: string;
+  mode: ToolForgeRuntimeMode;
+  status: ToolForgeRuntimeStatus;
+  executedGeneratedCode: false;
+  metadataOnly: true;
+  projectPath: string;
+  outputRoot: string;
+  inputFingerprint: string;
+  summary: string;
+  sandbox: ToolForgeRuntimeSandboxPolicy;
+  durationMs: number;
+  createdAt: string;
+}
+
+export interface ToolForgeRuntimeRunSummary {
+  runtimeRunId: string;
+  registrationId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  toolName: string;
+  mode: ToolForgeRuntimeMode;
+  status: ToolForgeRuntimeStatus;
+  executedGeneratedCode: false;
+  metadataOnly: true;
+  createdAt: string;
+}
+
+export interface ToolForgeCheckRuntimeEligibilityResult {
+  eligibility: ToolForgeRuntimeEligibilityResult;
+}
+
+export interface ToolForgeRunSandboxedToolResult {
+  eligibility: ToolForgeRuntimeEligibilityResult;
+  runtimeRun: ToolForgeRuntimeRunRecord;
+  output: ToolForgeSandboxStubOutput;
+}
+
+export interface ToolForgeGetRuntimeRunResult {
+  runtimeRun: ToolForgeRuntimeRunRecord;
+}
+
+export interface ToolForgeListRuntimeRunsResult {
+  runtimeRuns: ToolForgeRuntimeRunSummary[];
 }
 
 export interface ToolForgeSaveManifestResult {

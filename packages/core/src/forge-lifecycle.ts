@@ -12,6 +12,8 @@ import type {
   ToolForgeHarnessStatus,
   ToolForgeManifest,
   ToolForgeManifestSummary,
+  ToolForgeRuntimeRunRecord,
+  ToolForgeRuntimeRunSummary,
   ToolForgeRegistrationEligibilityResult,
   ToolForgeRegistrationRecord,
   ToolForgeRegistrationStatus,
@@ -77,6 +79,16 @@ export function createToolForgeRegistrationId(input: {
 }): string {
   const timestampSegment = (input.now ?? new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
   return `registration.${input.artifact.manifestId}.${input.artifact.manifestVersion}.${input.artifact.manifestHash.slice(0, 12)}.${timestampSegment}`;
+}
+
+export function createToolForgeRuntimeRunId(input: {
+  registration: Pick<ToolForgeRegistrationRecord, "manifestId" | "manifestVersion" | "manifestHash">;
+  toolName: string;
+  now?: string;
+}): string {
+  const timestampSegment = (input.now ?? new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
+  const safeToolName = input.toolName.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `runtime.${input.registration.manifestId}.${input.registration.manifestVersion}.${safeToolName}.${input.registration.manifestHash.slice(0, 12)}.${timestampSegment}`;
 }
 
 export function createToolForgeArtifactRecord(input: {
@@ -331,6 +343,71 @@ export function summarizeToolForgeRegistration(
     executable: false,
     live: false,
     ...(record.expiresAt === undefined ? {} : { expiresAt: record.expiresAt })
+  };
+}
+
+export function createToolForgeRuntimeRunRecord(input: {
+  registration: ToolForgeRegistrationRecord;
+  artifact: ToolForgeArtifactRecord;
+  toolName: string;
+  projectPath: string;
+  outputRoot: string;
+  inputFingerprint: string;
+  summary: string;
+  sandbox: ToolForgeRuntimeRunRecord["sandbox"];
+  durationMs: number;
+  status?: ToolForgeRuntimeRunRecord["status"];
+  now?: string;
+}): ToolForgeRuntimeRunRecord {
+  const now = input.now ?? new Date().toISOString();
+
+  return {
+    runtimeRunId: createToolForgeRuntimeRunId({
+      registration: input.registration,
+      toolName: input.toolName,
+      now
+    }),
+    registrationId: input.registration.registrationId,
+    artifactId: input.artifact.artifactId,
+    manifestId: input.artifact.manifestId,
+    manifestVersion: input.artifact.manifestVersion,
+    manifestHash: input.artifact.manifestHash,
+    toolName: input.toolName,
+    mode: input.sandbox.mode,
+    status: input.status ?? "completed",
+    executedGeneratedCode: false,
+    metadataOnly: true,
+    projectPath: input.projectPath,
+    outputRoot: input.outputRoot,
+    inputFingerprint: input.inputFingerprint,
+    summary: input.summary,
+    sandbox: {
+      ...input.sandbox,
+      filesystemRoots: [...input.sandbox.filesystemRoots],
+      envAllowlist: [...input.sandbox.envAllowlist],
+      envBlocked: [...input.sandbox.envBlocked]
+    },
+    durationMs: input.durationMs,
+    createdAt: now
+  };
+}
+
+export function summarizeToolForgeRuntimeRun(
+  record: ToolForgeRuntimeRunRecord
+): ToolForgeRuntimeRunSummary {
+  return {
+    runtimeRunId: record.runtimeRunId,
+    registrationId: record.registrationId,
+    artifactId: record.artifactId,
+    manifestId: record.manifestId,
+    manifestVersion: record.manifestVersion,
+    manifestHash: record.manifestHash,
+    toolName: record.toolName,
+    mode: record.mode,
+    status: record.status,
+    executedGeneratedCode: false,
+    metadataOnly: true,
+    createdAt: record.createdAt
   };
 }
 

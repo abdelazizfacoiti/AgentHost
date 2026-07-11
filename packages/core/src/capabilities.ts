@@ -204,6 +204,26 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Marks a Forge registration record revoked without deleting it or exposing generated tools."
     },
     {
+      name: "forge.check_runtime_eligibility",
+      riskLevel: "low" as const,
+      description: "Checks whether a registered inert Forge artifact is eligible for limited sandbox runtime handling."
+    },
+    {
+      name: "forge.run_sandboxed_tool",
+      riskLevel: "medium" as const,
+      description: "Runs a confirmation-gated metadata stub for one registered inert Forge tool without executing generated code."
+    },
+    {
+      name: "forge.get_runtime_run",
+      riskLevel: "low" as const,
+      description: "Returns one stored Forge runtime run record."
+    },
+    {
+      name: "forge.list_runtime_runs",
+      riskLevel: "low" as const,
+      description: "Lists stored Forge runtime run summaries."
+    },
+    {
       name: "app.detect",
       riskLevel: "low" as const,
       description: "Detects a Linux app generically and reports available automation strategies."
