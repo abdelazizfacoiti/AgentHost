@@ -1981,6 +1981,49 @@ describe("forge MCP tools", () => {
     expect(context.registry.listTools().some((entry) => entry.name === runtimeSafeManifest.tools[0]!.name)).toBe(false);
   });
 
+  it("lists and gets inert dispatchable metadata without exposing generated tools", async () => {
+    const context = createContext({ persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)] });
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const listed = await runTool(getTool("forge.list_dispatchable_tools"), { registrationId: runtimeReady.registrationId }, context);
+    expect(listed.ok).toBe(true);
+    const tools = (listed.data as { tools: Array<{ toolName: string; notCallableAsMcpTool: boolean }> }).tools;
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ toolName: runtimeSafeManifest.tools[0]!.name, notCallableAsMcpTool: true });
+    const found = await runTool(getTool("forge.get_dispatchable_tool"), { registrationId: runtimeReady.registrationId, toolName: runtimeSafeManifest.tools[0]!.name }, context);
+    expect(found.ok).toBe(true);
+    expect((found.data as { tool: { active: boolean; inputSchema: unknown } }).tool.active).toBe(true);
+    expect(context.registry.listTools().some((tool) => tool.name === runtimeSafeManifest.tools[0]!.name)).toBe(false);
+  });
+
+  it("dispatch_generated_tool previews, requires confirmation, and uses fixed runner", async () => {
+    const context = createContext({ persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)] });
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const toolName = runtimeSafeManifest.tools[0]!.name;
+    const preview = await runTool(getTool("forge.dispatch_generated_tool"), { registrationId: runtimeReady.registrationId, toolName, input: {}, dryRun: true }, context);
+    expect(preview.ok).toBe(true);
+    const previewData = preview.data as { confirmationToken: string; dispatch: { notCallableAsMcpTool: boolean } };
+    expect(previewData.dispatch.notCallableAsMcpTool).toBe(true);
+    const missing = await runTool(getTool("forge.dispatch_generated_tool"), { registrationId: runtimeReady.registrationId, toolName, input: {} }, context);
+    expect(missing.ok).toBe(false);
+    expect(missing.error?.code).toBe("dry_run_required");
+    const result = await runTool(getTool("forge.dispatch_generated_tool"), { registrationId: runtimeReady.registrationId, toolName, input: {}, confirmationToken: previewData.confirmationToken }, context);
+    expect(result.ok).toBe(true);
+    expect((result.data as { dispatch: { underlyingTool: string }; runtimeRun: { runnerMode: string } }).dispatch.underlyingTool).toBe("forge.run_sandboxed_tool");
+    expect((result.data as { runtimeRun: { runnerMode: string } }).runtimeRun.runnerMode).toBe("subprocess");
+    expect(context.logger.entries.some((entry) => JSON.stringify(entry).includes(previewData.confirmationToken))).toBe(false);
+  });
+
+  it("dispatch_generated_tool blocks revoked inert registrations", async () => {
+    const context = createContext({ persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)] });
+    const runtimeReady = await createRuntimeReadyRegistration(context);
+    const revokePreview = await runTool(getTool("forge.revoke_registration"), { registrationId: runtimeReady.registrationId, dryRun: true }, context);
+    const revokeToken = (revokePreview.data as { confirmationToken: string }).confirmationToken;
+    await runTool(getTool("forge.revoke_registration"), { registrationId: runtimeReady.registrationId, confirmationToken: revokeToken }, context);
+    const result = await runTool(getTool("forge.dispatch_generated_tool"), { registrationId: runtimeReady.registrationId, toolName: runtimeSafeManifest.tools[0]!.name, input: {} }, context);
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("runtime_ineligible");
+  });
+
   it("get/list runtime runs return stored metadata-only summaries", async () => {
     const context = createContext({
       persistentGrants: [createRuntimeExecutionGrant(runtimeSafeManifest.id)]

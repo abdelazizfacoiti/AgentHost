@@ -1546,6 +1546,43 @@ export interface ToolForgeRunSandboxedToolResult {
   output: ToolForgeSandboxStubOutput | { mode: "subprocess"; generatedCodeExecuted: false; metadataOnly: false; result: unknown; sandbox: ToolForgeRuntimeSandboxPolicy };
 }
 
+/** Metadata for a generated tool that remains inert and non-callable as an MCP tool. */
+export interface ToolForgeDispatchableTool {
+  registrationId: string;
+  artifactId: string;
+  manifestId: string;
+  manifestVersion: string;
+  manifestHash: string;
+  toolName: string;
+  description: string;
+  inputSchema: unknown;
+  riskLevel: RiskLevel;
+  runtimeCapabilities: ToolForgeRuntimeCapability[];
+  registrationStatus: ToolForgeRegistrationStatus;
+  active: boolean;
+  inactiveReasons: string[];
+  notCallableAsMcpTool: true;
+}
+
+export interface ToolForgeListDispatchableToolsResult {
+  tools: ToolForgeDispatchableTool[];
+}
+
+export interface ToolForgeGetDispatchableToolResult {
+  tool: ToolForgeDispatchableTool;
+}
+
+export interface ToolForgeDispatchGeneratedToolResult extends ToolForgeRunSandboxedToolResult {
+  dispatch: {
+    registrationId: string;
+    artifactId: string;
+    manifestId: string;
+    toolName: string;
+    underlyingTool: "forge.run_sandboxed_tool";
+    notCallableAsMcpTool: true;
+  };
+}
+
 export interface ToolForgeGetRuntimeRunResult {
   runtimeRun: ToolForgeRuntimeRunRecord;
 }
