@@ -8,3 +8,5 @@ coverage/
 
 .agenthost/
 .agenthost-git/
+skills-lock.json
+.agents/
