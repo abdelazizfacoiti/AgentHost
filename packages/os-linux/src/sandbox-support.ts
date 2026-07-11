@@ -29,8 +29,8 @@ const BACKEND_CANDIDATES: BackendCandidate[] = [
     id: "bubblewrap",
     commandNames: ["bwrap", "bubblewrap"],
     usability: "candidate",
-    reason: "Bubblewrap is a small, purpose-built userspace sandbox candidate.",
-    limitations: ["A later phase must choose a safe profile and verify user-namespace support."]
+    reason: "Bubblewrap can isolate AgentHost's fixed JSON runner when unprivileged user namespaces are enabled.",
+    limitations: ["Only the fixed bounded JSON runner is supported; generated source code is never mounted or executed."]
   },
   {
     id: "firejail",
@@ -225,6 +225,8 @@ export async function probeLinuxSandboxSupport(context: SandboxProbeContext = {}
   const onlyNamespaceBackends = availableBackends.every((backend) => backend.id === "bubblewrap" || backend.id === "unshare");
   const supported = availableBackends.length > 0 && !(onlyNamespaceBackends && userNamespaces.status === "unavailable");
 
+  const safeForAgentHostUse = availableBackends.some((backend) => backend.id === "bubblewrap") && userNamespaces.status === "available";
+
   return {
     platform: context.platform ?? process.platform,
     supported,
@@ -239,15 +241,15 @@ export async function probeLinuxSandboxSupport(context: SandboxProbeContext = {}
     },
     limitations: [
       "This is a read-only availability probe; no backend command is executed.",
-      "Availability does not prove a complete AgentHost sandbox policy or safe configuration.",
-      "AgentHost does not enable OS-level sandbox execution in this phase."
+      "Availability does not prove Bubblewrap can launch successfully under every local kernel or container policy.",
+      "Only Bubblewrap with confirmed user namespaces is eligible for Forge runtime integration; all other backends remain probe-only."
     ],
     requiresInstall: availableBackends.length === 0,
     requiresSudo: false,
-    safeForAgentHostUse: false,
+    safeForAgentHostUse,
     notes: [
       "Command detection resolves fixed executable names on PATH using filesystem checks only.",
-      "No sudo, package manager, network, generated code, or system setting was used."
+      "No sudo, package manager, network, generated code, or system setting was used by this probe."
     ]
   };
 }

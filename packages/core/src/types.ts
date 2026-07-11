@@ -242,8 +242,13 @@ export interface AgentHostConfig {
   configPath: string;
   logFile: string;
   profile: PolicyProfileName;
+  /** Undefined only for older in-memory callers; loader always supplies `auto` by default. */
+  forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
   policy: PolicyProfile;
 }
+
+/** OS isolation preference for the fixed Forge JSON runner. */
+export type ForgeRuntimeSandboxMode = "auto" | "none" | "bubblewrap" | "firejail" | "unshare";
 
 export interface ToolContext {
   sessionId: string;
@@ -1492,6 +1497,9 @@ export interface ToolForgeRuntimeRunRecord {
   executedGeneratedCode: false;
   metadataOnly: boolean;
   runnerMode: "metadata_stub" | "subprocess";
+  /** Backend selected around the fixed subprocess; never executes generated source code. */
+  sandboxBackend?: "none" | "bubblewrap" | "firejail" | "unshare";
+  sandboxLimitations?: string[];
   projectPath: string;
   outputRoot: string;
   inputFingerprint: string;

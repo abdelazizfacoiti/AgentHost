@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { getPolicyProfile } from "./policies.js";
-import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, PolicyProfileName } from "./types.js";
+import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, ForgeRuntimeSandboxMode, PolicyProfileName } from "./types.js";
 
 const policyProfileNameSchema = z.enum([
   "strict",
@@ -13,6 +13,8 @@ const policyProfileNameSchema = z.enum([
   "private-data",
   "autopilot-future-disabled-by-default"
 ]);
+
+const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "firejail", "unshare"]);
 
 const automationStrategySchema = z.enum([
   "app_adapter",
@@ -99,6 +101,7 @@ const configFileSchema = z
     agentHostDir: z.string().min(1).optional(),
     logFile: z.string().min(1).optional(),
     profile: policyProfileNameSchema.optional(),
+    forgeRuntimeSandboxMode: forgeRuntimeSandboxModeSchema.optional(),
     grants: z.array(capabilityGrantSchema).max(500).optional()
   })
   .strict();
@@ -202,6 +205,9 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const agentHostDir = resolveLocalPath(env.AGENTHOST_HOME ?? fileConfig.agentHostDir ?? initialAgentHostDir, homeDir);
   const profile = (env.AGENTHOST_PROFILE ?? fileConfig.profile ?? "strict") as PolicyProfileName;
   const parsedProfile = policyProfileNameSchema.parse(profile);
+  const forgeRuntimeSandboxMode = forgeRuntimeSandboxModeSchema.parse(
+    (env.AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE ?? fileConfig.forgeRuntimeSandboxMode ?? "auto") as ForgeRuntimeSandboxMode
+  );
   const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
   const logFile = resolveLocalPath(
     env.AGENTHOST_LOG_FILE ?? fileConfig.logFile ?? path.join(agentHostDir, "logs", "agenthost.jsonl"),
@@ -213,6 +219,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     configPath,
     logFile,
     profile: parsedProfile,
+    forgeRuntimeSandboxMode,
     policy: getPolicyProfile(parsedProfile, { grants })
   };
 }

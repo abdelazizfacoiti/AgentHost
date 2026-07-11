@@ -72,6 +72,7 @@ import {
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
 import { createRuntimeRunDirectory, prepareRuntimeRun, runForgeSubprocess, RUNTIME_BLOCKED_ENV, RUNTIME_ENV, RUNTIME_OUTPUT_BYTES_MAX, RUNTIME_STDERR_BYTES_MAX, RUNTIME_STDOUT_BYTES_MAX, RUNTIME_TIMEOUT_MS } from "../runtime/forge-subprocess.js";
+import { selectForgeRuntimeSandbox, type ForgeRuntimeSandboxSelection } from "../runtime/forge-os-sandbox.js";
 import { createSafetyEvaluationContext } from "../grants.js";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import {
@@ -87,6 +88,15 @@ const forgeManifestInputSchema = z.union([z.string().max(200_000), z.record(z.un
 const optionalVersionSchema = z.string().trim().min(1).max(64).optional();
 const optionalHashSchema = z.string().trim().regex(/^[a-f0-9]{64}$/).optional();
 const optionalConfirmationSchema = z.string().trim().min(1).max(500).optional();
+
+async function selectRuntimeSandbox(context: AgentHostMcpContext): Promise<ForgeRuntimeSandboxSelection> {
+  const probe = context.linux.checkSandboxSupport === undefined ? undefined : await context.linux.checkSandboxSupport();
+  return selectForgeRuntimeSandbox({ mode: context.config.forgeRuntimeSandboxMode, probe });
+}
+
+function sandboxSelectionUsable(selection: ForgeRuntimeSandboxSelection): boolean {
+  return selection.backend === "none" || (selection.backend === "bubblewrap" && selection.commandPath !== undefined);
+}
 
 const validateReviewProposeInputSchema = z
   .object({
@@ -4251,7 +4261,7 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     AgentHostMcpContext
   > = {
     name: "forge.run_sandboxed_tool",
-    description: "Runs a confirmation-gated metadata stub for one registered inert Forge tool without executing generated code.",
+    description: "Runs a confirmation-gated fixed JSON handler for one registered inert Forge tool; generated source is never loaded or registered.",
     riskLevel: "medium",
     inputSchema: runSandboxedToolInputSchema,
     mcpInputSchema: runSandboxedToolMcpInputSchema,
@@ -4304,6 +4314,14 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
         });
       }
       const runnerMode = input.mode ?? "stub";
+      let sandboxSelection: ForgeRuntimeSandboxSelection | undefined;
+      if (runnerMode === "subprocess") {
+        try {
+          sandboxSelection = await selectRuntimeSandbox(context);
+        } catch (error) {
+          return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: "medium", error: { code: "sandbox_probe_failed", message: error instanceof Error ? error.message : "Sandbox support could not be checked." }, observations: ["No generated code was executed."] });
+        }
+      }
       const targetSummary = resolution.tool === undefined ? `Preview Forge runtime ${runnerMode} ${input.toolName}` : `Run Forge runtime ${runnerMode} ${resolution.tool.name}`;
       const target = {
         registrationId: resolution.registration.registrationId,
@@ -4311,7 +4329,8 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
         toolName: resolution.eligibility.toolName,
         mode: input.mode ?? "stub",
         projectPath: resolution.artifact.projectPath,
-        outputRoot: resolution.eligibility.sandbox.outputRoot
+        outputRoot: resolution.eligibility.sandbox.outputRoot,
+        ...(sandboxSelection === undefined ? {} : { sandboxBackend: sandboxSelection.backend, sandboxFallbackUsed: sandboxSelection.fallbackUsed, sandboxCommandPath: sandboxSelection.commandPath ?? null })
       };
       const runtimeRunPath = context.forge.runtimeRunPath(
         `preview.${resolution.registration.registrationId}.${resolution.eligibility.toolName || input.toolName}`
@@ -4335,7 +4354,7 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
           safety: safetyDecision,
           targetSummary,
           target: toFilePreviewTarget(runtimeRunPath, targetSummary),
-          wouldExecute: resolution.eligibility.eligible && safetyDecision.allowed,
+          wouldExecute: resolution.eligibility.eligible && safetyDecision.allowed && (sandboxSelection === undefined || sandboxSelectionUsable(sandboxSelection)),
           ...(resolution.eligibility.eligible
             ? {
                 confirmation: {
@@ -4364,7 +4383,8 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
           grantDecision: safetyDecision.grantDecision,
           data: {
             ...(preview.data as ActionPreviewResult),
-            eligibility: resolution.eligibility
+            eligibility: resolution.eligibility,
+            ...(sandboxSelection === undefined ? {} : { sandbox: sandboxSelection })
           }
         };
       }
@@ -4381,6 +4401,10 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
           },
           observations: resolution.eligibility.reasons
         });
+      }
+
+      if (sandboxSelection !== undefined && !sandboxSelectionUsable(sandboxSelection)) {
+        return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, error: { code: "sandbox_backend_unavailable", message: sandboxSelection.limitations[0] ?? "Requested sandbox backend is unavailable." }, observations: sandboxSelection.limitations });
       }
 
       if (input.confirmationToken === undefined) {
@@ -4427,16 +4451,20 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
         if (!rechecked.eligibility.eligible || rechecked.artifact.projectPath === undefined) {
           return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: rejectedConfirmation(verification.tokenId, "Runtime eligibility changed before spawn."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, error: { code: "runtime_ineligible", message: rechecked.eligibility.reasons.join(" ") || "Runtime eligibility changed before spawn." }, observations: rechecked.eligibility.reasons });
         }
+        const recheckedSandbox = await selectRuntimeSandbox(context);
+        if (!sandboxSelectionUsable(recheckedSandbox) || recheckedSandbox.backend !== sandboxSelection!.backend || recheckedSandbox.commandPath !== sandboxSelection!.commandPath) {
+          return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: rejectedConfirmation(verification.tokenId, "Sandbox backend changed after preview; request a new preview."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, error: { code: "sandbox_backend_changed", message: "Sandbox backend changed after preview; request a new preview." }, observations: recheckedSandbox.limitations });
+        }
         const { runId, runDirectory } = createRuntimeRunDirectory(path.join(context.forge.rootDir(), "runtime-runs"));
         const manifestPath = path.join(rechecked.artifact.projectPath, "agenthost.manifest.json");
         const handlerPath = path.join(rechecked.artifact.projectPath, "runtime", "handler.json");
         try {
           await mkdir(runDirectory, { recursive: true, mode: 0o700 });
           const paths = await prepareRuntimeRun({ runDirectory, payload: input.input ?? null });
-          const processResult = await runForgeSubprocess({ projectPath: rechecked.artifact.projectPath, manifestPath, handlerPath, toolName: rechecked.tool!.name, inputPath: paths.inputPath, outputPath: paths.outputPath, tempDirectory: paths.tempDirectory, timeoutMs: rechecked.eligibility.enforcedLimits.maxRuntimeMs, allowedOperations: rechecked.eligibility.allowedOperations });
+          const processResult = await runForgeSubprocess({ projectPath: rechecked.artifact.projectPath, manifestPath, handlerPath, toolName: rechecked.tool!.name, inputPath: paths.inputPath, outputPath: paths.outputPath, tempDirectory: paths.tempDirectory, timeoutMs: rechecked.eligibility.enforcedLimits.maxRuntimeMs, allowedOperations: rechecked.eligibility.allowedOperations, sandbox: recheckedSandbox });
           await rm(paths.inputPath, { force: true });
           await rm(paths.tempDirectory, { recursive: true, force: true });
-          const runtimeRun: ToolForgeRuntimeRunRecord = { runtimeRunId: runId, registrationId: rechecked.registration.registrationId, artifactId: rechecked.artifact.artifactId, manifestId: rechecked.artifact.manifestId, manifestVersion: rechecked.artifact.manifestVersion, manifestHash: rechecked.artifact.manifestHash, toolName: rechecked.tool!.name, mode: "subprocess", status: processResult.status, executedGeneratedCode: false, metadataOnly: false, runnerMode: "subprocess", projectPath: rechecked.artifact.projectPath, outputRoot: runDirectory, inputFingerprint: context.confirmations.fingerprintInput(input), summary: processResult.status === "passed" ? "Fixed runner evaluated bounded JSON handler." : "Fixed runner did not complete successfully.", sandbox: rechecked.eligibility.sandbox, durationMs: processResult.durationMs, commandSummary: processResult.commandSummary, cwd: processResult.cwd, envKeys: processResult.envKeys, timeoutMs: rechecked.eligibility.enforcedLimits.maxRuntimeMs, outputSizeBytes: processResult.outputSizeBytes, runtimeCapabilitiesUsed: rechecked.eligibility.grantedRuntimeCapabilities, enforcedLimits: rechecked.eligibility.enforcedLimits, ...(processResult.status === "passed" ? { resultSummary: "JSON result returned." } : {}), ...(processResult.errorSummary === undefined ? {} : { errorSummary: processResult.errorSummary }), executableStillFalse: true, liveStillFalse: true, createdAt: new Date().toISOString() };
+          const runtimeRun: ToolForgeRuntimeRunRecord = { runtimeRunId: runId, registrationId: rechecked.registration.registrationId, artifactId: rechecked.artifact.artifactId, manifestId: rechecked.artifact.manifestId, manifestVersion: rechecked.artifact.manifestVersion, manifestHash: rechecked.artifact.manifestHash, toolName: rechecked.tool!.name, mode: "subprocess", status: processResult.status, executedGeneratedCode: false, metadataOnly: false, runnerMode: "subprocess", sandboxBackend: processResult.sandboxBackend, sandboxLimitations: processResult.sandboxLimitations, projectPath: rechecked.artifact.projectPath, outputRoot: runDirectory, inputFingerprint: context.confirmations.fingerprintInput(input), summary: processResult.status === "passed" ? "Fixed runner evaluated bounded JSON handler." : "Fixed runner did not complete successfully.", sandbox: rechecked.eligibility.sandbox, durationMs: processResult.durationMs, commandSummary: processResult.commandSummary, cwd: processResult.cwd, envKeys: processResult.envKeys, timeoutMs: rechecked.eligibility.enforcedLimits.maxRuntimeMs, outputSizeBytes: processResult.outputSizeBytes, runtimeCapabilitiesUsed: rechecked.eligibility.grantedRuntimeCapabilities, enforcedLimits: rechecked.eligibility.enforcedLimits, ...(processResult.status === "passed" ? { resultSummary: "JSON result returned." } : {}), ...(processResult.errorSummary === undefined ? {} : { errorSummary: processResult.errorSummary }), executableStillFalse: true, liveStillFalse: true, createdAt: new Date().toISOString() };
           await context.forge.saveRuntimeRun(runtimeRun);
           if (processResult.status !== "passed") return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted; subprocess failed safely."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, error: { code: processResult.status === "timeout" ? "runtime_timeout" : "runtime_failed", message: processResult.errorSummary ?? "Runner failed." }, observations: [processResult.errorSummary ?? "Runner failed."] });
           return toolSuccess({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and fixed subprocess runner completed."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, data: { eligibility: rechecked.eligibility, runtimeRun, output: { mode: "subprocess", generatedCodeExecuted: false, metadataOnly: false, result: processResult.result ?? null, sandbox: rechecked.eligibility.sandbox } }, observations: ["Fixed runner evaluated bounded JSON handler; no live tool registered."] });
