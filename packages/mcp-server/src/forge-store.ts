@@ -106,7 +106,7 @@ export class ForgeStore {
   }
 
   runtimeRunPath(runtimeRunId: string): string {
-    return path.join(this.#runtimeRunsDir, `${sanitizeSegment(runtimeRunId)}.json`);
+    return path.join(this.#runtimeRunsDir, sanitizeSegment(runtimeRunId), "record.json");
   }
 
   async saveManifest(manifest: ToolForgeManifest, manifestHash: string): Promise<string> {
@@ -207,11 +207,21 @@ export class ForgeStore {
   }
 
   async loadRuntimeRun(runtimeRunId: string): Promise<ToolForgeRuntimeRunRecord> {
-    return readJson<ToolForgeRuntimeRunRecord>(this.runtimeRunPath(runtimeRunId));
+    try {
+      return await readJson<ToolForgeRuntimeRunRecord>(this.runtimeRunPath(runtimeRunId));
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+        return readJson<ToolForgeRuntimeRunRecord>(path.join(this.#runtimeRunsDir, `${sanitizeSegment(runtimeRunId)}.json`));
+      }
+      throw error;
+    }
   }
 
   async listRuntimeRuns(): Promise<ToolForgeRuntimeRunRecord[]> {
-    return this.#readJsonDirectory<ToolForgeRuntimeRunRecord>(this.#runtimeRunsDir);
+    const records = await this.#readJsonDirectory<ToolForgeRuntimeRunRecord>(this.#runtimeRunsDir);
+    const entries = await readdir(this.#runtimeRunsDir, { withFileTypes: true }).catch(() => []);
+    const nested = await Promise.all(entries.filter((entry) => entry.isDirectory()).map((entry) => readJson<ToolForgeRuntimeRunRecord>(path.join(this.#runtimeRunsDir, entry.name, "record.json")).catch(() => undefined)));
+    return [...records, ...nested.filter((record): record is ToolForgeRuntimeRunRecord => record !== undefined)];
   }
 
   async saveProposalRecord(record: ForgeProposalRecord): Promise<void> {

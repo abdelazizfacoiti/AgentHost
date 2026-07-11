@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
 import {
@@ -70,6 +70,7 @@ import {
 } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
+import { createRuntimeRunDirectory, prepareRuntimeRun, runForgeSubprocess, RUNTIME_BLOCKED_ENV, RUNTIME_ENV, RUNTIME_OUTPUT_BYTES_MAX, RUNTIME_STDERR_BYTES_MAX, RUNTIME_STDOUT_BYTES_MAX, RUNTIME_TIMEOUT_MS } from "../runtime/forge-subprocess.js";
 import { createSafetyEvaluationContext } from "../grants.js";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import {
@@ -359,7 +360,7 @@ const runSandboxedToolInputSchema = z
     registrationId: z.string().trim().min(1).max(400),
     toolName: z.string().trim().min(1).max(200),
     input: z.unknown().optional(),
-    mode: z.enum(["stub"]).optional(),
+    mode: z.enum(["stub", "subprocess"]).optional(),
     dryRun: z.boolean().optional(),
     confirmationToken: optionalConfirmationSchema
   })
@@ -682,7 +683,7 @@ const runSandboxedToolMcpInputSchema = {
     registrationId: { type: "string", minLength: 1, maxLength: 400 },
     toolName: { type: "string", minLength: 1, maxLength: 200 },
     input: {},
-    mode: { type: "string", enum: ["stub"] },
+    mode: { type: "string", enum: ["stub", "subprocess"] },
     dryRun: { type: "boolean" },
     confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
   },
@@ -869,6 +870,14 @@ function buildScaffoldFiles(
     "}"
   ].join("\n");
 
+  const handler = {
+    schemaVersion: "agenthost.forge.handler.v1",
+    tools: Object.fromEntries(manifest.tools.map((tool) => [tool.name, {
+      op: "object",
+      entries: { tool: { op: "const", value: tool.name }, input: { op: "input" } }
+    }]))
+  };
+
   const testFile = [
     "import test from \"node:test\";",
     "import assert from \"node:assert/strict\";",
@@ -885,7 +894,7 @@ function buildScaffoldFiles(
     `Requirements: dryRun=${manifest.requirements.requiresDryRun === true}, confirmation=${manifest.requirements.requiresConfirmationToken === true}, approval=${manifest.requirements.requiresApproval === true}`,
     `Permissions: ${manifest.requestedPermissions.map((permission) => permission.id).join(", ") || "none"}`,
     "",
-    "This scaffold is inert.",
+    "This scaffold is inert except Phase 19 bounded runtime/handler.json evaluation.",
     "It must not be executed, registered, or dynamically imported in AgentHost.",
     "Validation may inspect these files statically only."
   ].join("\n");
@@ -914,6 +923,7 @@ function buildScaffoldFiles(
   const plan: Array<ToolForgeProjectFilePlanEntry & { content: string }> = [
     { path: projectPath, kind: "directory", description: "Generated project root", content: "" },
     { path: path.join(projectPath, "src"), kind: "directory", description: "Source directory", content: "" },
+    { path: path.join(projectPath, "runtime"), kind: "directory", description: "Bounded JSON handler directory", content: "" },
     { path: path.join(projectPath, "tests"), kind: "directory", description: "Test directory", content: "" },
     {
       path: path.join(projectPath, "agenthost.manifest.json"),
@@ -935,6 +945,7 @@ function buildScaffoldFiles(
       content: `${JSON.stringify(tsconfig, null, 2)}\n`
     },
     { path: path.join(projectPath, "src", "index.ts"), kind: "file", description: "Inert source placeholder", content: `${srcIndex}\n` },
+    { path: path.join(projectPath, "runtime", "handler.json"), kind: "file", description: "Bounded Phase 19 JSON handler", content: `${JSON.stringify(handler, null, 2)}\n` },
     {
       path: path.join(projectPath, "tests", "generated.test.ts"),
       kind: "file",
@@ -1049,6 +1060,7 @@ function collectStaticValidationChecks(
     "package.json",
     "tsconfig.json",
     "src/index.ts",
+    "runtime/handler.json",
     "tests/generated.test.ts",
     "CONTRACT.md"
   ]) {
@@ -1462,30 +1474,21 @@ async function evaluateRegistrationEligibility(
   };
 }
 
-const RUNTIME_ENV_ALLOWLIST = ["HOME", "LANG", "LC_ALL", "PATH", "PWD", "TMPDIR", "TZ", "NODE_ENV"] as const;
-const RUNTIME_ENV_BLOCKLIST = [
-  "DISPLAY",
-  "WAYLAND_DISPLAY",
-  "DBUS_SESSION_BUS_ADDRESS",
-  "XAUTHORITY",
-  "SSH_AUTH_SOCK",
-  "GPG_AGENT_INFO"
-] as const;
-const RUNTIME_TIMEOUT_MS = 5_000;
-const RUNTIME_STDOUT_BYTES_MAX = 8_192;
-const RUNTIME_STDERR_BYTES_MAX = 8_192;
+const RUNTIME_ENV_ALLOWLIST = Object.keys(RUNTIME_ENV);
+const RUNTIME_ENV_BLOCKLIST = RUNTIME_BLOCKED_ENV;
 
 function createRuntimeOutputRoot(context: AgentHostMcpContext, artifact: ToolForgeArtifactRecord): string {
-  return path.join(context.forge.rootDir(), "runtime-output", artifact.manifestId, artifact.manifestVersion);
+  return path.join(context.forge.rootDir(), "runtime-runs");
 }
 
 function createRuntimeSandboxPolicy(
   context: AgentHostMcpContext,
-  artifact: ToolForgeArtifactRecord
+  artifact: ToolForgeArtifactRecord,
+  mode: "stub" | "subprocess" = "stub"
 ): ToolForgeRuntimeEligibilityResult["sandbox"] {
   return {
-    mode: "stub",
-    childProcess: false,
+    mode,
+    childProcess: mode === "subprocess",
     networkAllowed: false,
     filesystemRoots: artifact.projectPath === undefined
       ? [createRuntimeOutputRoot(context, artifact)]
@@ -1504,7 +1507,7 @@ function createRuntimeSandboxPolicy(
 function isLowRiskRuntimeTool(tool: ToolForgeManifest["tools"][number]): boolean {
   return (
     (tool.riskLevel === "observe" || tool.riskLevel === "low") &&
-    (tool.actionType === "observe" || tool.actionType === "inspect")
+    tool.actionType === "inspect"
   );
 }
 
@@ -1535,6 +1538,7 @@ async function evaluateRuntimeEligibility(input: {
   context: AgentHostMcpContext;
   registration: ToolForgeRegistrationRecord;
   requestedToolName?: string;
+  mode?: "stub" | "subprocess";
 }): Promise<{
   eligibility: ToolForgeRuntimeEligibilityResult;
   registration: ToolForgeRegistrationRecord;
@@ -1561,7 +1565,7 @@ async function evaluateRuntimeEligibility(input: {
   const blockedPermissionIds = manifest.requestedPermissions
     .filter((permission) => permissionExceedsPhase18Runtime(permission))
     .map((permission) => permission.id);
-  const sandbox = createRuntimeSandboxPolicy(input.context, artifact);
+  const sandbox = createRuntimeSandboxPolicy(input.context, artifact, input.mode);
 
   if (registration.status !== "registered_inert") {
     missingRequirements.push("Registration must be active registered_inert.");
@@ -1686,6 +1690,17 @@ async function evaluateRuntimeEligibility(input: {
   if (blockedPermissionIds.length > 0) {
     missingRequirements.push("Requested permissions must stay within the Phase 18 stub boundary.");
     reasons.push("Phase 18 runtime stub does not allow generated shell, file, GUI, network, or delegated tool permissions.");
+  }
+
+  if (input.mode === "subprocess") {
+    if (tool?.inputSchema === undefined || tool.outputSchema === undefined) {
+      missingRequirements.push("Subprocess tools must declare input and output schemas.");
+      reasons.push("Phase 19 runner only accepts schema-declared JSON input and output.");
+    }
+    if (artifact.projectPath !== undefined && !(await pathExists(path.join(artifact.projectPath, "runtime", "handler.json")))) {
+      missingRequirements.push("Subprocess handler must exist.");
+      reasons.push("Generated project lacks approved runtime/handler.json contract.");
+    }
   }
 
   if (manifest.riskDeclaration === "high" || manifest.riskDeclaration === "blocked") {
@@ -4251,6 +4266,7 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
         resolution = await evaluateRuntimeEligibility({
           context,
           registration,
+          mode: input.mode ?? "stub",
           ...(input.toolName === undefined ? {} : { requestedToolName: input.toolName })
         });
       } catch (error) {
@@ -4264,9 +4280,8 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
           observations: ["Runtime execution stopped before preview or execution because eligibility resolution failed."]
         });
       }
-      const targetSummary = resolution.tool === undefined
-        ? `Preview Forge runtime stub ${input.toolName}`
-        : `Run Forge runtime stub ${resolution.tool.name}`;
+      const runnerMode = input.mode ?? "stub";
+      const targetSummary = resolution.tool === undefined ? `Preview Forge runtime ${runnerMode} ${input.toolName}` : `Run Forge runtime ${runnerMode} ${resolution.tool.name}`;
       const target = {
         registrationId: resolution.registration.registrationId,
         manifestHash: resolution.registration.manifestHash,
@@ -4306,7 +4321,7 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
                   input,
                   target,
                   explanation:
-                    "Use this token to run the exact previewed Forge metadata stub before it expires.",
+                    `Use this token to run exact previewed Forge ${runnerMode} runtime before it expires.`,
                   riskLevel: safetyDecision.riskLevel,
                   appSensitivity: safetyDecision.appSensitivity
                 }
@@ -4314,11 +4329,11 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
             : {}),
           reasons: previewReasons(
             resolution.eligibility.eligible
-              ? "Prepared a Phase 18 metadata-only runtime stub preview without executing generated code."
+              ? `Prepared Forge ${runnerMode} runtime preview without exposing generated tools.`
               : resolution.eligibility.reasons[0] ?? "Runtime eligibility is not satisfied.",
             safetyDecision.reasons
           ),
-          observations: ["Previewed the limited Forge runtime boundary without executing generated code."]
+          observations: ["Previewed Forge runtime boundary without executing generated code."]
         });
 
         return {
@@ -4382,6 +4397,29 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
           },
           observations: [verification.reason]
         });
+      }
+
+      if (runnerMode === "subprocess") {
+        const rechecked = await evaluateRuntimeEligibility({ context, registration: resolution.registration, requestedToolName: resolution.tool.name, mode: "subprocess" });
+        if (!rechecked.eligibility.eligible || rechecked.artifact.projectPath === undefined) {
+          return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: rejectedConfirmation(verification.tokenId, "Runtime eligibility changed before spawn."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, error: { code: "runtime_ineligible", message: rechecked.eligibility.reasons.join(" ") || "Runtime eligibility changed before spawn." }, observations: rechecked.eligibility.reasons });
+        }
+        const { runId, runDirectory } = createRuntimeRunDirectory(path.join(context.forge.rootDir(), "runtime-runs"));
+        const manifestPath = path.join(rechecked.artifact.projectPath, "agenthost.manifest.json");
+        const handlerPath = path.join(rechecked.artifact.projectPath, "runtime", "handler.json");
+        try {
+          await mkdir(runDirectory, { recursive: true, mode: 0o700 });
+          const paths = await prepareRuntimeRun({ runDirectory, payload: input.input ?? null });
+          const processResult = await runForgeSubprocess({ projectPath: rechecked.artifact.projectPath, manifestPath, handlerPath, toolName: rechecked.tool!.name, inputPath: paths.inputPath, outputPath: paths.outputPath, tempDirectory: paths.tempDirectory });
+          await rm(paths.inputPath, { force: true });
+          await rm(paths.tempDirectory, { recursive: true, force: true });
+          const runtimeRun: ToolForgeRuntimeRunRecord = { runtimeRunId: runId, registrationId: rechecked.registration.registrationId, artifactId: rechecked.artifact.artifactId, manifestId: rechecked.artifact.manifestId, manifestVersion: rechecked.artifact.manifestVersion, manifestHash: rechecked.artifact.manifestHash, toolName: rechecked.tool!.name, mode: "subprocess", status: processResult.status, executedGeneratedCode: false, metadataOnly: false, runnerMode: "subprocess", projectPath: rechecked.artifact.projectPath, outputRoot: runDirectory, inputFingerprint: context.confirmations.fingerprintInput(input), summary: processResult.status === "passed" ? "Fixed runner evaluated bounded JSON handler." : "Fixed runner did not complete successfully.", sandbox: rechecked.eligibility.sandbox, durationMs: processResult.durationMs, commandSummary: processResult.commandSummary, cwd: processResult.cwd, envKeys: processResult.envKeys, timeoutMs: RUNTIME_TIMEOUT_MS, outputSizeBytes: processResult.outputSizeBytes, ...(processResult.status === "passed" ? { resultSummary: "JSON result returned." } : {}), ...(processResult.errorSummary === undefined ? {} : { errorSummary: processResult.errorSummary }), executableStillFalse: true, liveStillFalse: true, createdAt: new Date().toISOString() };
+          await context.forge.saveRuntimeRun(runtimeRun);
+          if (processResult.status !== "passed") return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted; subprocess failed safely."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, error: { code: processResult.status === "timeout" ? "runtime_timeout" : "runtime_failed", message: processResult.errorSummary ?? "Runner failed." }, observations: [processResult.errorSummary ?? "Runner failed."] });
+          return toolSuccess({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and fixed subprocess runner completed."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, data: { eligibility: rechecked.eligibility, runtimeRun, output: { mode: "subprocess", generatedCodeExecuted: false, metadataOnly: false, result: processResult.result ?? null, sandbox: rechecked.eligibility.sandbox } }, observations: ["Fixed runner evaluated bounded JSON handler; no live tool registered."] });
+        } catch (error) {
+          return toolFailure({ tool: "forge.run_sandboxed_tool", riskLevel: safetyDecision.riskLevel, confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted; sandbox setup failed safely."), grantDecision: safetyDecision.grantDecision, approval: safetyDecision.approval, error: { code: "sandbox_failed", message: error instanceof Error ? error.message : "Sandbox setup failed." }, observations: ["No generated JavaScript executed."] });
+        }
       }
 
       const startedAt = performance.now();
