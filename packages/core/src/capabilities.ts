@@ -44,6 +44,21 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
 
   for (const capability of [
     {
+      name: "forge.list_dispatchable_tools",
+      riskLevel: "observe" as const,
+      description: "Lists inert generated Forge tool metadata; generated names are never live MCP tools."
+    },
+    {
+      name: "forge.get_dispatchable_tool",
+      riskLevel: "observe" as const,
+      description: "Returns metadata for one inert generated Forge tool."
+    },
+    {
+      name: "forge.dispatch_generated_tool",
+      riskLevel: "medium" as const,
+      description: "Dispatches one eligible inert generated Forge tool through the fixed sandboxed JSON runner."
+    },
+    {
       name: "system.get_info",
       riskLevel: "observe" as const,
       description: "Returns local system information and AgentHost runtime details."

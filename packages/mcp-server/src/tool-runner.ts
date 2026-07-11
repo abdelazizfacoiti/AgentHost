@@ -39,6 +39,8 @@ export interface AgentHostToolDefinition<
   inputSchema: z.ZodType<TInput>;
   mcpInputSchema: Record<string, unknown>;
   inputSummary: string;
+  /** Safe per-call audit label; must never include unredacted user payloads or tokens. */
+  auditInputSummary?(input: TInput): string;
   safety?: {
     actionType: SafetyInput["actionType"];
     getInput?: (input: TInput) => Partial<SafetyInput>;
@@ -198,6 +200,9 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
   }
 
   const durationMs = Math.round(performance.now() - start);
-  await context.logger.log(createAuditLogEntry(result, context, definition.inputSummary, durationMs));
+  const inputSummary = parsed.success && definition.auditInputSummary !== undefined
+    ? definition.auditInputSummary(parsed.data)
+    : definition.inputSummary;
+  await context.logger.log(createAuditLogEntry(result, context, inputSummary, durationMs));
   return result;
 }

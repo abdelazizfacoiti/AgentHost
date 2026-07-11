@@ -30,7 +30,10 @@ import {
   type ToolForgeApplySessionGrantsResult,
   type ToolForgeArchiveManifestResult,
   type ToolForgeArtifactRecord,
+  type ToolForgeDispatchGeneratedToolResult,
+  type ToolForgeDispatchableTool,
   type ToolForgeGetArtifactResult,
+  type ToolForgeGetDispatchableToolResult,
   type ToolForgeCreateReviewResult,
   type ToolForgeGetHarnessRunResult,
   type ToolForgeGetManifestResult,
@@ -41,6 +44,7 @@ import {
   type ToolForgeCheckRuntimeEligibilityResult,
   type ToolForgeGrantProposalResult,
   type ToolForgeListArtifactsResult,
+  type ToolForgeListDispatchableToolsResult,
   type ToolForgeListHarnessRunsResult,
   type ToolForgeListManifestsResult,
   type ToolForgeListRegistrationsResult,
@@ -377,6 +381,35 @@ const runSandboxedToolInputSchema = z
   })
   .strict();
 
+const dispatchLocatorShape = {
+  registrationId: z.string().trim().min(1).max(400).optional(),
+  manifestId: z.string().trim().min(1).max(200).optional(),
+  toolName: z.string().trim().min(1).max(200)
+};
+
+function requireDispatchLocator<T extends z.ZodRawShape>(schema: z.ZodObject<T>) {
+  return schema.superRefine((input, context) => {
+    if ((input.registrationId === undefined) === (input.manifestId === undefined)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Provide exactly one of registrationId or manifestId." });
+    }
+  });
+}
+
+const dispatchGeneratedToolInputSchema = requireDispatchLocator(z.object({ ...dispatchLocatorShape,
+  input: z.unknown().optional(),
+  dryRun: z.boolean().optional(),
+  confirmationToken: optionalConfirmationSchema
+}).strict());
+
+const getDispatchableToolInputSchema = requireDispatchLocator(z.object(dispatchLocatorShape).strict());
+
+const listDispatchableToolsInputSchema = z.object({
+  registrationId: z.string().trim().min(1).max(400).optional(),
+  manifestId: z.string().trim().min(1).max(200).optional(),
+  toolName: z.string().trim().min(1).max(200).optional(),
+  limit: z.number().int().min(1).max(500).optional()
+}).strict();
+
 const getRuntimeRunInputSchema = z
   .object({
     runtimeRunId: z.string().trim().min(1).max(400)
@@ -418,6 +451,9 @@ type ListRegistrationsInput = z.infer<typeof listRegistrationsInputSchema>;
 type RevokeRegistrationInput = z.infer<typeof revokeRegistrationInputSchema>;
 type RuntimeEligibilityInput = z.infer<typeof runtimeEligibilityInputSchema>;
 type RunSandboxedToolInput = z.infer<typeof runSandboxedToolInputSchema>;
+type DispatchGeneratedToolInput = z.infer<typeof dispatchGeneratedToolInputSchema>;
+type GetDispatchableToolInput = z.infer<typeof getDispatchableToolInputSchema>;
+type ListDispatchableToolsInput = z.infer<typeof listDispatchableToolsInputSchema>;
 type GetRuntimeRunInput = z.infer<typeof getRuntimeRunInputSchema>;
 type ListRuntimeRunsInput = z.infer<typeof listRuntimeRunsInputSchema>;
 
@@ -699,6 +735,32 @@ const runSandboxedToolMcpInputSchema = {
     confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
   },
   required: ["registrationId", "toolName"],
+  additionalProperties: false
+};
+
+const dispatchLocatorMcpProperties = {
+  registrationId: { type: "string", minLength: 1, maxLength: 400 },
+  manifestId: { type: "string", minLength: 1, maxLength: 200 },
+  toolName: { type: "string", minLength: 1, maxLength: 200 }
+};
+
+const dispatchGeneratedToolMcpInputSchema = {
+  type: "object",
+  properties: { ...dispatchLocatorMcpProperties, input: {}, dryRun: { type: "boolean" }, confirmationToken: { type: "string", minLength: 1, maxLength: 500 } },
+  required: ["toolName"],
+  additionalProperties: false
+};
+
+const getDispatchableToolMcpInputSchema = {
+  type: "object",
+  properties: dispatchLocatorMcpProperties,
+  required: ["toolName"],
+  additionalProperties: false
+};
+
+const listDispatchableToolsMcpInputSchema = {
+  type: "object",
+  properties: { ...dispatchLocatorMcpProperties, limit: { type: "integer", minimum: 1, maximum: 500 } },
   additionalProperties: false
 };
 
@@ -1828,6 +1890,50 @@ function buildRuntimeStubOutput(input: {
       envBlocked: [...input.sandbox.envBlocked]
     }
   };
+}
+
+async function toDispatchableTool(
+  context: AgentHostMcpContext,
+  registration: ToolForgeRegistrationRecord,
+  declaration: ToolForgeRegistrationRecord["registeredTools"][number]
+): Promise<ToolForgeDispatchableTool> {
+  const effective = resolveEffectiveRegistrationStatus(registration);
+  try {
+    const resolution = await evaluateRuntimeEligibility({ context, registration: effective, requestedToolName: declaration.name, mode: "subprocess" });
+    return {
+      registrationId: effective.registrationId, artifactId: effective.artifactId, manifestId: effective.manifestId,
+      manifestVersion: effective.manifestVersion, manifestHash: effective.manifestHash, toolName: declaration.name,
+      description: declaration.description, inputSchema: declaration.inputSchema ?? {}, riskLevel: declaration.riskLevel,
+      runtimeCapabilities: resolution.eligibility.requestedRuntimeCapabilities, registrationStatus: effective.status,
+      active: resolution.eligibility.eligible, inactiveReasons: resolution.eligibility.eligible ? [] : resolution.eligibility.reasons,
+      notCallableAsMcpTool: true
+    };
+  } catch {
+    return {
+      registrationId: effective.registrationId, artifactId: effective.artifactId, manifestId: effective.manifestId,
+      manifestVersion: effective.manifestVersion, manifestHash: effective.manifestHash, toolName: declaration.name,
+      description: declaration.description, inputSchema: declaration.inputSchema ?? {}, riskLevel: declaration.riskLevel,
+      runtimeCapabilities: [], registrationStatus: effective.status, active: false,
+      inactiveReasons: ["Stored inert metadata could not be evaluated for runtime dispatch."], notCallableAsMcpTool: true
+    };
+  }
+}
+
+async function resolveDispatchRegistration(
+  context: AgentHostMcpContext,
+  input: { registrationId?: string | undefined; manifestId?: string | undefined; toolName: string }
+): Promise<ToolForgeRegistrationRecord> {
+  if (input.registrationId !== undefined) return resolveEffectiveRegistrationStatus(await context.forge.loadRegistration(input.registrationId));
+  const candidates = (await context.forge.listRegistrations())
+    .map((registration) => resolveEffectiveRegistrationStatus(registration))
+    .filter((registration) => registration.manifestId === input.manifestId && registration.status === "registered_inert" && registration.registeredTools.some((tool) => tool.name === input.toolName));
+  const eligible = await Promise.all(candidates.map(async (registration) => ({ registration, resolution: await evaluateRuntimeEligibility({ context, registration, requestedToolName: input.toolName, mode: "subprocess" }).catch(() => undefined) })));
+  const matches = eligible.filter((candidate) => candidate.resolution?.eligibility.eligible).map((candidate) => candidate.registration);
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) throw new Error("Multiple eligible inert registrations match manifestId and toolName; provide registrationId.");
+  if (candidates.length === 1) return candidates[0]!;
+  if (candidates.length === 0) throw new Error("No active inert registration matches manifestId and toolName.");
+  throw new Error("No unique eligible inert registration matches manifestId and toolName; provide registrationId.");
 }
 
 async function resolveHarnessInput(
@@ -4513,6 +4619,82 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     }
   };
 
+  const listDispatchableTools: AgentHostToolDefinition<
+    ListDispatchableToolsInput,
+    ToolForgeListDispatchableToolsResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.list_dispatchable_tools",
+    description: "Lists inert generated Forge metadata that may be dispatched only through the fixed runtime boundary.",
+    riskLevel: "observe",
+    inputSchema: listDispatchableToolsInputSchema,
+    mcpInputSchema: listDispatchableToolsMcpInputSchema,
+    inputSummary: "List inert Forge dispatchable tool metadata",
+    safety: { actionType: "observe" },
+    async handler(input, context): Promise<ToolResult<ToolForgeListDispatchableToolsResult>> {
+      const registrations = (await context.forge.listRegistrations())
+        .map((registration) => resolveEffectiveRegistrationStatus(registration))
+        .filter((registration) => ["registered_inert", "revoked", "expired"].includes(registration.status))
+        .filter((registration) => input.registrationId === undefined || registration.registrationId === input.registrationId)
+        .filter((registration) => input.manifestId === undefined || registration.manifestId === input.manifestId);
+      const declarations = registrations.flatMap((registration) => registration.registeredTools
+        .filter((tool) => input.toolName === undefined || tool.name === input.toolName)
+        .map((tool) => ({ registration, tool })));
+      const tools = await Promise.all(declarations.slice(0, input.limit ?? 100).map(({ registration, tool }) => toDispatchableTool(context, registration, tool)));
+      return toolSuccess({ tool: "forge.list_dispatchable_tools", riskLevel: "observe", data: { tools }, observations: ["Returned inert metadata only; generated names are not live MCP tools."] });
+    }
+  };
+
+  const getDispatchableTool: AgentHostToolDefinition<
+    GetDispatchableToolInput,
+    ToolForgeGetDispatchableToolResult,
+    AgentHostMcpContext
+  > = {
+    name: "forge.get_dispatchable_tool",
+    description: "Returns inert metadata for one generated Forge tool without exposing it as an MCP tool.",
+    riskLevel: "observe",
+    inputSchema: getDispatchableToolInputSchema,
+    mcpInputSchema: getDispatchableToolMcpInputSchema,
+    inputSummary: "Get inert Forge dispatchable tool metadata",
+    safety: { actionType: "observe" },
+    async handler(input, context): Promise<ToolResult<ToolForgeGetDispatchableToolResult>> {
+      try {
+        const registration = await resolveDispatchRegistration(context, input);
+        const declaration = registration.registeredTools.find((tool) => tool.name === input.toolName);
+        if (declaration === undefined) throw new Error("Requested tool is not present in the inert registration metadata.");
+        return toolSuccess({ tool: "forge.get_dispatchable_tool", riskLevel: "observe", data: { tool: await toDispatchableTool(context, registration, declaration) }, observations: ["Returned inert metadata only; no generated code ran."] });
+      } catch (error) {
+        return toolFailure({ tool: "forge.get_dispatchable_tool", riskLevel: "observe", error: { code: "dispatchable_tool_not_found", message: error instanceof Error ? error.message : "Dispatchable tool was not found." }, observations: ["No generated code ran."] });
+      }
+    }
+  };
+
+  const dispatchGeneratedTool: AgentHostToolDefinition<
+    DispatchGeneratedToolInput,
+    ToolForgeDispatchGeneratedToolResult | (ActionPreviewResult & { eligibility: ToolForgeRuntimeEligibilityResult }),
+    AgentHostMcpContext
+  > = {
+    name: "forge.dispatch_generated_tool",
+    description: "Dispatches one eligible inert generated tool only through Forge's fixed sandboxed JSON runner.",
+    riskLevel: "medium",
+    inputSchema: dispatchGeneratedToolInputSchema,
+    mcpInputSchema: dispatchGeneratedToolMcpInputSchema,
+    inputSummary: "Dispatch inert generated Forge tool without logging input or token",
+    auditInputSummary: (input) => `Dispatch inert Forge tool ${input.registrationId ?? input.manifestId ?? "unknown"}/${input.toolName}`,
+    preview: { isDryRun: (input) => input.dryRun === true },
+    async handler(input, context, runtime) {
+      try {
+        const registration = await resolveDispatchRegistration(context, input);
+        const delegated = await runSandboxedTool.handler({ registrationId: registration.registrationId, toolName: input.toolName, input: input.input, mode: "subprocess", dryRun: input.dryRun, confirmationToken: input.confirmationToken }, context, { isDryRun: runtime?.isDryRun ?? input.dryRun === true });
+        const dispatch = { registrationId: registration.registrationId, artifactId: registration.artifactId, manifestId: registration.manifestId, toolName: input.toolName, underlyingTool: "forge.run_sandboxed_tool" as const, notCallableAsMcpTool: true as const };
+        if (!delegated.ok) return { ...delegated, tool: "forge.dispatch_generated_tool", observations: [...delegated.observations, `Dispatch target ${registration.registrationId}/${input.toolName}.`] } as ToolResult<ToolForgeDispatchGeneratedToolResult | (ActionPreviewResult & { eligibility: ToolForgeRuntimeEligibilityResult })>;
+        return { ...delegated, tool: "forge.dispatch_generated_tool", data: { ...(delegated.data as object), dispatch }, observations: [...delegated.observations, `Dispatched inert registration ${registration.registrationId}/${input.toolName} through fixed runner.`] } as ToolResult<ToolForgeDispatchGeneratedToolResult | (ActionPreviewResult & { eligibility: ToolForgeRuntimeEligibilityResult })>;
+      } catch (error) {
+        return toolFailure({ tool: "forge.dispatch_generated_tool", riskLevel: "medium", error: { code: "dispatch_resolution_failed", message: error instanceof Error ? error.message : "Dispatch target could not be resolved." }, observations: ["No generated code ran."] });
+      }
+    }
+  };
+
   const getRuntimeRun: AgentHostToolDefinition<
     GetRuntimeRunInput,
     ToolForgeGetRuntimeRunResult,
@@ -4611,6 +4793,9 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     revokeRegistration,
     checkRuntimeEligibility,
     runSandboxedTool,
+    listDispatchableTools,
+    getDispatchableTool,
+    dispatchGeneratedTool,
     getRuntimeRun,
     listRuntimeRuns
   ];

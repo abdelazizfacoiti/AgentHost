@@ -12,6 +12,9 @@ describe("CapabilityRegistry", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
+      "forge.list_dispatchable_tools",
+      "forge.get_dispatchable_tool",
+      "forge.dispatch_generated_tool",
       "system.get_info",
       "system.list_capabilities",
       "system.check_dependency",
