@@ -75,6 +75,14 @@ export interface VisionTextItem { id: string; text: string; redactedText: string
 export interface VisionTextGroup { id: string; text: string; bounds: VisionBounds; center: VisionPoint; confidence: number; matchedTextIds: string[]; }
 export interface VisionTargetCandidate { candidateId: string; label: string; kind: "text" | "button_candidate" | "input_candidate" | "region"; bounds: VisionBounds; center: VisionPoint; coordinateSpace: "image"; confidence: number; reason: string; matchedTextIds: string[]; riskHint: "normal" | "medium" | "high"; }
 export interface VisionGroundingResult { supported: boolean; backend: "tesseract" | "unavailable"; mode: VisionMode; image?: { width: number; height: number; source: "agenthost_screenshot" | "agenthost_output" | "granted_path"; basename: string; pathRedacted: true; }; textItems: VisionTextItem[]; groups: VisionTextGroup[]; targetCandidates: VisionTargetCandidate[]; warnings: string[]; redactionCounts: Record<string, number>; truncated: boolean; reason: string; }
+export const CHECKPOINT_KINDS = ["browser_url_contains", "browser_text_appears_redacted", "browser_element_exists", "browser_element_missing", "accessibility_element_exists", "accessibility_element_missing", "active_window_matches", "active_window_title_contains", "file_exists", "file_missing", "output_artifact_exists", "vision_text_appears", "vision_text_missing", "vision_target_exists", "manual_check"] as const;
+export type CheckpointKind = (typeof CHECKPOINT_KINDS)[number];
+export type CheckpointStrategy = "browser" | "accessibility" | "vision" | "file" | "desktop" | "manual";
+export type CheckpointSensitivity = "public" | "private" | "secret";
+export type CheckpointStatus = "passed" | "failed" | "unknown" | "timeout" | "blocked";
+export interface CheckpointEvidenceSummary { source: CheckpointStrategy; matched?: boolean; count?: number; confidence?: number; summary: string; }
+export interface Checkpoint { checkpointId?: string; kind: CheckpointKind; description: string; sensitivity: CheckpointSensitivity; expected: Record<string, unknown>; timeoutMs?: number; pollIntervalMs?: number; }
+export interface CheckpointResult { checkpointId: string; kind: CheckpointKind; strategy: CheckpointStrategy; status: CheckpointStatus; description: string; evidence: CheckpointEvidenceSummary; blockedReasons: string[]; warnings: string[]; durationMs: number; }
 
 export const TOOL_FORGE_MANIFEST_KINDS = ["tool", "adapter", "skill", "workflow"] as const;
 export type ToolForgeManifestKind = (typeof TOOL_FORGE_MANIFEST_KINDS)[number];

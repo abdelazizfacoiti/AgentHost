@@ -14,3 +14,4 @@ export * from "./types.js";
 export * from "./workflow.js";
 export * from "./workflow-redaction.js";
 export * from "./vision.js";
+export * from "./checkpoint.js";

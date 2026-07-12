@@ -17,6 +17,7 @@ export function workflowStrategyForTool(tool: string): WorkflowStrategy {
 }
 
 export function workflowActionForTool(tool: string): WorkflowStepAction {
+  if (tool.startsWith("checkpoint.")) return "checkpoint";
   if (tool === "browser.open_url") return "open_url";
   if (tool === "browser.wait_for_state") return "wait_for_state";
   if (tool === "browser.find_element") return "find_element";

@@ -9,6 +9,7 @@ export * from "./tools/system.js";
 export * from "./tools/workflow.js";
 export * from "./workflow-store.js";
 export * from "./tools/vision.js";
+export * from "./tools/checkpoint.js";
 
 const currentFile = fileURLToPath(import.meta.url);
 const invokedFile = process.argv[1] === undefined ? "" : path.resolve(process.argv[1]);
