@@ -70,6 +70,7 @@ import { createShellTools } from "./tools/shell.js";
 import { createSystemTools } from "./tools/system.js";
 import { createWindowTools } from "./tools/window.js";
 import { createBrowserTools } from "./tools/browser.js";
+import { createBrowserSetupTools } from "./tools/browser-setup.js";
 import { createWorkflowTools } from "./tools/workflow.js";
 import { createVisionTools } from "./tools/vision.js";
 import { createCheckpointTools } from "./tools/checkpoint.js";
@@ -211,14 +212,14 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     forge,
     workflowTrace,
     visionEvidence,
-    browser,
+    browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux
   };
   const tools = [
     ...createSystemTools(),
     ...createForgeTools(),
     ...createForgeSandboxTools(),
-    ...createBrowserTools(),
+    ...createBrowserTools(), ...createBrowserSetupTools(),
     ...createWorkflowTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),

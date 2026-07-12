@@ -37,7 +37,7 @@ import type {
   SandboxSupportProbeResult
   ,VisionGroundingResult, VisionMode
 } from "@agenthost/core";
-import type { BrowserBridgeAdapter } from "@agenthost/app-browser";
+import type { BrowserBridgeAdapter, BrowserBridgeServer } from "@agenthost/app-browser";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
 import type { ConfirmationManager } from "./confirmation.js";
 import type { ForgeStore } from "./forge-store.js";
@@ -148,5 +148,6 @@ export interface AgentHostMcpContext {
   workflowTrace?: WorkflowStore;
   visionEvidence?: VisionEvidenceStore;
   browser?: BrowserBridgeAdapter;
+  browserBridge?: BrowserBridgeServer;
   linux: LinuxAutomation;
 }

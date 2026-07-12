@@ -16,7 +16,11 @@
     "lint": "tsc -b --pretty false",
     "test": "vitest run",
     "start:mcp": "node packages/mcp-server/dist/index.js",
-    "smoke:mcp": "node scripts/smoke-mcp.mjs"
+    "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "browser:extension:prepare": "node scripts/prepare-browser-extension.mjs",
+    "browser:extension:firefox": "node scripts/prepare-browser-extension.mjs --browser firefox",
+    "browser:extension:chromium": "node scripts/prepare-browser-extension.mjs --browser chromium",
+    "browser:setup": "node scripts/prepare-browser-extension.mjs --setup"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.0",

@@ -66,7 +66,27 @@ Browser tools are disabled by default. Enable the local bridge in `~/.agenthost/
 }
 ```
 
-Start AgentHost once. Copy the token from `~/.agenthost/browser/pairing-token` into the unpacked extension popup, then use the extension popup to grant each site origin. Load `packages/app-browser/extension` with either `manifest.firefox.json` or `manifest.chromium.json` renamed to `manifest.json`. The bridge binds only to `127.0.0.1`; it never exposes cookies, saved passwords, or browser debugging.
+One-time local setup. This explicitly creates/updates local bridge config, prepares stable bundles, and prints pairing token. It never installs extension automatically.
+
+```bash
+npm run browser:setup
+```
+
+Restart AgentHost MCP server. Then load Firefox/Chromium bundle and paste displayed token into popup.
+
+Prepare only, without config/token change:
+
+```bash
+npm run browser:extension:firefox
+# or
+npm run browser:extension:chromium
+```
+
+Firefox: open `about:debugging#/runtime/this-firefox`, select **Load Temporary Add-on…**, then select `~/AgentHost/browser-extension/firefox/manifest.json`. Temporary Firefox add-ons disappear after browser restart; reload same manifest.
+
+Chromium: open `chrome://extensions`, enable Developer mode, select **Load unpacked**, then select `~/AgentHost/browser-extension/chromium`.
+
+Use `browser.setup_status` and `browser.diagnose_bridge` for safe setup state. Generate token through `browser.generate_pairing_token` with dry-run/confirmation, paste returned token into popup, click **Pair / Re-pair**, then call `browser.verify_pairing`. `browser.reset_pairing` revokes current pairing without returning token. Tokens never enter audit logs. Bridge binds only to `127.0.0.1`; it never exposes cookies, saved passwords, storage, browser debugging, or arbitrary JavaScript.
 
 Forge bounded runtime defaults to `forgeRuntimeSandboxMode: "auto"`. It uses Bubblewrap only when `bwrap` and unprivileged user namespaces are available; otherwise it keeps existing fixed child runner and records fallback warning. Set `forgeRuntimeSandboxMode` in `~/.agenthost/config.json`, or `AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE` to `auto`, `none`, `bubblewrap`, `firejail`, or `unshare`. Explicit `firejail`/`unshare` currently fail closed: no reviewed allow-only filesystem profile exists.
 
