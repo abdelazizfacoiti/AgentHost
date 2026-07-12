@@ -1,0 +1,12 @@
+import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import type { DesktopWindowBounds, DesktopWindowContext, VisionTargetCandidate } from "@agenthost/core";
+export interface ScreenshotEvidence { screenshotId: string; sessionId: string; imagePath: string; imageHash: string; capturedAt: number; captureKind: "full_screen" | "active_window"; imageWidth: number; imageHeight: number; displayBounds?: DesktopWindowBounds; windowBounds?: DesktopWindowBounds; activeWindow: DesktopWindowContext; }
+export class VisionEvidenceStore {
+  #screens = new Map<string, ScreenshotEvidence>(); #candidates = new Map<string, { screenshotId: string; candidate: VisionTargetCandidate }>();
+  async saveScreenshot(input: Omit<ScreenshotEvidence, "screenshotId" | "imageHash" | "capturedAt">): Promise<ScreenshotEvidence> { const imageHash = createHash("sha256").update(await readFile(input.imagePath)).digest("hex"); const value: ScreenshotEvidence = { ...input, screenshotId: `shot_${randomUUID()}`, imageHash, capturedAt: Date.now() }; this.#screens.set(value.screenshotId, value); return value; }
+  async getFresh(screenshotId: string, sessionId: string, imagePath: string, ttlMs = 10_000): Promise<ScreenshotEvidence | undefined> { const value = this.#screens.get(screenshotId); if (value === undefined || value.sessionId !== sessionId || value.imagePath !== imagePath || Date.now() - value.capturedAt > ttlMs) return undefined; const current = createHash("sha256").update(await readFile(imagePath)).digest("hex"); return current === value.imageHash ? value : undefined; }
+  saveCandidates(screenshotId: string, candidates: VisionTargetCandidate[]): VisionTargetCandidate[] { return candidates.map((candidate) => { const value = { ...candidate, candidateId: `candidate_${randomUUID()}` }; this.#candidates.set(value.candidateId, { screenshotId, candidate: value }); return value; }); }
+  getCandidate(id: string): { screenshotId: string; candidate: VisionTargetCandidate } | undefined { return this.#candidates.get(id); }
+  findScreenshot(sessionId: string, imagePath: string): ScreenshotEvidence | undefined { return [...this.#screens.values()].find((value) => value.sessionId === sessionId && value.imagePath === imagePath); }
+}

@@ -99,6 +99,8 @@ Stop a trace with `workflow.trace_stop`, save its safe generic plan using `workf
 
 `vision.analyze_image`, `vision.find_text`, and `vision.find_target` inspect approved local AgentHost screenshot/output images. They use installed local `tesseract` when available, return bounded redacted OCR bounds and image-relative candidate coordinates, and never click, type, upload, cache image bytes, or call cloud services. Missing Tesseract returns `ocr_backend_unavailable`; AgentHost never installs it.
 
+`vision.prepare_pointer_action` accepts only fresh in-session screenshot and target evidence, then returns a `desktop.click` payload with `dryRun:true`. It never calls pointer tools or creates confirmation tokens.
+
 For a raw stdio protocol check, pipe JSON-RPC messages into the built server:
 
 ```bash
