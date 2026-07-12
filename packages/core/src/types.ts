@@ -52,6 +52,17 @@ export const ACTION_TYPES = [
 ] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
 
+export const WORKFLOW_TRACE_STATUSES = ["active", "stopped", "failed", "archived"] as const;
+export type WorkflowTraceStatus = (typeof WORKFLOW_TRACE_STATUSES)[number];
+export const WORKFLOW_SKILL_STATUSES = ["draft", "active", "archived"] as const;
+export type WorkflowSkillStatus = (typeof WORKFLOW_SKILL_STATUSES)[number];
+export const WORKFLOW_STRATEGIES = ["browser", "desktop", "pointer", "accessibility", "file", "shell", "app_adapter", "official_api", "guide", "forge_runtime", "unknown"] as const;
+export type WorkflowStrategy = (typeof WORKFLOW_STRATEGIES)[number];
+export const WORKFLOW_STEP_ACTIONS = ["open_url", "open_app", "wait_for_state", "find_element", "click_element", "fill_text_redacted", "extract_text_redacted", "accessibility_action", "pointer_action", "file_operation", "shell_operation", "adapter_action", "forge_runtime_action", "checkpoint", "guide_step", "tool_action"] as const;
+export type WorkflowStepAction = (typeof WORKFLOW_STEP_ACTIONS)[number];
+export const WORKFLOW_CHECKPOINT_KINDS = ["url_contains", "page_text_appears", "browser_element_exists", "active_browser_tab_matches", "app_window_active", "accessibility_element_exists", "file_exists", "directory_exists", "command_succeeded", "output_artifact_exists", "form_field_exists", "app_category_matches", "manual"] as const;
+export type WorkflowCheckpointKind = (typeof WORKFLOW_CHECKPOINT_KINDS)[number];
+
 export const DATA_SENSITIVITIES = ["none", "low", "sensitive", "secret"] as const;
 export type DataSensitivity = (typeof DATA_SENSITIVITIES)[number];
 
@@ -102,6 +113,124 @@ export interface ToolResult<T = unknown> {
   data: T | null;
   observations: string[];
   error: ToolError | null;
+}
+
+export interface WorkflowSafetyDecisionSummary {
+  allowed: boolean;
+  blocked: boolean;
+  guideOnly: boolean;
+  matchedRules: string[];
+  requiresDryRun: boolean;
+  requiresConfirmationToken: boolean;
+  requiresApproval: boolean;
+  requiresExactTarget: boolean;
+}
+
+export interface WorkflowCheckpoint {
+  checkpointId: string;
+  sourceStepId?: string;
+  kind: WorkflowCheckpointKind;
+  expectationSummary: string;
+  status: "pending" | "passed" | "failed" | "manual_required";
+  resultSummary?: string;
+  checkedAt?: string;
+  reusable: boolean;
+}
+
+export interface WorkflowTraceStep {
+  stepId: string;
+  timestamp: string;
+  tool: string;
+  strategy: WorkflowStrategy;
+  actionType: WorkflowStepAction;
+  riskLevel: RiskLevel;
+  appCategory?: string;
+  appSensitivity?: AppSensitivity;
+  inputSummary: string;
+  outputSummary: string;
+  preview: boolean;
+  ok: boolean;
+  errorSummary?: string;
+  checkpointResult?: WorkflowCheckpoint;
+  requiredGrantIds?: string[];
+  safetyDecision?: WorkflowSafetyDecisionSummary;
+}
+
+export interface WorkflowTrace {
+  traceId: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  status: WorkflowTraceStatus;
+  appCategories: string[];
+  strategiesUsed: WorkflowStrategy[];
+  steps: WorkflowTraceStep[];
+  checkpoints: WorkflowCheckpoint[];
+  requiredGrants: string[];
+  safetyNotes: string[];
+  summary?: string;
+  sessionId?: string;
+  stoppedAt?: string;
+  archivedAt?: string;
+  truncated?: boolean;
+  droppedStepCount?: number;
+}
+
+export interface WorkflowSkillParameter {
+  name: string;
+  type: "string" | "number" | "boolean" | "json";
+  required: boolean;
+  sensitive: boolean;
+  description?: string;
+  usedByStepIds: string[];
+}
+
+export interface WorkflowSkillStep {
+  stepId: string;
+  tool: string;
+  strategy: WorkflowStrategy;
+  actionType: WorkflowStepAction;
+  riskLevel: RiskLevel;
+  inputSummary: string;
+  checkpointIds: string[];
+  requiredGrantIds: string[];
+  requiresConfirmation: boolean;
+  blocked: boolean;
+  blockedReason?: string;
+}
+
+export interface WorkflowSkill {
+  skillId: string;
+  name: string;
+  description: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  status: WorkflowSkillStatus;
+  supportedStrategies: WorkflowStrategy[];
+  appCategories: string[];
+  parameters: WorkflowSkillParameter[];
+  steps: WorkflowSkillStep[];
+  checkpoints: WorkflowCheckpoint[];
+  requiredGrants: string[];
+  safetyRestrictions: string[];
+  blockedActions: string[];
+  sourceTraceId: string;
+  archivedAt?: string;
+}
+
+export interface WorkflowSkillDryRunResult {
+  skillId: string;
+  version: number;
+  executable: false;
+  requiredGrants: string[];
+  missingGrantIds: string[];
+  steps: WorkflowSkillStep[];
+  blockedSteps: WorkflowSkillStep[];
+  confirmationStepIds: string[];
+  safetyRestrictions: string[];
+  missingParameters: string[];
 }
 
 export type ConfirmationStatus =

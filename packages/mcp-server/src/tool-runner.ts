@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { randomUUID } from "node:crypto";
 import type {
   AgentHostConfig,
   AuditLogEntry,
@@ -8,9 +9,11 @@ import type {
   CapabilityRegistrySnapshot,
   PolicyProfile,
   RiskLevel,
-  ToolResult
+  ToolResult,
+  WorkflowCheckpoint,
+  WorkflowTraceStep
 } from "@agenthost/core";
-import { evaluateSafety, summarizeToolResult, toolFailure } from "@agenthost/core";
+import { evaluateSafety, redactWorkflowSummary, summarizeToolResult, toolFailure, workflowActionForTool, workflowStrategyForTool } from "@agenthost/core";
 import type { z } from "zod";
 import type { GrantStore } from "./grants.js";
 
@@ -21,6 +24,7 @@ export interface ToolExecutionContext {
   registry: CapabilityRegistrySnapshot;
   logger: AuditLogger;
   grants: GrantStore;
+  workflowTrace?: { capture(event: { sessionId: string; step: WorkflowTraceStep }): Promise<void> };
 }
 
 export interface ToolExecutionRuntime {
@@ -126,6 +130,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
 ): Promise<ToolResult<TData>> {
   const start = performance.now();
   let result: ToolResult<TData>;
+  let safetyDecision: SafetyDecision | undefined;
   const parsed = definition.inputSchema.safeParse(rawInput ?? {});
 
   if (!parsed.success) {
@@ -150,7 +155,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
           tool: definition.name,
           actionType: definition.safety.actionType
         };
-        const safetyDecision = evaluateSafety(safetyInput, context.policy, {
+        safetyDecision = evaluateSafety(safetyInput, context.policy, {
           agentHostDir: context.config.agentHostDir,
           grants: context.grants.listActiveGrants()
         });
@@ -207,5 +212,43 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
     : definition.inputSummary;
   const outputSummary = definition.auditOutputSummary?.(result);
   await context.logger.log(createAuditLogEntry(result, context, inputSummary, durationMs, outputSummary));
+  if (context.workflowTrace !== undefined && !definition.name.startsWith("workflow.")) {
+    const grants = result.grantDecision;
+    const safeOutput = outputSummary === undefined
+      ? (result.ok ? "Operation completed; result content intentionally omitted from trace." : `Operation failed: ${result.error?.code ?? "tool_failed"}.`)
+      : outputSummary;
+    const checkpointResult: WorkflowCheckpoint | undefined = definition.name === "browser.wait_for_state" || definition.name === "shell.run_safe"
+      ? {
+          checkpointId: `checkpoint_${randomUUID()}`,
+          kind: definition.name === "browser.wait_for_state" ? "browser_element_exists" : "command_succeeded",
+          expectationSummary: definition.name === "browser.wait_for_state" ? "Requested browser state becomes available." : "Safe command completes successfully.",
+          status: result.ok ? "passed" : "failed",
+          resultSummary: result.ok ? "Checkpoint completed." : `Checkpoint failed: ${result.error?.code ?? "tool_failed"}.`,
+          checkedAt: new Date().toISOString(), reusable: true
+        }
+      : undefined;
+    const step: WorkflowTraceStep = {
+      stepId: `step_${randomUUID()}`,
+      timestamp: new Date().toISOString(),
+      tool: definition.name,
+      strategy: workflowStrategyForTool(definition.name),
+      actionType: workflowActionForTool(definition.name),
+      riskLevel: result.riskLevel,
+      inputSummary: redactWorkflowSummary(inputSummary),
+      outputSummary: redactWorkflowSummary(safeOutput),
+      preview: result.preview === true,
+      ok: result.ok,
+      ...(result.error === null ? {} : { errorSummary: result.error.code }),
+      ...(checkpointResult === undefined ? {} : { checkpointResult }),
+      ...(grants === undefined ? {} : { requiredGrantIds: [...grants.allowedByGrantIds] }),
+      ...(safetyDecision === undefined ? {} : { safetyDecision: {
+        allowed: safetyDecision.allowed, blocked: safetyDecision.blocked, guideOnly: safetyDecision.guideOnly,
+        matchedRules: safetyDecision.matchedRules.map(redactWorkflowSummary), requiresDryRun: safetyDecision.grantDecision.requiresDryRun,
+        requiresConfirmationToken: safetyDecision.grantDecision.requiresConfirmationToken, requiresApproval: safetyDecision.grantDecision.requiresApproval,
+        requiresExactTarget: safetyDecision.grantDecision.requiresExactTarget
+      } })
+    };
+    try { await context.workflowTrace.capture({ sessionId: context.sessionId, step }); } catch { /* Trace capture never changes original tool result. */ }
+  }
   return result;
 }

@@ -41,6 +41,7 @@ import type { RunSafeCommandInput } from "@agenthost/os-linux";
 import type { ConfirmationManager } from "./confirmation.js";
 import type { ForgeStore } from "./forge-store.js";
 import type { GrantStore } from "./grants.js";
+import type { WorkflowStore } from "./workflow-store.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -139,6 +140,7 @@ export interface AgentHostMcpContext {
   confirmations: ConfirmationManager;
   grants: GrantStore;
   forge: ForgeStore;
+  workflowTrace?: WorkflowStore;
   browser?: BrowserBridgeAdapter;
   linux: LinuxAutomation;
 }

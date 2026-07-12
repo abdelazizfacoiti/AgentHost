@@ -43,6 +43,16 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
 
   for (const capability of [
+    { name: "workflow.trace_start", riskLevel: "low" as const, description: "Starts explicit local redacted workflow tracing for this MCP session." },
+    { name: "workflow.trace_stop", riskLevel: "low" as const, description: "Stops and finalizes one redacted local workflow trace." },
+    { name: "workflow.trace_get", riskLevel: "observe" as const, description: "Returns one redacted workflow trace." },
+    { name: "workflow.trace_list", riskLevel: "observe" as const, description: "Lists redacted local workflow traces." },
+    { name: "workflow.trace_archive", riskLevel: "low" as const, description: "Archives one stopped redacted workflow trace." },
+    { name: "workflow.skill_save_from_trace", riskLevel: "low" as const, description: "Creates a draft reusable workflow skill from a stopped redacted trace." },
+    { name: "workflow.skill_list", riskLevel: "observe" as const, description: "Lists local workflow skill metadata." },
+    { name: "workflow.skill_get", riskLevel: "observe" as const, description: "Returns one local workflow skill." },
+    { name: "workflow.skill_archive", riskLevel: "low" as const, description: "Archives one workflow skill without deleting it." },
+    { name: "workflow.skill_run_dryrun", riskLevel: "low" as const, description: "Previews a workflow skill without executing any workflow action." },
     { name: "browser.find_element", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Finds bounded, redacted browser elements through the paired extension." },
     { name: "browser.click_element", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated click of one revalidated safe browser element." },
     { name: "browser.fill_text", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated draft-only text fill of one safe browser field." },

@@ -12,6 +12,16 @@ describe("CapabilityRegistry", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
+      "workflow.trace_start",
+      "workflow.trace_stop",
+      "workflow.trace_get",
+      "workflow.trace_list",
+      "workflow.trace_archive",
+      "workflow.skill_save_from_trace",
+      "workflow.skill_list",
+      "workflow.skill_get",
+      "workflow.skill_archive",
+      "workflow.skill_run_dryrun",
       "browser.find_element",
       "browser.click_element",
       "browser.fill_text",

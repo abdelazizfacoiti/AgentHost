@@ -84,6 +84,17 @@ npm run smoke:mcp
 
 The smoke test sets `AGENTHOST_HOME=.agenthost/smoke` so it writes only inside the ignored local workspace folder.
 
+## Workflow traces and skills (Phase 27)
+
+Start tracing explicitly with `workflow.trace_start`, then use normal AgentHost tools. While active, AgentHost stores only bounded redacted summaries under:
+
+```text
+~/.agenthost/workflows/traces/
+~/.agenthost/workflows/skills/
+```
+
+Stop a trace with `workflow.trace_stop`, save its safe generic plan using `workflow.skill_save_from_trace`, and inspect it with `workflow.skill_run_dryrun`. Skills are draft, preview-only metadata in this phase: they cannot execute tools, create confirmation tokens, send, submit, upload, or bypass safety/grants.
+
 For a raw stdio protocol check, pipe JSON-RPC messages into the built server:
 
 ```bash
