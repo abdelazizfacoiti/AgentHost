@@ -67,6 +67,8 @@ import { createShellTools } from "./tools/shell.js";
 import { createSystemTools } from "./tools/system.js";
 import { createWindowTools } from "./tools/window.js";
 import { createBrowserTools } from "./tools/browser.js";
+import { createWorkflowTools } from "./tools/workflow.js";
+import { WorkflowStore } from "./workflow-store.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -142,6 +144,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const confirmations = new ConfirmationManager();
   const forge = new ForgeStore(config.agentHostDir);
   await forge.ensureStructure();
+  const workflowTrace = new WorkflowStore(config.agentHostDir);
+  await workflowTrace.ensureStructure();
   const grants = new GrantStore({
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
@@ -195,6 +199,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     confirmations,
     grants,
     forge,
+    workflowTrace,
     browser,
     linux
   };
@@ -203,6 +208,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createForgeTools(),
     ...createForgeSandboxTools(),
     ...createBrowserTools(),
+    ...createWorkflowTools(),
     ...createAdapterTools(),
     ...createBlenderTools(),
     ...createAppTools(),

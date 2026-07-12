@@ -11,3 +11,5 @@ export * from "./result.js";
 export * from "./runtime-grants.js";
 export * from "./safety/index.js";
 export * from "./types.js";
+export * from "./workflow.js";
+export * from "./workflow-redaction.js";
