@@ -66,6 +66,16 @@ export type WorkflowCheckpointKind = (typeof WORKFLOW_CHECKPOINT_KINDS)[number];
 export const DATA_SENSITIVITIES = ["none", "low", "sensitive", "secret"] as const;
 export type DataSensitivity = (typeof DATA_SENSITIVITIES)[number];
 
+export const VISION_MODES = ["ocr", "layout", "target_search"] as const;
+export type VisionMode = (typeof VISION_MODES)[number];
+export type VisionMatchMode = "exact" | "contains" | "fuzzy";
+export interface VisionBounds { x: number; y: number; width: number; height: number; }
+export interface VisionPoint { x: number; y: number; }
+export interface VisionTextItem { id: string; text: string; redactedText: string; bounds: VisionBounds; center: VisionPoint; confidence: number; kind: "text"; page: number; block: number; paragraph: number; line: number; redacted: boolean; }
+export interface VisionTextGroup { id: string; text: string; bounds: VisionBounds; center: VisionPoint; confidence: number; matchedTextIds: string[]; }
+export interface VisionTargetCandidate { candidateId: string; label: string; kind: "text" | "button_candidate" | "input_candidate" | "region"; bounds: VisionBounds; center: VisionPoint; coordinateSpace: "image"; confidence: number; reason: string; matchedTextIds: string[]; riskHint: "normal" | "medium" | "high"; }
+export interface VisionGroundingResult { supported: boolean; backend: "tesseract" | "unavailable"; mode: VisionMode; image?: { width: number; height: number; source: "agenthost_screenshot" | "agenthost_output" | "granted_path"; basename: string; pathRedacted: true; }; textItems: VisionTextItem[]; groups: VisionTextGroup[]; targetCandidates: VisionTargetCandidate[]; warnings: string[]; redactionCounts: Record<string, number>; truncated: boolean; reason: string; }
+
 export const TOOL_FORGE_MANIFEST_KINDS = ["tool", "adapter", "skill", "workflow"] as const;
 export type ToolForgeManifestKind = (typeof TOOL_FORGE_MANIFEST_KINDS)[number];
 

@@ -12,6 +12,9 @@ describe("CapabilityRegistry", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
+      "vision.analyze_image",
+      "vision.find_text",
+      "vision.find_target",
       "workflow.trace_start",
       "workflow.trace_stop",
       "workflow.trace_get",

@@ -46,6 +46,7 @@ import {
   setLinuxAccessibilityValue,
   typeLinuxText,
   writeLinuxFile
+  ,analyzeLinuxImage
 } from "@agenthost/os-linux";
 import { BrowserBridgeServer, createBrowserAdapter, type BrowserBridgeAdapter } from "@agenthost/app-browser";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
@@ -68,6 +69,7 @@ import { createSystemTools } from "./tools/system.js";
 import { createWindowTools } from "./tools/window.js";
 import { createBrowserTools } from "./tools/browser.js";
 import { createWorkflowTools } from "./tools/workflow.js";
+import { createVisionTools } from "./tools/vision.js";
 import { WorkflowStore } from "./workflow-store.js";
 
 const SERVER_VERSION = "0.1.0";
@@ -179,6 +181,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       click: (input) => clickLinuxDesktop(input, { agentHostDir: config.agentHostDir }),
       pointer: (input) => performLinuxPointerAction(input, { agentHostDir: config.agentHostDir }),
       checkSandboxSupport: () => probeLinuxSandboxSupport({ env: process.env }),
+      analyzeImage: (input) => analyzeLinuxImage(input, { env: process.env }),
       getAccessibilityTree: (input) => getLinuxAccessibilityTree(input, { agentHostDir: config.agentHostDir }),
       findAccessibilityElement: (input) => findLinuxAccessibilityElements(input, { agentHostDir: config.agentHostDir }),
       inspectAccessibilityElement: (input) =>
@@ -209,6 +212,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createForgeSandboxTools(),
     ...createBrowserTools(),
     ...createWorkflowTools(),
+    ...createVisionTools(),
     ...createAdapterTools(),
     ...createBlenderTools(),
     ...createAppTools(),
