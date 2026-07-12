@@ -28,6 +28,8 @@ import {
   focusLinuxAccessibilityElement,
   focusLinuxWindow,
   getLinuxActiveWindow,
+  getLinuxScreenGeometry,
+  getLinuxActiveWindowBounds,
   getLinuxAccessibilityTree,
   getLinuxAppStrategy,
   getLinuxDesktopCapabilities,
@@ -71,6 +73,7 @@ import { createBrowserTools } from "./tools/browser.js";
 import { createWorkflowTools } from "./tools/workflow.js";
 import { createVisionTools } from "./tools/vision.js";
 import { WorkflowStore } from "./workflow-store.js";
+import { VisionEvidenceStore } from "./vision-evidence.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -148,6 +151,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   await forge.ensureStructure();
   const workflowTrace = new WorkflowStore(config.agentHostDir);
   await workflowTrace.ensureStructure();
+  const visionEvidence = new VisionEvidenceStore();
   const grants = new GrantStore({
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
@@ -173,6 +177,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       ensureDir: (input) => ensureLinuxDir(input, { agentHostDir: config.agentHostDir }),
       getDesktopCapabilities: () => getLinuxDesktopCapabilities({ agentHostDir: config.agentHostDir }),
       getActiveWindow: () => getLinuxActiveWindow({ agentHostDir: config.agentHostDir }),
+      getScreenGeometry: () => getLinuxScreenGeometry({ agentHostDir: config.agentHostDir }),
+      getActiveWindowBounds: () => getLinuxActiveWindowBounds({ agentHostDir: config.agentHostDir }),
       screenshot: (input) => captureLinuxScreenshot(input, { agentHostDir: config.agentHostDir }),
       listWindows: (input) => listLinuxWindows(input, { agentHostDir: config.agentHostDir }),
       focusWindow: (input) => focusLinuxWindow(input, { agentHostDir: config.agentHostDir }),
@@ -203,6 +209,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     grants,
     forge,
     workflowTrace,
+    visionEvidence,
     browser,
     linux
   };

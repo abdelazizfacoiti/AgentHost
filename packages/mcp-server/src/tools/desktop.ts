@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   evaluateSafety,
   normalizePathForPolicy,
@@ -129,6 +130,7 @@ function screenshotPath(input: ScreenshotInput, context: AgentHostMcpContext): s
   const filename = input.filename ?? `screenshot-${context.sessionId}-${Date.now()}.png`;
   return normalizePathForPolicy(path.join(outputDir, filename), { agentHostDir: context.config.agentHostDir });
 }
+async function pngSize(filePath: string): Promise<{ width: number; height: number } | undefined> { try { const raw = await readFile(filePath); if (raw.length < 24 || raw.toString("ascii", 12, 16) !== "IHDR") return undefined; return { width: raw.readUInt32BE(16), height: raw.readUInt32BE(20) }; } catch { return undefined; } }
 
 function safetyFailure(tool: string, safety: ReturnType<typeof evaluateSafety>): ToolResult<never> {
   return toolFailure({
@@ -357,16 +359,14 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return safetyFailure("desktop.screenshot", postResolutionSafety);
       }
 
+      const data = await context.linux.screenshot({ path: outputPath, ...(input.includeActiveWindowOnly === undefined ? {} : { includeActiveWindowOnly: input.includeActiveWindowOnly }) });
+      if (data.supported && data.path !== undefined && context.visionEvidence !== undefined) { const size = await pngSize(data.path); const current = await context.linux.getActiveWindow(); const display = await context.linux.getScreenGeometry?.(); const window = await context.linux.getActiveWindowBounds?.(); if (size !== undefined && current.activeWindow !== undefined) { const evidence = await context.visionEvidence.saveScreenshot({ sessionId: context.sessionId, imagePath: data.path, captureKind: input.includeActiveWindowOnly === true ? "active_window" : "full_screen", imageWidth: size.width, imageHeight: size.height, ...(display?.bounds === undefined ? {} : { displayBounds: display.bounds }), ...(window?.bounds === undefined ? {} : { windowBounds: window.bounds }), activeWindow: current.activeWindow }); data.screenshotMetadata = { screenshotId: evidence.screenshotId, capturedAt: new Date(evidence.capturedAt).toISOString(), captureKind: evidence.captureKind, imageWidth: size.width, imageHeight: size.height, geometryAvailable: evidence.displayBounds !== undefined && (evidence.captureKind === "full_screen" || evidence.windowBounds !== undefined) }; } }
+
       return toolSuccess({
         tool: "desktop.screenshot",
         riskLevel: "medium",
         strategy: "gui_control",
-        data: await context.linux.screenshot({
-          path: outputPath,
-          ...(input.includeActiveWindowOnly === undefined
-            ? {}
-            : { includeActiveWindowOnly: input.includeActiveWindowOnly })
-        }),
+        data,
         observations: ["Saved a screenshot locally under an approved AgentHost folder."]
       });
     }

@@ -811,6 +811,7 @@ export interface DesktopScreenshotResult {
   path?: string;
   bytesWritten?: number;
   activeWindow?: DesktopWindowContext;
+  screenshotMetadata?: { screenshotId: string; capturedAt: string; captureKind: "full_screen" | "active_window"; imageWidth: number; imageHeight: number; geometryAvailable: boolean };
   reason: string;
 }
 
