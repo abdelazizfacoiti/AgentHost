@@ -12,4 +12,14 @@ describe("BrowserBridgeServer", () => {
     expect(bridge.status()).toMatchObject({ enabled: false, connected: false });
     await bridge.close();
   });
+
+  it("reports setup state and rotates pairing without exposing it in status", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-browser-"));
+    const bridge = new BrowserBridgeServer({ enabled: true, port: 0, pairingTokenFile: path.join(root, "pairing-token") });
+    expect(bridge.status()).toMatchObject({ enabled: true, state: "bridge_unavailable", tokenExists: false });
+    expect(JSON.stringify(bridge.status())).not.toContain("AH-");
+    const first = await bridge.resetPairing(); const second = await bridge.resetPairing();
+    expect(first).not.toBe(second);
+    await bridge.close();
+  });
 });

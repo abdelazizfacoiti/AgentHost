@@ -28,6 +28,8 @@ Firefox/Chromium WebExtension bridge is disabled by default, binds only to `127.
 
 Fixed commands expose sanitized tabs, URLs, page context/text, element discovery, safe actions, and state waits. There is no arbitrary JavaScript, CDP/debugger, cookies, storage, history, webRequest, password API, upload, submit, send, or form command.
 
+Setup diagnostics return state/error codes, prepared paths, timestamps, and recovery steps only. They never return browser URLs, page data, session tokens, pairing tokens, cookies, or storage. Pairing-token rotation/reset is dry-run and confirmation gated; only explicit token generation returns raw token once.
+
 Browser `elementId` values are opaque, short-lived, tab/page-bound references. Actions require a unique reference, revalidate URL/session, visibility, enabled state, identity, and ambiguity. Direct selectors cannot act. Stale or changed references fail.
 
 ## Browser content and action policy

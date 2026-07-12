@@ -40,6 +40,8 @@ AgentHost is a universal local workstation runtime. Provider names such as Gmail
 
 Current maintenance phase. Keep product, architecture, MCP, security, and roadmap documents synchronized with capability registry, package layout, runtime limits, browser bridge behavior, vision evidence, checkpoint safety, and workflow-template behavior.
 
+Phase 31.5 also hardens browser extension packaging, setup diagnostics, pairing recovery, stable unpacked paths, and Firefox temporary-add-on guidance. No browser action capability expands.
+
 ## Recommended next phases
 
 ### Phase 32 — Local Review/Edit Lifecycle for Workflow Skill Checkpoint Templates

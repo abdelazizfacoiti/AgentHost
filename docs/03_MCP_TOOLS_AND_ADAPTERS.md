@@ -46,6 +46,8 @@ Pointer tools require active-window context, bounds checks, safety classificatio
 
 ```text
 browser.detect, browser.list_tabs, browser.get_active_tab, browser.current_url
+browser.setup_status, browser.diagnose_bridge, browser.generate_pairing_token
+browser.reset_pairing, browser.get_extension_install_instructions, browser.verify_pairing
 browser.open_url, browser.get_page_context, browser.extract_text
 browser.find_element, browser.click_element, browser.fill_text
 browser.focus_element, browser.wait_for_state, browser.get_form_state
@@ -53,6 +55,8 @@ browser.get_selected_text
 ```
 
 Bridge is disabled by default. Fixed commands run through paired `127.0.0.1` WebExtension. `browser.find_element` returns bounded metadata and short-lived opaque `elementId`. Click/fill/focus require that reference; direct selectors cannot execute actions. References are tab/page-bound, revalidated, and rejected when stale or ambiguous. No `browser.click_selector` or `browser.fill_form` exists.
+
+Setup tools report prepared bundle path, manifest state, bridge state, last seen time, and safe recovery instructions. Token generation/reset requires dry-run and confirmation. Only explicit `browser.generate_pairing_token` returns a token once; logs never contain it.
 
 `browser.open_url` requires dry-run and exact confirmation. Content is redacted and sensitivity-gated. No send, submit, upload, download, cookie, storage, password, debugger, or arbitrary script command exists.
 
