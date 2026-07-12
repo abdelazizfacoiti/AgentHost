@@ -1,423 +1,79 @@
 # AgentHost System Architecture
 
-## 1. Architecture overview
-
-AgentHost is built around a simple idea:
-
-> The AI agent plans. AgentHost executes through safe, structured local tools.
+## Runtime shape
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│ AI agent / Codex                                             │
-│ - understands prompt                                         │
-│ - plans workflow                                             │
-│ - chooses tools                                              │
-│ - writes scripts if needed                                   │
-│ - validates results                                          │
-└─────────────────────────────┬────────────────────────────────┘
-                              │ MCP
-                              ▼
-┌──────────────────────────────────────────────────────────────┐
-│ AgentHost MCP Server                                         │
-│ - exposes tools                                              │
-│ - validates schemas                                          │
-│ - runs safety preflight                                      │
-│ - supports dry-run previews                                  │
-│ - verifies confirmation tokens                               │
-│ - returns structured ToolResult objects                      │
-│ - will host future Tool Forge workflow gates                 │
-└─────────────────────────────┬────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────┐
-│ Safety Kernel / Core                                         │
-│ - types                                                      │
-│ - config                                                     │
-│ - policy profiles                                            │
-│ - risk classification                                        │
-│ - app/data sensitivity classification                        │
-│ - path and shell safety                                      │
-│ - redaction                                                  │
-│ - preview result format                                      │
-│ - confirmation metadata types                                │
-│ - audit logger                                               │
-│ - capability registry                                        │
-└───────────────┬──────────────────────────────┬───────────────┘
-                │                              │
-                ▼                              ▼
-┌──────────────────────────────┐   ┌───────────────────────────┐
-│ Universal Tool Layer          │   │ App Adapter Layer          │
-│ - system                      │   │ - optional adapters        │
-│ - apps                        │   │ - Blender adapter          │
-│ - shell                       │   │ - browser later            │
-│ - files                       │   │ - Gmail later              │
-│ - guide                       │   │ - VS Code later            │
-│ - desktop                     │   │ - user-generated later     │
-│ - windows                     │   │                           │
-│ - accessibility               │   │                           │
-│ - Tool Forge later            │   │                           │
-└───────────────┬──────────────┘   └────────────┬──────────────┘
-                │                               │
-                ▼                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│ OS Adapter Layer                                             │
-│ - Linux first                                                │
-│ - X11 desktop backend                                        │
-│ - Wayland capability detection / clean unsupported results   │
-│ - Windows later                                              │
-│ - macOS later                                                │
-└─────────────────────────────┬────────────────────────────────┘
-                              ▼
-┌──────────────────────────────────────────────────────────────┐
-│ Real computer                                                │
-│ - desktop apps                                               │
-│ - shell                                                      │
-│ - files                                                      │
-│ - browser                                                    │
-│ - OS windows                                                 │
-│ - accessibility tree                                         │
-└──────────────────────────────────────────────────────────────┘
+Codex / agent -> MCP stdio server -> schemas, risk, policy, grants
+-> dry-run/confirmation -> adapters, browser bridge, OS tools, Forge runtime
+-> structured result and redacted audit record
 ```
 
-## 2. Package responsibilities
+Core is app-agnostic. App-specific and Linux-specific implementations stay outside `packages/core`.
+
+## Packages and modules
 
 ### `packages/core`
 
-App-agnostic shared product logic.
-
-Responsibilities:
-
-- shared types
-- `ToolResult`
-- `RiskLevel`, `ApprovalStatus`, `AutomationStrategy`
-- policy profile types
-- capability types
-- preview/confirmation result types
-- redaction
-- safety classification
-- audit log data shapes
-- capability registry
-
-Rule:
-
-> `core` must not contain Linux-specific or app-specific implementation.
+Shared types and safety primitives: policy/grants, risk and app sensitivity, redaction, logging shapes, capability registry, Forge manifest/runtime types, vision types, workflow traces/skills, checkpoints, checkpoint-template validation, and parameter binding.
 
 ### `packages/mcp-server`
 
-MCP runtime and tool orchestration.
+MCP server, context, tool runner, confirmation manager, audit integration, policy/grant wiring, Forge store/tools, runtime subprocess/sandbox modules, vision evidence store, workflow store, browser/desktop/vision/checkpoint/workflow tools.
 
-Responsibilities:
-
-- stdio MCP server
-- tool schemas
-- tool runner
-- safety preflight integration
-- dry-run preview path
-- confirmation manager
-- confirmation token verification
-- tool result construction
-- JSONL logging
-- adapter runtime wiring
-- future Tool Forge request/validation flow
-
-Important Phase 11 component:
-
-```text
-packages/mcp-server/src/confirmation.ts
-```
-
-This manages in-memory, session-bound, expiring, single-use confirmation tokens.
+Important modules include `runtime/forge-subprocess.ts`, `runtime/forge-sandbox.ts`, `vision-evidence.ts`, `workflow-store.ts`, and checkpoint/template tool modules.
 
 ### `packages/os-linux`
 
-Linux-specific implementation.
+Linux system/app/shell/file/window/accessibility/desktop implementations, X11 backends, Wayland detection, screenshots, local Tesseract OCR, sandbox-support probe, and clean unsupported results.
 
-Responsibilities:
+### `packages/app-browser`
 
-- system detection
-- dependency checks
-- shell execution
-- file operations
-- app detection/opening
-- X11 desktop capability detection
-- active window inspection
-- screenshot backend
-- window list/focus
-- AT-SPI accessibility tree and element operations
-- clean unsupported results for Wayland where safe backends are unavailable
+Firefox/Chromium unpacked WebExtension and localhost bridge. Fixed tab/DOM commands, sanitized page context/text, short-lived element references, element policy, URL sensitivity, and redaction. No arbitrary script, cookies, storage, debugger, or communication API.
 
 ### `packages/app-blender`
 
-Optional Blender adapter.
+Optional app adapter; it does not shape core architecture.
 
-Responsibilities:
-
-- `createBlenderAdapter`
-- `blender.run_python`
-- background Blender execution
-- output validation
-- coffee cup demo
-
-Rule:
-
-> Blender remains an optional adapter and must not shape the core architecture.
-
-### Future `packages/app-browser`
-
-Browser adapter.
-
-Responsibilities later:
-
-- controlled browser sessions
-- DOM reading
-- URL opening
-- form preparation
-- safe browser actions with preview/confirmation
-- never submit sensitive forms without approval
-
-### Future `packages/app-gmail`
-
-Gmail adapter.
-
-Responsibilities later:
-
-- official Gmail API / OAuth
-- read-only email summaries first
-- no sending/deleting/archiving in MVP
-- strict private-data handling
-
-### Future `apps/control-room`
-
-Desktop/tray app.
-
-Responsibilities later:
-
-- MCP server lifecycle
-- connected agents
-- approval queue
-- confirmation preview cards
-- logs viewer
-- permissions and profiles
-- emergency stop
-- capability viewer
-- installed tools/adapters/skills
-
-### Future `packages/tool-forge`
-
-Tool-generation safety layer for later phases.
-
-Responsibilities later:
-
-- scaffold new tool packages
-- validate `agenthost.tool.json` manifests
-- enforce declared permissions
-- run generated tool tests
-- gate registration on user approval
-- keep generated tools inside the same safety, preview, and confirmation model
-
-## 3. Tool execution flow
-
-Every meaningful tool follows:
+## Tool request flow
 
 ```text
-MCP tool request
-  ↓
-schema validation
-  ↓
-risk classification
-  ↓
-policy check
-  ↓
-dry-run preview? ── yes ─→ target resolution if applicable
-  │                       ↓
-  │                   preview result
-  │                       ↓
-  │                   optional confirmation token
-  │                       ↓
-  │                   audit log
-  │
-  no
-  ↓
-confirmation token required? ── yes ─→ verify token
-  │                                  ↓
-  │                             reject if mismatch/expired/reused
-  │
-  ↓
-approval if needed
-  ↓
-execute through tool/adapter/OS layer
-  ↓
-result validation/postcondition check
-  ↓
-audit log
-  ↓
-ToolResult returned to Codex
+MCP request -> schema -> risk/sensitivity -> policy/grants
+-> dry-run -> exact confirmation -> safe backend execution
+-> result/checkpoint validation -> redacted audit -> ToolResult
 ```
 
-## 4. Confirmation token architecture
+Browser content tools classify sanitized tab metadata before requesting content. Element actions require a fresh, unique, tab-bound, short-lived `elementId`, then revalidate page, visibility, enabled state, identity, and ambiguity.
 
-Phase 11 adds a confirmation manager in the MCP runtime/session layer.
+Vision never acts. Trusted screenshot evidence is session-bound, hash-checked, and valid for 10 seconds. Handoff can only produce a `desktop.click` dry-run suggestion.
 
-Tokens are:
+## Forge runtime boundary
 
-- in-memory
-- session-bound
-- short-lived, currently 3 minutes by default
-- single-use
-- bound to tool name
-- bound to normalized input fingerprint
-- bound to target fingerprint when applicable
-- bound to risk level
-- not allowed to contain raw secrets
-- not logged raw
+Generated artifacts are inert metadata until registration and runtime eligibility pass. Runtime uses only `runtime/handler.json` bounded JSON operations through a fixed child process. It does not import generated code. Runtime grants, limits, environment allowlists, output folders, timeouts, and optional OS sandbox backend are recorded per run.
 
-Execution with a token still runs safety preflight. Tokens do not bypass safety or Codex approval.
+Preferred sandbox backend: bubblewrap/bwrap, then firejail, then safe unshare, with fixed-runner fallback in `auto` mode. No network, GUI/DBus, secrets, broad filesystem, shell, or arbitrary code.
 
-## 5. Dry-run preview architecture
+## Workflow/checkpoint boundary
 
-Phase 10 added `dryRun: true` to state-changing tools instead of a separate `action.preview` tool.
+Workflow store persists redacted records under `workflows/traces` and `workflows/skills`. Skills contain metadata, blocked actions, grants, steps, and optional reviewable checkpoint templates. Binding uses only declared `{{parameterName}}` interpolation. Skill tools never execute workflow actions. Checkpoint tools observe state only.
 
-Dry-run previews:
-
-- never execute side effects
-- still validate schema
-- still run safety preflight
-- resolve targets when possible
-- return whether execution would happen
-- indicate whether action would be blocked
-- may mint a confirmation token if exact, safe, and unambiguous
-
-## 6. Universal automation strategy
-
-Strategy order remains:
-
-1. app-specific adapter
-2. official API/plugin API
-3. CLI/script interface
-4. browser automation
-5. accessibility
-6. GUI screenshot/click/type fallback
-7. guide mode
-
-## 7. Current repository structure
-
-Representative structure after Phase 11:
-
-```text
-agenthost/
-  package.json
-  tsconfig.json
-  AGENTS.md
-  docs/
-
-  packages/
-    core/
-      src/
-        types.ts
-        result.ts
-        capabilities.ts
-        safety/
-        logging/
-        config/
-
-    mcp-server/
-      src/
-        index.ts
-        server.ts
-        context.ts
-        tool-runner.ts
-        confirmation.ts
-        tools/
-          system.ts
-          app.ts
-          shell.ts
-          file.ts
-          guide.ts
-          adapter.ts
-          blender.ts
-          desktop.ts
-          window.ts
-          accessibility.ts
-          preview.ts
-
-    os-linux/
-      src/
-        system.ts
-        shell.ts
-        files.ts
-        apps.ts
-        desktop.ts
-        accessibility.ts
-
-    app-blender/
-      src/
-        adapter.ts
-        runner.ts
-        python-safety.ts
-        coffee-cup-demo.ts
-```
-
-Future structure should add:
-
-```text
-packages/tool-forge/
-packages/skills/
-packages/app-browser/
-packages/app-gmail/
-apps/control-room/
-```
-
-## 8. Local data folder
-
-Default local folder:
-
-```text
-~/.agenthost/
-```
-
-Typical structure:
+## Local data layout
 
 ```text
 ~/.agenthost/
   config.json
   logs/
-    agenthost.jsonl
   outputs/
   screenshots/
-  tmp/
-  skills/
-  traces/
-  policies/
-  tools/
-  manifests/
+  forge/
+    manifests/ artifacts/ registrations/ runtime-runs/
+  workflows/
+    traces/ skills/
+  browser/
+    pairing-token
 ```
 
-## 9. Cross-platform design rule
+Checkpoint-template review metadata lives inside skill records; separate review UI/folder is future work.
 
-The core must never assume Linux.
+## Platform safety
 
-Use OS adapters:
-
-```ts
-interface OSAdapter {
-  getSystemInfo(): Promise<SystemInfo>;
-  checkDependency(name: string): Promise<DependencyResult>;
-  openApp(input: OpenAppInput): Promise<ToolResult>;
-}
-```
-
-Current implementation is Linux-first. Windows and macOS should be later phases with explicit capability matrices and permission docs.
-
-## 10. Future architecture additions inspired by OpenClaw
-
-AgentHost should adopt these product layers later:
-
-- Control Room UI
-- plugin/tool manifests
-- skill registry
-- memory files
-- sub-agent/task runner with restricted permissions
-- optional channel/mobile approval gateway
-- loop detector and circuit breaker
-
-AgentHost should not copy OpenClaw’s chat-first positioning. It should remain a workstation capability platform for coding agents.
+Linux/X11 is primary for pointer control. Wayland reports support status without unsafe fallback. Browser bridge is localhost-only and disabled until explicitly configured and paired. No public HTTP server is enabled by default.
