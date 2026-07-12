@@ -43,6 +43,8 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
 
   for (const capability of [
+    { name: "checkpoint.evaluate", riskLevel: "low" as const, description: "Evaluates read-only semantic post-action checkpoints." },
+    { name: "checkpoint.wait_for", riskLevel: "low" as const, description: "Polls read-only semantic checkpoints with bounded timeout." },
     { name: "vision.prepare_pointer_action", riskLevel: "medium" as const, strategy: "gui_control" as const, description: "Prepares validated desktop.click dry-run suggestion from fresh trusted screenshot evidence." },
     { name: "vision.analyze_image", riskLevel: "low" as const, strategy: "gui_control" as const, description: "Runs local redacted OCR on an approved image without desktop actions." },
     { name: "vision.find_text", riskLevel: "low" as const, strategy: "gui_control" as const, description: "Finds redacted local OCR text and image-relative bounds without desktop actions." },

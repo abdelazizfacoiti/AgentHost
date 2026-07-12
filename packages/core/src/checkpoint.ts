@@ -1,0 +1,2 @@
+import type { CheckpointKind, CheckpointStrategy } from "./types.js";
+export function checkpointStrategy(kind: CheckpointKind): CheckpointStrategy { if (kind.startsWith("browser_")) return "browser"; if (kind.startsWith("accessibility_")) return "accessibility"; if (kind.startsWith("vision_")) return "vision"; if (kind.startsWith("file_") || kind === "output_artifact_exists") return "file"; if (kind.startsWith("active_window")) return "desktop"; return "manual"; }

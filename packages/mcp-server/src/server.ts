@@ -72,6 +72,7 @@ import { createWindowTools } from "./tools/window.js";
 import { createBrowserTools } from "./tools/browser.js";
 import { createWorkflowTools } from "./tools/workflow.js";
 import { createVisionTools } from "./tools/vision.js";
+import { createCheckpointTools } from "./tools/checkpoint.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { VisionEvidenceStore } from "./vision-evidence.js";
 
@@ -220,6 +221,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createBrowserTools(),
     ...createWorkflowTools(),
     ...createVisionTools(),
+    ...createCheckpointTools(),
     ...createAdapterTools(),
     ...createBlenderTools(),
     ...createAppTools(),

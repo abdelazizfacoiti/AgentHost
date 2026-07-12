@@ -101,6 +101,10 @@ Stop a trace with `workflow.trace_stop`, save its safe generic plan using `workf
 
 `vision.prepare_pointer_action` accepts only fresh in-session screenshot and target evidence, then returns a `desktop.click` payload with `dryRun:true`. It never calls pointer tools or creates confirmation tokens.
 
+## Semantic checkpoints (Phase 30)
+
+`checkpoint.evaluate` checks bounded read-only browser, accessibility, desktop, file, or manual conditions once. `checkpoint.wait_for` polls those same conditions for at most 30 seconds. Both return redacted summaries only and never click, type, retry an action, create confirmation tokens, or run background loops.
+
 For a raw stdio protocol check, pipe JSON-RPC messages into the built server:
 
 ```bash
