@@ -299,6 +299,33 @@ export interface BrowserTextResult {
   redactionCounts: Record<string, number>;
 }
 
+export type BrowserElementActionKind = "safe_navigation" | "safe_toggle" | "safe_disclosure" | "safe_search" | "text_input" | "message_input" | "form_submit" | "communication_send" | "upload" | "destructive" | "financial" | "authentication" | "captcha" | "password_input" | "unknown";
+export interface BrowserElementSummary {
+  elementId: string;
+  tabId: string;
+  role: string;
+  nameSummary: string;
+  bounds?: { x: number; y: number; width: number; height: number };
+  visible: boolean;
+  enabled: boolean;
+  confidence: number;
+  ambiguous: boolean;
+  actionKind: BrowserElementActionKind;
+  expiresAt: string;
+}
+export interface BrowserFormStateResult {
+  tab: BrowserTabSummary;
+  fields: Array<{ elementId?: string; label: string; type: string; required: boolean; disabled: boolean; valueStatus: "empty" | "filled" | "redacted" }>;
+  submitButtonPresent: boolean;
+  truncated: boolean;
+}
+export interface BrowserCheckpointResult {
+  passed: boolean;
+  actionPerformed: boolean;
+  checks: Array<{ kind: string; passed: boolean; redactedSummary: string }>;
+  durationMs: number;
+}
+
 /** OS isolation preference for the fixed Forge JSON runner. */
 export type ForgeRuntimeSandboxMode = "auto" | "none" | "bubblewrap" | "firejail" | "unshare";
 
