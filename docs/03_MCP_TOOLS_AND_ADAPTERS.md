@@ -1,467 +1,114 @@
 # AgentHost MCP Tools and Adapter Specification
 
-## 1. MCP server goal
+All tools return `ToolResult`. MCP transport is stdio. Browser bridge is a separate fixed, token-authenticated localhost channel, not a public MCP transport.
 
-The AgentHost MCP server exposes local computer capabilities to Codex and other AI agents.
+## Strategy order
 
-The server name should be:
-
-```text
-agenthost
-```
-
-The MVP transport remains:
-
-```text
-stdio
-```
-
-Do not expose a public HTTP server by default.
-
-If HTTP transport is added later, bind only to:
-
-```text
-127.0.0.1
-```
-
-and require pairing/authentication.
-
-## 2. Server instruction
-
-The MCP server should explain itself clearly to Codex:
-
-```text
-AgentHost is a universal local automation host. Prefer app adapters, official APIs, CLI/scripts, browser automation, and accessibility before GUI clicking. Use GUI click/type only as fallback and only when policy allows. For state-changing tools, preview with dryRun:true first, then execute only with a matching confirmation token when required. High-risk actions require approval or are blocked.
-```
-
-## 3. Universal automation strategies
-
-```ts
-type AutomationStrategy =
-  | "app_adapter"
-  | "official_api"
-  | "cli_or_script"
-  | "browser_automation"
-  | "accessibility"
-  | "gui_control"
-  | "guide_only";
-```
-
-Strategy priority:
-
-1. app-specific adapter
+1. app adapter/API
 2. official API/plugin API
-3. CLI/script interface
-4. browser automation
+3. CLI/script
+4. browser DOM
 5. accessibility
-6. GUI fallback
-7. guide mode
+6. screenshot OCR/vision grounding
+7. pointer GUI fallback
+8. guide mode
 
-## 4. Tool result standard
+## Current Phase 31 capabilities
 
-All tools return `ToolResult`.
-
-Phase 10/11 extend normal results with preview and confirmation metadata when relevant.
-
-```ts
-interface ToolResult<T = unknown> {
-  ok: boolean;
-  tool: string;
-  riskLevel: RiskLevel;
-  strategy?: AutomationStrategy;
-  preview?: boolean;
-  confirmation?: {
-    status: "previewGenerated" | "tokenUsed" | "tokenAccepted" | "tokenRejected";
-    used: boolean;
-    accepted: boolean;
-    executed: boolean;
-    reason: string;
-    tokenId?: string;
-    expiresAt?: string;
-  };
-  approval: {
-    required: boolean;
-    status: ApprovalStatus;
-    reason?: string;
-  };
-  data: T | null;
-  observations: string[];
-  error: null | {
-    code: string;
-    message: string;
-    details?: unknown;
-  };
-}
-```
-
-## 5. Current tools by category
-
-### Base tools currently returned by `system.list_capabilities`
-
-These are the tools exposed by the default AgentHost runtime today:
+### System, policy, app, file, shell, guide, adapter
 
 ```text
-accessibility.find_element
-accessibility.focus_element
-accessibility.get_tree
-accessibility.inspect_element
-accessibility.invoke_action
-accessibility.set_value
-adapter.detect_for_app
-adapter.get_capabilities
-adapter.list
-app.detect
-app.get_strategy
-app.list_installed
-app.open
-desktop.click
-desktop.get_active_window
-desktop.get_capabilities
-desktop.hotkey
-desktop.screenshot
-desktop.type_text
-file.ensure_dir
-file.exists
-file.list
-file.read
-file.write
-guide.create_steps
-guide.explain_strategy
+system.get_info, system.list_capabilities, system.check_dependency
+policy.get_profile, policy.list_profiles, policy.list_grants, policy.explain_decision
+app.detect, app.list_installed, app.open, app.get_strategy
+file.write, file.read, file.exists, file.list, file.ensure_dir
 shell.run_safe
-system.check_dependency
-system.get_info
-system.list_capabilities
-window.focus
-window.list
+guide.create_steps, guide.explain_strategy
+adapter.list, adapter.get_capabilities, adapter.detect_for_app
 ```
 
-### System tools
+### Desktop, windows, accessibility
 
 ```text
-system.get_info
-system.list_capabilities
-system.check_dependency
+desktop.get_capabilities, desktop.get_active_window, desktop.screenshot
+desktop.hotkey, desktop.type_text, desktop.click
+desktop.move_mouse, desktop.scroll, desktop.double_click
+desktop.right_click, desktop.drag
+window.list, window.focus
+accessibility.get_tree, accessibility.find_element
+accessibility.inspect_element, accessibility.invoke_action
+accessibility.set_value, accessibility.focus_element
 ```
 
-### App tools
+Pointer tools require active-window context, bounds checks, safety classification, dry-run, and confirmation unless a narrow local demo policy permits. Sensitive apps remain blocked/guide-only; communication actions are high-risk.
+
+### Browser
 
 ```text
-app.detect
-app.list_installed
-app.open
-app.get_strategy
+browser.detect, browser.list_tabs, browser.get_active_tab, browser.current_url
+browser.open_url, browser.get_page_context, browser.extract_text
+browser.find_element, browser.click_element, browser.fill_text
+browser.focus_element, browser.wait_for_state, browser.get_form_state
+browser.get_selected_text
 ```
 
-`app.open` supports `dryRun:true` and confirmation token execution.
+Bridge is disabled by default. Fixed commands run through paired `127.0.0.1` WebExtension. `browser.find_element` returns bounded metadata and short-lived opaque `elementId`. Click/fill/focus require that reference; direct selectors cannot execute actions. References are tab/page-bound, revalidated, and rejected when stale or ambiguous. No `browser.click_selector` or `browser.fill_form` exists.
 
-### Shell tools
+`browser.open_url` requires dry-run and exact confirmation. Content is redacted and sensitivity-gated. No send, submit, upload, download, cookie, storage, password, debugger, or arbitrary script command exists.
+
+### Vision and screenshot handoff
 
 ```text
-shell.run_safe
+vision.analyze_image, vision.find_text, vision.find_target
+vision.prepare_pointer_action
 ```
 
-`dryRun:true` classifies the command without running it.
+OCR is local Tesseract CLI only. Results contain bounded redacted text, boxes, centers, confidence, and target suggestions. Vision never clicks or types. `vision.prepare_pointer_action` validates approved image roots, dimensions, coordinate space, fresh trusted screenshot evidence, active window, bounds, confidence, and risk, then returns only a `desktop.click` `dryRun:true` payload.
 
-Execution may require `confirmationToken`.
-
-### File tools
+### Checkpoints
 
 ```text
-file.write
-file.read
-file.exists
-file.list
-file.ensure_dir
+checkpoint.evaluate
+checkpoint.wait_for
 ```
 
-State-changing file tools support `dryRun:true` and confirmation tokens:
+Observe-only semantic checks for browser state, accessibility metadata, active windows, approved file metadata, and trusted vision evidence. No workflow action, unsafe retry, or confirmation generation.
+
+### Tool Forge/generated runtime
 
 ```text
-file.write
-file.ensure_dir
+forge.validate_manifest, forge.review_manifest, forge.propose_grants
+forge.save_manifest, forge.list_manifests, forge.get_manifest
+forge.create_review, forge.get_review, forge.list_reviews, forge.archive_manifest
+forge.apply_session_grants_from_review
+forge.scaffold_project, forge.validate_project
+forge.get_artifact, forge.list_artifacts, forge.get_validation, forge.list_validations
+forge.run_validation_harness, forge.get_harness_run, forge.list_harness_runs
+forge.check_registration_eligibility, forge.register_artifact, forge.get_registration
+forge.list_registrations, forge.revoke_registration
+forge.check_runtime_eligibility, forge.check_sandbox_support
+forge.run_sandboxed_tool, forge.get_runtime_run, forge.list_runtime_runs
+forge.list_dispatchable_tools, forge.get_dispatchable_tool, forge.dispatch_generated_tool
 ```
 
-### Guide tools
+Generated tools remain inert metadata and absent from live capabilities. Dispatch routes through the bounded JSON runner, runtime grants, eligibility, optional OS sandbox, dry-run, and confirmation.
+
+### Workflow traces, skills, templates
 
 ```text
-guide.create_steps
-guide.explain_strategy
+workflow.trace_start, workflow.trace_stop, workflow.trace_get
+workflow.trace_list, workflow.trace_archive
+workflow.skill_save_from_trace, workflow.skill_list, workflow.skill_get
+workflow.skill_archive, workflow.skill_run_dryrun
+workflow.skill_bind_checkpoints, workflow.skill_checkpoints_dryrun
 ```
 
-### Adapter discovery tools
+Traces store redacted summaries only. Skills do not replay actions. Template binding accepts declared parameters and `{{parameterName}}` interpolation only. Checkpoint dry-run may evaluate read-only checkpoints only with `evaluate:true`; it never clicks, types, navigates, sends, submits, uploads, deletes, or creates tokens.
 
-```text
-adapter.list
-adapter.get_capabilities
-adapter.detect_for_app
-```
+## Result and confirmation
 
-### Optional adapter-exposed tools
+State-changing tools support `dryRun:true` where applicable. Execution requires matching session-bound confirmation when policy says so. Confirmation never bypasses schema, safety, grants, protected-app rules, or approval.
 
-These are implemented, but they are not part of the default base capability list unless the adapter/tool is registered in the active runtime:
+## Optional adapters
 
-```text
-blender.run_python
-```
-
-Blender is optional and app-specific. It runs in background mode, saves outputs only under approved folders, and validates expected `.blend` outputs.
-
-### Desktop tools
-
-```text
-desktop.get_capabilities
-desktop.get_active_window
-desktop.screenshot
-desktop.hotkey
-desktop.type_text
-desktop.click
-```
-
-State-changing desktop tools support dry-run and confirmation:
-
-```text
-desktop.hotkey
-desktop.type_text
-desktop.click
-```
-
-### Window tools
-
-```text
-window.list
-window.focus
-```
-
-`window.focus` supports dry-run and confirmation.
-
-### Accessibility tools
-
-```text
-accessibility.get_tree
-accessibility.find_element
-accessibility.inspect_element
-accessibility.invoke_action
-accessibility.set_value
-accessibility.focus_element
-```
-
-State-changing accessibility tools support dry-run and confirmation:
-
-```text
-accessibility.invoke_action
-accessibility.set_value
-accessibility.focus_element
-```
-
-## 6. Dry-run and confirmation flow
-
-For state-changing tools:
-
-### Preview
-
-```json
-{
-  "toolSpecificInput": "...",
-  "dryRun": true
-}
-```
-
-The tool should:
-
-- validate schema
-- run safety preflight
-- resolve target if applicable
-- detect ambiguity
-- avoid all side effects
-- return a structured preview
-
-Preview data should include:
-
-```json
-{
-  "preview": true,
-  "wouldExecute": true,
-  "wouldRequireApproval": false,
-  "wouldBeBlocked": false,
-  "riskLevel": "medium",
-  "appSensitivity": "normal",
-  "dataSensitivity": "none",
-  "targetSummary": "Notes \"Draft\"",
-  "ambiguous": false,
-  "reasons": [],
-  "matchedRules": [],
-  "confirmationAvailable": true,
-  "confirmationRequired": true,
-  "confirmationToken": "<redacted in logs>",
-  "tokenId": "token_...",
-  "expiresAt": "...",
-  "inputFingerprint": "input_...",
-  "targetFingerprint": "target_...",
-  "confirmationExplanation": "Use this token to execute the exact previewed action before it expires."
-}
-```
-
-### Execute
-
-```json
-{
-  "toolSpecificInput": "...",
-  "confirmationToken": "<token-from-preview>"
-}
-```
-
-Execution should verify:
-
-- token exists
-- token not expired
-- token not used
-- same session
-- same tool
-- same normalized input fingerprint
-- same resolved target fingerprint when applicable
-- same or safer risk
-
-Then safety preflight still runs before execution.
-
-## 7. App adapter system
-
-AgentHost supports optional app adapters.
-
-Adapters are not required for the core to run.
-
-### App adapter interface
-
-```ts
-interface AppAdapter {
-  id: string;
-  displayName: string;
-  supportedPlatforms: string[];
-  getCapabilities(): AppCapability[];
-}
-```
-
-Execution can be exposed either through adapter-specific MCP tools or a generic adapter execution path if added later.
-
-### Adapter registry
-
-The adapter registry should:
-
-- register adapters
-- list adapters
-- find adapter by app id
-- list adapter capabilities
-- avoid loading unsupported adapters
-- keep app-specific code out of the core
-
-### Current adapter: Blender
-
-```text
-packages/app-blender/
-```
-
-Tool:
-
-```text
-blender.run_python
-```
-
-Capabilities:
-
-- run built-in coffee cup demo
-- run reviewed Blender Python
-- save output under approved roots
-- validate `.blend` outputs
-- return clean `blender_not_found` if missing
-
-## 8. Unknown app behavior
-
-Unknown apps must not fail catastrophically.
-
-If no adapter/CLI/API/accessibility/GUI method is available:
-
-```json
-{
-  "appId": "unknown:some-app",
-  "adapterAvailable": false,
-  "availableStrategies": ["guide_only"],
-  "recommendedStrategy": "guide_only",
-  "reason": "No adapter, CLI, API, browser, accessibility, or GUI method is available yet."
-}
-```
-
-If accessibility is available, prefer it before GUI control.
-
-If GUI control is enabled by policy:
-
-```json
-{
-  "availableStrategies": ["accessibility", "gui_control", "guide_only"],
-  "recommendedStrategy": "accessibility",
-  "reason": "Accessibility is safer than raw GUI control when available."
-}
-```
-
-Sensitive apps should prefer guide mode or strict approval.
-
-## 9. Future tools
-
-### Browser tools
-
-```text
-browser.open_url
-browser.get_page_context
-browser.find_element
-browser.click_selector
-browser.fill_form
-browser.extract_text
-```
-
-Do not submit forms without approval.
-
-### Communication tools
-
-```text
-gmail.list_today
-gmail.read_thread
-email.prepare_draft
-message.prepare_draft
-```
-
-Do not send messages automatically in MVP.
-
-### Tool Forge tools
-
-```text
-tool_forge.propose_tool
-tool_forge.create_scaffold
-tool_forge.validate_manifest
-tool_forge.run_tests
-tool_forge.register_tool
-```
-
-Generated tools must have manifests, permission declarations, tests, and safety metadata.
-
-### Skill tools
-
-```text
-skill.list
-skill.inspect
-skill.create
-skill.run_dry
-skill.run_confirmed
-```
-
-## 10. Codex behavior expectation
-
-Codex should:
-
-- call `system.list_capabilities` before assuming tools exist
-- prefer app adapters over GUI control
-- prefer official APIs over browser/GUI when available
-- prefer accessibility over raw click/type
-- use `dryRun:true` before state-changing actions
-- execute with confirmation token only for the same target/input
-- validate outputs after actions
-- avoid sending communications without explicit approval
-- avoid destructive shell commands
-- use guide mode for sensitive or unsupported apps
+`packages/app-blender` provides optional `blender.run_python`. Future adapters may target any provider or local app; provider names are examples, not core architecture.

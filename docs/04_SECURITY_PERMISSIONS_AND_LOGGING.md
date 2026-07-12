@@ -1,522 +1,61 @@
 # AgentHost Security, Permissions, and Logging
 
-## 1. Security goal
+## Security goal
 
-AgentHost gives AI agents access to real local capabilities. Safety is the product.
+AgentHost is local-first, visible, permissioned, previewable, confirmation-bound, auditable, and conservative. It must never behave like malware, spyware, credential theft software, or stealth remote control.
 
-The system must be:
+Every tool follows schema validation, risk/sensitivity classification, policy and grant checks, dry-run when required, confirmation when required, bounded execution, result/checkpoint validation, and safe audit logging.
 
-- local-first
-- visible
-- permissioned
-- logged
-- previewable
-- confirmation-bound
-- reversible where possible
-- conservative by default
+## Hard non-negotiables
 
-AgentHost must never act like malware, spyware, credential theft software, or stealth remote control software.
+- no silent send, submit, post, upload, delete, archive, pay, buy, publish, or destructive overwrite
+- no login, CAPTCHA, MFA, payment, security, or approval bypass
+- no passwords, cookies, browser storage, tokens, API keys, private keys, or secret extraction
+- no public browser bridge, remote access, stealth control, hidden persistence, background autonomy, sudo, package installation, or unsafe network access
+- generated runtime has no network, shell, GUI/DBus, private-data, or arbitrary-code capability
 
-## 2. Safety layers
+## Policy and grants
 
-Every meaningful action should pass through:
+Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. Grants are explicit, scoped, session/persistent, and rechecked immediately before execution. Demo mode reduces friction only for approved local/demo roots and normal apps; hard safety blocks remain.
 
-```text
-schema validation
-  ↓
-risk classification
-  ↓
-policy check
-  ↓
-dry-run preview if requested
-  ↓
-confirmation token check if required
-  ↓
-approval request if needed
-  ↓
-execution
-  ↓
-result validation
-  ↓
-audit log
-```
+State-changing tools retain dry-run and exact confirmation requirements unless a narrow profile/grant explicitly permits local behavior. Tokens are session-bound, short-lived, single-use, fingerprint-bound, and never logged raw.
 
-## 3. Risk levels
+Communication apps (mail, chat, collaboration, social messaging) are private/high-risk. Financial, payment, credential/security, password-manager, and system-admin apps are blocked or guide-only for sensitive reads/actions.
 
-### `observe`
+## Browser bridge safety
 
-No state change.
+Firefox/Chromium WebExtension bridge is disabled by default, binds only to `127.0.0.1`, uses a protected pairing token plus rotating session token, permits one active session, and has bounded body/command/long-poll limits. Extension origin and tokens are validated; invalid/missing tokens fail cleanly.
 
-Examples:
+Fixed commands expose sanitized tabs, URLs, page context/text, element discovery, safe actions, and state waits. There is no arbitrary JavaScript, CDP/debugger, cookies, storage, history, webRequest, password API, upload, submit, send, or form command.
 
-- get OS info
-- list capabilities
-- inspect current profile
-- read recent logs
+Browser `elementId` values are opaque, short-lived, tab/page-bound references. Actions require a unique reference, revalidate URL/session, visibility, enabled state, identity, and ambiguity. Direct selectors cannot act. Stale or changed references fail.
 
-### `low`
+## Browser content and action policy
 
-Low-impact inspection.
+URLs are normalized and redacted before results/logs. Email, phone, token, auth-looking, query, fragment, and credential material is redacted. Communication content requires explicit private-data grants. Financial/credential/security/admin content is blocked or guide-only. Fill is draft-only; send/submit/post/upload/delete/pay/buy remain blocked or high-risk.
 
-Examples:
+## OCR and vision safety
 
-- check if command exists
-- check if file exists in approved output folder
-- list AgentHost output directory
-- list visible windows
-- inspect accessibility metadata
+Vision accepts only approved AgentHost screenshot/output roots unless separately granted. It uses local Tesseract only; no cloud OCR, upload, network, or dependency installation. Protected active windows and sensitive paths are blocked. OCR results are bounded and redacted; logs contain no image bytes or full private text.
 
-### `medium`
+`vision.find_target` returns suggestions only. `vision.prepare_pointer_action` requires session match, image hash, coordinate-space proof, dimensions, active-window match, fresh evidence within 10 seconds, bounds, confidence, and risk checks. It returns only a `desktop.click` dry-run suggestion and never clicks or types.
 
-Changes local state.
+## Checkpoint safety
 
-Examples:
+`checkpoint.evaluate` and `checkpoint.wait_for` are read-only. They inspect metadata/state through existing safety boundaries and return bounded evidence summaries. Secret checkpoints block. Private checkpoints require grants. File paths, browser URLs, accessibility queries, and vision evidence retain path, app sensitivity, grant, and redaction checks.
 
-- write a file under approved output folder
-- open an app
-- focus a window
-- run a safe local command
-- generate local output
-- accessibility action on normal app
-- prepare a draft without sending
+Checkpoint templates are review metadata, not action scripts. They accept only declared parameters and literal `{{parameterName}}` interpolation. No expressions, shell/env/glob expansion, code execution, or hidden tool calls. Secret/private literal expectations are rejected or blocked; sensitive bindings stay in memory and never enter skill records, traces, ToolResults, or logs. Skills cannot replay actions or create confirmation tokens.
 
-### `high`
+## Tool Forge and OS sandboxing
 
-External, sensitive, destructive, irreversible, or user-visible communication.
+Forge manifests declare capabilities and risk. Reviews, artifact validation, registration gates, runtime eligibility, and grants precede execution. Generated artifacts remain non-live and absent from `system.list_capabilities` live tools.
 
-Examples:
+Runtime runs execute only bounded `runtime/handler.json` JSON operations in a fixed child runner. Generated JavaScript/Python is not imported or executed. Inputs/outputs, stdout/stderr, runtime, environment, and filesystem are capped. Network, GUI/DBus, secrets, broad filesystem, shell, private data, and dangerous capabilities are denied.
 
-- send email
-- post message
-- upload file
-- delete files
-- overwrite important files
-- run `sudo`
-- install packages
-- change system settings
-- access secrets
-- submit forms
-- interact with banking/payment sites
-- publish content
+Optional sandbox selection prefers bubblewrap/bwrap, then firejail, then safe unshare. Auto mode falls back to the fixed runner with limitations when unavailable. No install or sudo is used. Run records include backend, limitations, grants, limits, env key names, status, and redacted summaries.
 
-### `blocked`
+## Files and logs
 
-Forbidden by default.
+Default writable roots are `~/.agenthost/` and approved AgentHost output roots. Protected paths include system roots, home-wide private data, SSH/GnuPG/keyrings, browser profiles, and credentials.
 
-Examples:
-
-- hidden persistence
-- stealth control
-- credential extraction
-- bypassing OS security
-- CAPTCHA bypass
-- disabling security tools
-- destructive actions without explicit user intent
-- exfiltrating private files
-- typing/sending secret data by default
-
-## 4. App sensitivity categories
-
-### Normal apps
-
-Examples:
-
-- Blender
-- GIMP
-- LibreOffice
-- VS Code
-- terminal
-
-Medium-risk automation may be allowed with profile permissions.
-
-### Communication apps
-
-Examples:
-
-- Gmail
-- Outlook
-- Slack
-- Discord
-- WhatsApp Web
-
-Reading private data requires explicit user intent. Typing, sending, attaching, posting, or submitting is high risk unless reviewed.
-
-### Financial/payment apps
-
-Examples:
-
-- banking
-- checkout pages
-- crypto wallets
-
-Autonomous execution should be blocked by default. Guide mode only unless a very explicit future policy says otherwise.
-
-### Credential/security apps
-
-Examples:
-
-- password managers
-- SSH key folders
-- browser profile secrets
-- keyrings
-
-Reading, exporting, typing, or uploading secrets is blocked by default.
-
-### System settings
-
-Changing settings is high-risk.
-
-## 5. Policy profiles
-
-### strict
-
-For normal users.
-
-```json
-{
-  "allowScreenshots": true,
-  "allowAppLaunch": true,
-  "allowShell": false,
-  "allowFileWriteRoots": ["~/.agenthost"],
-  "allowGenericClick": false,
-  "allowGenericType": false,
-  "allowEmailSend": false,
-  "allowUploads": false,
-  "requireApprovalForMediumRisk": true,
-  "blockHighRiskByDefault": true,
-  "requireConfirmationForStateChanging": true
-}
-```
-
-### dev
-
-For development.
-
-```json
-{
-  "allowScreenshots": true,
-  "allowAppLaunch": true,
-  "allowShell": true,
-  "allowFileWriteRoots": ["~/.agenthost", "~/Desktop/agenthost-output"],
-  "allowGenericClick": false,
-  "allowGenericType": false,
-  "allowEmailSend": false,
-  "allowUploads": false,
-  "requireApprovalForMediumRisk": false,
-  "blockHighRiskByDefault": true,
-  "requireConfirmationForStateChanging": true
-}
-```
-
-### gui-dev
-
-For local GUI testing only.
-
-```json
-{
-  "allowScreenshots": true,
-  "allowAppLaunch": true,
-  "allowShell": true,
-  "allowGenericClick": true,
-  "allowGenericType": true,
-  "requireDryRunForGuiActions": true,
-  "requireConfirmationForStateChanging": true,
-  "blockHighRiskByDefault": true
-}
-```
-
-### autopilot
-
-Future profile only. Do not use in MVP.
-
-Autopilot must still preserve blocked categories and confirmation for high-risk actions.
-
-## 6. Dry-run previews
-
-State-changing tools should support:
-
-```json
-{
-  "dryRun": true
-}
-```
-
-Dry-run previews must:
-
-- never execute side effects
-- still validate schema
-- still run safety preflight
-- resolve targets where possible
-- detect ambiguity
-- redact secrets
-- return whether the action would execute
-- return whether approval or confirmation would be required
-- mint a confirmation token only when exact, unambiguous, allowed, and eligible
-
-## 7. Confirmation tokens
-
-Phase 11 adds confirmation tokens.
-
-Tokens are:
-
-- in-memory
-- session-bound
-- short-lived, currently 3 minutes by default
-- single-use
-- bound to tool name
-- bound to normalized input fingerprint
-- bound to target fingerprint when applicable
-- bound to risk level
-- not logged raw
-- not allowed to contain secrets
-
-Execution with token must verify:
-
-- token exists
-- token not expired
-- token not reused
-- same session
-- same tool
-- same normalized input
-- same target fingerprint
-- risk did not increase
-
-A token does **not** bypass:
-
-- schema validation
-- safety engine
-- approval prompts
-- Codex approval layer
-
-## 8. Shell safety
-
-Dangerous patterns must be high-risk or blocked.
-
-Examples:
-
-```text
-rm -rf
-sudo
-dd if=
-mkfs
-chmod -R 777 /
-chown -R
-curl ... | bash
-wget ... | sh
-kill -9 -1
-commands touching ~/.ssh
-commands touching ~/.gnupg
-commands touching browser profile secrets
-```
-
-Shell commands should have:
-
-- timeout
-- working directory
-- max output size
-- stdout/stderr capture
-- structured errors
-- risk classification before execution
-- dry-run classification
-- confirmation token when required
-
-Prefer `spawn(command, args)` or `execFile` over raw shell strings.
-
-## 9. File safety
-
-Default writable roots:
-
-```text
-~/.agenthost/
-~/Desktop/agenthost-output/
-```
-
-Do not write outside approved roots unless explicitly approved.
-
-Protected paths:
-
-```text
-/
-~/
-~/.ssh
-~/.gnupg
-~/.config
-~/.local/share/keyrings
-browser profile folders
-system folders
-```
-
-File writes should support dry-run and confirmation.
-
-## 10. Communication safety
-
-MVP must not send communications automatically.
-
-This includes:
-
-- email
-- chat messages
-- social posts
-- form submissions
-- comments
-- support replies
-
-Allowed near-term:
-
-- prepare draft text
-- open compose page
-- show recipient/subject/body
-- read user-approved email data through official API
-- summarize user-approved private data
-- guide user manually
-
-Blocked by default:
-
-- sending
-- posting
-- submitting
-- silent file upload
-- silent attachment
-- deleting/archiving email without explicit confirmation
-
-## 11. GUI automation safety
-
-GUI automation includes:
-
-- screenshots
-- click
-- type
-- hotkey
-- focus window
-
-Rules:
-
-- screenshots are privacy-sensitive
-- clicks require active window context
-- typing passwords/secrets is forbidden
-- communication apps are high-risk
-- financial apps are guide-only
-- generic GUI control is disabled in strict profile
-- accessibility is preferred before raw GUI
-- dry-run preview is required for state-changing GUI actions
-- confirmation token should be required where configured
-
-## 12. Accessibility safety
-
-Accessibility is safer than raw coordinates but still powerful.
-
-Rules:
-
-- read-only tree/element inspection is low risk
-- state-changing actions are medium/high depending on app/action/data
-- ambiguous targets must be rejected
-- hidden/password/secret fields must not expose values
-- secret set_value is blocked by default
-- no fallback to raw click/type unless explicitly requested and policy allows
-- action previews should include element summary and ambiguity status
-
-## 13. Approval requests
-
-Approval prompts must include:
-
-- action summary
-- app/site
-- automation strategy
-- exact command if shell
-- files affected
-- data sent or changed
-- target window/element if UI action
-- risk level
-- consequence
-- dry-run preview if available
-- confirmation token status
-- approve/deny/edit options
-
-## 14. Audit logging
-
-All tool calls must be logged locally as JSONL.
-
-Default folder:
-
-```text
-~/.agenthost/logs/
-```
-
-Each log entry should include:
-
-```json
-{
-  "timestamp": "2026-07-08T21:00:00.000Z",
-  "sessionId": "session_123",
-  "tool": "shell.run_safe",
-  "riskLevel": "medium",
-  "strategy": "cli_or_script",
-  "inputSummary": "Run node --version",
-  "approvalStatus": "not_required",
-  "preview": false,
-  "confirmation": {
-    "used": true,
-    "accepted": true,
-    "tokenId": "token_abcd"
-  },
-  "ok": true,
-  "durationMs": 12,
-  "outputSummary": "Command exited 0"
-}
-```
-
-Do not log:
-
-- passwords
-- API keys
-- auth tokens
-- cookies
-- private keys
-- raw confirmation tokens
-- full sensitive files
-- full private email/message content
-- screenshots by default
-- raw secret values
-
-## 15. Emergency stop
-
-Future Control Room UI must include emergency stop.
-
-Emergency stop should:
-
-- cancel queued actions
-- kill child processes started by AgentHost
-- disable further tool calls in the session
-- write stop entry to logs
-- return cancelled errors to Codex
-
-## 16. Tool Forge security
-
-Future generated tools must require:
-
-- manifest
-- permission declaration
-- allowed domains
-- allowed file roots
-- declared risk levels
-- tests
-- dry-run support for state-changing actions
-- confirmation support where needed
-- user approval before registration
-
-Generated tools must not run with arbitrary unrestricted access.
-
-## 17. Security non-negotiables
-
-AgentHost must never:
-
-- hide its actions
-- bypass OS permissions
-- bypass login/CAPTCHA/payment confirmations
-- silently send communications
-- silently upload files
-- steal credentials
-- install hidden persistence
-- disable security tools
-- control another person’s computer without consent
-- use generated tools to bypass safety policy
+JSONL audit logs contain tool name, risk, policy decision, grant IDs/status, sanitized origin/app, counts, sizes, truncation, backend, and safe error codes. They never contain pairing/session/confirmation tokens, secrets, raw OCR text, page content, screenshots, private messages, full sensitive paths, or hidden environment values.
