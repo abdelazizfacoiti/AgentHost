@@ -12,6 +12,13 @@ describe("CapabilityRegistry", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
+      "browser.find_element",
+      "browser.click_element",
+      "browser.fill_text",
+      "browser.focus_element",
+      "browser.wait_for_state",
+      "browser.get_form_state",
+      "browser.get_selected_text",
       "browser.detect",
       "browser.list_tabs",
       "browser.get_active_tab",

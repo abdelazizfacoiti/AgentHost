@@ -43,6 +43,13 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
 
   for (const capability of [
+    { name: "browser.find_element", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Finds bounded, redacted browser elements through the paired extension." },
+    { name: "browser.click_element", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated click of one revalidated safe browser element." },
+    { name: "browser.fill_text", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated draft-only text fill of one safe browser field." },
+    { name: "browser.focus_element", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated focus of one safe browser element." },
+    { name: "browser.wait_for_state", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Waits for bounded browser state checkpoints." },
+    { name: "browser.get_form_state", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Reads safe browser form metadata without values." },
+    { name: "browser.get_selected_text", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Reads bounded redacted browser selected text." },
     { name: "browser.detect", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Reports local WebExtension browser bridge status." },
     { name: "browser.list_tabs", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Lists sanitized tabs from the paired local browser." },
     { name: "browser.get_active_tab", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Returns the active paired-browser tab metadata." },
