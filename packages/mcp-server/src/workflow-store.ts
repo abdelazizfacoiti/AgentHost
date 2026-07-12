@@ -3,10 +3,12 @@ import { chmod, mkdir, readFile, readdir, rename, writeFile } from "node:fs/prom
 import path from "node:path";
 import {
   WORKFLOW_BLOCKED_ACTIONS,
+  checkpointTemplateSummary,
   isBlockedWorkflowAction,
   redactWorkflowSummary,
   type WorkflowCheckpoint,
   type WorkflowSkill,
+  type WorkflowCheckpointTemplate,
   type WorkflowSkillDryRunResult,
   type WorkflowSkillParameter,
   type WorkflowSkillStatus,
@@ -107,7 +109,7 @@ export class WorkflowStore {
     return (await this.#list<WorkflowTrace>(this.#tracesDir)).filter((record) => status === undefined || record.status === status).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  async saveSkillFromTrace(input: { traceId: string; name: string; description: string; parameters?: WorkflowSkillParameter[]; appCategories?: string[] }): Promise<WorkflowSkill> {
+  async saveSkillFromTrace(input: { traceId: string; name: string; description: string; parameters?: WorkflowSkillParameter[]; checkpointTemplates?: WorkflowCheckpointTemplate[]; appCategories?: string[] }): Promise<WorkflowSkill> {
     const trace = await this.getTrace(input.traceId);
     if (trace.status !== "stopped" && trace.status !== "failed") throw new Error("trace_must_be_stopped");
     const checkpoints = trace.checkpoints.map((checkpoint) => ({ ...checkpoint }));
@@ -125,16 +127,16 @@ export class WorkflowStore {
       skillId: id("skill"), name: redactWorkflowSummary(input.name), description: redactWorkflowSummary(input.description), version: 1,
       createdAt: timestamp, updatedAt: timestamp, status: "draft", supportedStrategies: unique(steps.map((step) => step.strategy)) as WorkflowSkill["supportedStrategies"],
       appCategories: unique((input.appCategories ?? trace.appCategories).map(redactWorkflowSummary)), parameters: (input.parameters ?? []).map((p) => ({ ...p, ...(p.description === undefined ? {} : { description: redactWorkflowSummary(p.description) }) })),
-      steps, checkpoints, requiredGrants: [...trace.requiredGrants],
+      steps, checkpoints, checkpointTemplates: input.checkpointTemplates ?? [], requiredGrants: unique([...trace.requiredGrants, ...(input.checkpointTemplates ?? []).flatMap((template) => template.requiredGrants)]),
       safetyRestrictions: ["Preview only. Phase 27 never executes workflow skills.", "Future replay must re-evaluate policy, grants, dry-run, and confirmation."],
       blockedActions: [...WORKFLOW_BLOCKED_ACTIONS], sourceTraceId: trace.traceId
     };
     await this.#saveSkill(skill); return skill;
   }
 
-  async getSkill(skillId: string): Promise<WorkflowSkill> { return this.#readRecord(this.#skillPath(skillId), "skill_not_found"); }
+  async getSkill(skillId: string): Promise<WorkflowSkill> { return this.#normalizeSkill(await this.#readRecord(this.#skillPath(skillId), "skill_not_found")); }
   async listSkills(status?: WorkflowSkillStatus): Promise<WorkflowSkill[]> {
-    return (await this.#list<WorkflowSkill>(this.#skillsDir)).filter((record) => status === undefined || record.status === status).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return (await this.#list<WorkflowSkill>(this.#skillsDir)).map((record) => this.#normalizeSkill(record)).filter((record) => status === undefined || record.status === status).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
   async archiveSkill(skillId: string): Promise<WorkflowSkill> {
     const skill = await this.getSkill(skillId);
@@ -145,12 +147,14 @@ export class WorkflowStore {
     const skill = await this.getSkill(input.skillId);
     const missingParameters = skill.parameters.filter((parameter) => parameter.required && !input.providedParameterNames.includes(parameter.name)).map((parameter) => parameter.name);
     const missingGrantIds = skill.requiredGrants.filter((grant) => !input.activeGrantIds.includes(grant));
-    return { skillId: skill.skillId, version: skill.version, executable: false, requiredGrants: skill.requiredGrants, missingGrantIds, steps: skill.steps, blockedSteps: skill.steps.filter((step) => step.blocked), confirmationStepIds: skill.steps.filter((step) => step.requiresConfirmation).map((step) => step.stepId), safetyRestrictions: skill.safetyRestrictions, missingParameters };
+    const checkpointTemplates = (skill.checkpointTemplates ?? []).map((template) => checkpointTemplateSummary(template, template.sensitivity === "secret" ? ["secret_checkpoint_blocked"] : template.sensitivity === "private" && template.requiredGrants.length === 0 ? ["private_checkpoint_grant_required"] : template.requiredGrants.some((grant) => !input.activeGrantIds.includes(grant)) ? ["checkpoint_grant_missing"] : []));
+    return { skillId: skill.skillId, version: skill.version, executable: false, requiredGrants: skill.requiredGrants, missingGrantIds, steps: skill.steps, blockedSteps: skill.steps.filter((step) => step.blocked), confirmationStepIds: skill.steps.filter((step) => step.requiresConfirmation).map((step) => step.stepId), safetyRestrictions: skill.safetyRestrictions, missingParameters, checkpointTemplates };
   }
 
   async #readRecord<T>(filePath: string, missingCode: string): Promise<T> {
     try { return await readJson<T>(filePath); } catch (error) { if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") throw new Error(missingCode); throw new Error("workflow_record_invalid"); }
   }
+  #normalizeSkill(skill: WorkflowSkill): WorkflowSkill { return { ...skill, checkpointTemplates: skill.checkpointTemplates ?? [] }; }
   async #list<T>(directory: string): Promise<T[]> { const entries = await readdir(directory, { withFileTypes: true }).catch(() => []); return Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json")).map((entry) => this.#readRecord<T>(path.join(directory, entry.name), "workflow_record_invalid"))); }
   #tracePath(traceId: string): string { return path.join(this.#tracesDir, `${traceId.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`); }
   #skillPath(skillId: string): string { return path.join(this.#skillsDir, `${skillId.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`); }

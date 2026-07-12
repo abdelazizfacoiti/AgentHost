@@ -59,6 +59,8 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "workflow.skill_get", riskLevel: "observe" as const, description: "Returns one local workflow skill." },
     { name: "workflow.skill_archive", riskLevel: "low" as const, description: "Archives one workflow skill without deleting it." },
     { name: "workflow.skill_run_dryrun", riskLevel: "low" as const, description: "Previews a workflow skill without executing any workflow action." },
+    { name: "workflow.skill_bind_checkpoints", riskLevel: "low" as const, description: "Validates redacted workflow checkpoint bindings without evaluation or actions." },
+    { name: "workflow.skill_checkpoints_dryrun", riskLevel: "low" as const, description: "Previews or read-only evaluates bound workflow checkpoints without skill replay." },
     { name: "browser.find_element", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Finds bounded, redacted browser elements through the paired extension." },
     { name: "browser.click_element", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated click of one revalidated safe browser element." },
     { name: "browser.fill_text", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated draft-only text fill of one safe browser field." },
