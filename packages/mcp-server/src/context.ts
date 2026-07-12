@@ -35,6 +35,7 @@ import type {
   ShellRunResult,
   SystemInfo,
   SandboxSupportProbeResult
+  ,VisionGroundingResult, VisionMode
 } from "@agenthost/core";
 import type { BrowserBridgeAdapter } from "@agenthost/app-browser";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
@@ -76,6 +77,7 @@ export interface LinuxAutomation {
   }): Promise<DesktopClickResult>;
   pointer?(input: { action: "move_mouse" | "scroll" | "double_click" | "right_click" | "drag"; activeWindow: DesktopWindowContext; x?: number; y?: number; direction?: "up" | "down" | "left" | "right"; amount?: number; startX?: number; startY?: number; endX?: number; endY?: number; durationMs?: number }): Promise<DesktopPointerResult>;
   checkSandboxSupport?(): Promise<SandboxSupportProbeResult>;
+  analyzeImage?(input: { imagePath: string; source: "agenthost_screenshot" | "agenthost_output" | "granted_path"; basename: string; mode: VisionMode; maxItems: number }): Promise<VisionGroundingResult>;
   getAccessibilityTree(input: {
     appName?: string;
     windowId?: string;

@@ -13,3 +13,4 @@ export * from "./safety/index.js";
 export * from "./types.js";
 export * from "./workflow.js";
 export * from "./workflow-redaction.js";
+export * from "./vision.js";

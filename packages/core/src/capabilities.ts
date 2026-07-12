@@ -43,6 +43,9 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
 
   for (const capability of [
+    { name: "vision.analyze_image", riskLevel: "low" as const, strategy: "gui_control" as const, description: "Runs local redacted OCR on an approved image without desktop actions." },
+    { name: "vision.find_text", riskLevel: "low" as const, strategy: "gui_control" as const, description: "Finds redacted local OCR text and image-relative bounds without desktop actions." },
+    { name: "vision.find_target", riskLevel: "low" as const, strategy: "gui_control" as const, description: "Ranks local OCR target candidates without clicking or typing." },
     { name: "workflow.trace_start", riskLevel: "low" as const, description: "Starts explicit local redacted workflow tracing for this MCP session." },
     { name: "workflow.trace_stop", riskLevel: "low" as const, description: "Stops and finalizes one redacted local workflow trace." },
     { name: "workflow.trace_get", riskLevel: "observe" as const, description: "Returns one redacted workflow trace." },

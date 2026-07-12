@@ -95,6 +95,10 @@ Start tracing explicitly with `workflow.trace_start`, then use normal AgentHost 
 
 Stop a trace with `workflow.trace_stop`, save its safe generic plan using `workflow.skill_save_from_trace`, and inspect it with `workflow.skill_run_dryrun`. Skills are draft, preview-only metadata in this phase: they cannot execute tools, create confirmation tokens, send, submit, upload, or bypass safety/grants.
 
+## Local OCR grounding (Phase 28)
+
+`vision.analyze_image`, `vision.find_text`, and `vision.find_target` inspect approved local AgentHost screenshot/output images. They use installed local `tesseract` when available, return bounded redacted OCR bounds and image-relative candidate coordinates, and never click, type, upload, cache image bytes, or call cloud services. Missing Tesseract returns `ocr_backend_unavailable`; AgentHost never installs it.
+
 For a raw stdio protocol check, pipe JSON-RPC messages into the built server:
 
 ```bash
