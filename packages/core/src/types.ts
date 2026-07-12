@@ -218,6 +218,24 @@ export interface WorkflowSkillStep {
   blockedReason?: string;
 }
 
+/** Reviewable, non-executable semantic checkpoint definition for a workflow skill. */
+export interface WorkflowCheckpointTemplate {
+  templateId: string;
+  name: string;
+  description: string;
+  kind: CheckpointKind;
+  strategy: CheckpointStrategy;
+  sensitivity: CheckpointSensitivity;
+  /** JSON values may use only {{declaredParameterName}} interpolation in strings. */
+  expectedTemplate: Record<string, unknown>;
+  parameters: string[];
+  requiredGrants: string[];
+  safetyNotes: string[];
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  redactionPolicy?: "summary_only" | "counts_only";
+}
+
 export interface WorkflowSkill {
   skillId: string;
   name: string;
@@ -231,6 +249,8 @@ export interface WorkflowSkill {
   parameters: WorkflowSkillParameter[];
   steps: WorkflowSkillStep[];
   checkpoints: WorkflowCheckpoint[];
+  /** Optional for backward-compatible persisted Phase 27 skills. */
+  checkpointTemplates?: WorkflowCheckpointTemplate[];
   requiredGrants: string[];
   safetyRestrictions: string[];
   blockedActions: string[];
@@ -249,6 +269,16 @@ export interface WorkflowSkillDryRunResult {
   confirmationStepIds: string[];
   safetyRestrictions: string[];
   missingParameters: string[];
+  checkpointTemplates?: Array<{
+    templateId: string;
+    kind: CheckpointKind;
+    strategy: CheckpointStrategy;
+    sensitivity: CheckpointSensitivity;
+    requiredGrants: string[];
+    parameterNames: string[];
+    blocked: boolean;
+    blockedReasons: string[];
+  }>;
 }
 
 export type ConfirmationStatus =

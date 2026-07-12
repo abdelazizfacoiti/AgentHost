@@ -28,6 +28,8 @@ describe("CapabilityRegistry", () => {
       "workflow.skill_get",
       "workflow.skill_archive",
       "workflow.skill_run_dryrun",
+      "workflow.skill_bind_checkpoints",
+      "workflow.skill_checkpoints_dryrun",
       "browser.find_element",
       "browser.click_element",
       "browser.fill_text",

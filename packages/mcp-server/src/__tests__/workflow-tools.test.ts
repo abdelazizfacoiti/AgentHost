@@ -86,4 +86,39 @@ describe("workflow tools", () => {
     expect((listedTraces.data as { traces: unknown[] }).traces).toHaveLength(1);
     await expect(call(value, "workflow.skill_save_from_trace", { traceId, name: "x", description: "x" })).resolves.toMatchObject({ ok: false });
   });
+
+  it("binds reviewable checkpoint templates without executing actions", async () => {
+    const value = await context();
+    const started = await call(value, "workflow.trace_start", { name: "Checkpoint skill" });
+    const traceId = (started.data as { traceId: string }).traceId;
+    await call(value, "workflow.trace_stop", { traceId });
+    const saved = await call(value, "workflow.skill_save_from_trace", {
+      traceId, name: "Check files", description: "Generic", parameters: [{ name: "outputPath", type: "string", required: true }],
+      checkpointTemplates: [{ templateId: "output_exists", name: "Output exists", description: "Check output", kind: "file_exists", strategy: "file", sensitivity: "public", expectedTemplate: { path: "{{outputPath}}" }, parameters: ["outputPath"], requiredGrants: [], safetyNotes: [] }]
+    });
+    const skillId = (saved.data as { skillId: string }).skillId;
+    const bound = await call(value, "workflow.skill_bind_checkpoints", { skillId, parameters: { outputPath: "/tmp/private-output" } });
+    expect(bound).toMatchObject({ ok: true, preview: true, data: { actionsExecuted: false, templates: [{ templateId: "output_exists", expectedFields: ["path"], redacted: true }] } });
+    expect(JSON.stringify(bound)).not.toContain("private-output");
+    const preview = await call(value, "workflow.skill_checkpoints_dryrun", { skillId, parameters: { outputPath: "/tmp/private-output" } });
+    expect(preview).toMatchObject({ ok: true, preview: true, data: { evaluated: false, actionsExecuted: false } });
+    (value.linux as any).fileExists = async ({ path }: { path: string }) => ({ path, exists: true });
+    const evaluated = await call(value, "workflow.skill_checkpoints_dryrun", { skillId, parameters: { outputPath: "/tmp/private-output" }, evaluate: true });
+    expect(evaluated).toMatchObject({ ok: true, data: { evaluated: true, actionsExecuted: false, status: "passed" } });
+    expect(value.linux).not.toHaveProperty("click");
+    await expect(call(value, "workflow.skill_bind_checkpoints", { skillId, parameters: { unknown: "x" } })).resolves.toMatchObject({ ok: false, error: { code: "checkpoint_parameter_unknown" } });
+    await expect(call(value, "workflow.skill_bind_checkpoints", { skillId, parameters: {} })).resolves.toMatchObject({ ok: false, error: { code: "checkpoint_parameter_missing" } });
+  });
+
+  it("blocks secret and ungranted private templates before evaluation", async () => {
+    const value = await context();
+    const started = await call(value, "workflow.trace_start", { name: "Protected checkpoints" }); const traceId = (started.data as { traceId: string }).traceId;
+    await call(value, "workflow.trace_stop", { traceId });
+    const saved = await call(value, "workflow.skill_save_from_trace", { traceId, name: "Protected", description: "Generic", checkpointTemplates: [
+      { templateId: "secret_check", name: "Secret", description: "Never inspect", kind: "manual_check", strategy: "manual", sensitivity: "secret", expectedTemplate: {}, parameters: [], requiredGrants: [], safetyNotes: [] },
+      { templateId: "private_check", name: "Private", description: "Needs grant", kind: "manual_check", strategy: "manual", sensitivity: "private", expectedTemplate: {}, parameters: [], requiredGrants: ["grant_private"], safetyNotes: [] }
+    ] });
+    const result = await call(value, "workflow.skill_checkpoints_dryrun", { skillId: (saved.data as { skillId: string }).skillId, evaluate: true });
+    expect(result).toMatchObject({ ok: true, data: { actionsExecuted: false, status: "blocked", templates: [{ blockedReasons: ["secret_checkpoint_blocked"] }, { blockedReasons: ["checkpoint_grant_missing"] }] } });
+  });
 });
