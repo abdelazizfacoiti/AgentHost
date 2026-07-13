@@ -21,6 +21,9 @@ export function manualRunRequestApprovalDefaults(input: Partial<ScheduledJobManu
     ...(input.reviewId === undefined ? {} : { reviewId: input.reviewId }),
     revoked: input.revoked ?? false,
     ...(input.approvedAt === undefined ? {} : { approvedAt: input.approvedAt }),
+    ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+    ...(input.approvalDependencySnapshot === undefined ? {} : { approvalDependencySnapshot: input.approvalDependencySnapshot }),
+    ...(input.approvalPolicyHash === undefined ? {} : { approvalPolicyHash: input.approvalPolicyHash }),
     ...(input.revokedAt === undefined ? {} : { revokedAt: input.revokedAt }),
     ...(input.approvalArchivedAt === undefined ? {} : { approvalArchivedAt: input.approvalArchivedAt })
   };

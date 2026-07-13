@@ -14,6 +14,7 @@ export * from "./scheduler-manual-run.js";
 export * from "./scheduler-manual-run-preflight.js";
 export * from "./scheduler-manual-run-audit.js";
 export * from "./scheduler-manual-run-request-review.js";
+export * from "./scheduler-manual-run-approval.js";
 export * from "./scheduler-readiness.js";
 export * from "./runtime-grants.js";
 export * from "./safety/index.js";
