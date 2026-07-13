@@ -7,4 +7,8 @@ describe("scheduler spec safety", () => {
     expect(validateSchedulerSchedule({ kind: "condition_watch_future", timezone: "UTC" }, DEFAULT_SCHEDULER_POLICY)).toContain("scheduler_condition_watch_future_only");
     expect(schedulerTaskFindings({ type: "custom_future", dataSensitivity: "secret", parameterNames: [], requiredGrantIds: [] }, { kind: "external_send_blocked" })).toEqual(expect.arrayContaining(["scheduler_task_future_only", "scheduler_secret_task_blocked", "scheduler_external_delivery_blocked"]));
   });
+
+  it("uses conservative manual-run approval expiry defaults", () => {
+    expect(DEFAULT_SCHEDULER_POLICY).toMatchObject({ manualRunApprovalTtlSeconds: 900, manualRunApprovalExpiryWarningSeconds: 300, requireFreshApprovalAtExecution: true, requireFullRevalidationAfterExpiry: true, allowAutomaticRefresh: false });
+  });
 });

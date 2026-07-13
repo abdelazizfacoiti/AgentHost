@@ -12,6 +12,7 @@ import { createSchedulerManualRunTools } from "../tools/scheduler-manual-run.js"
 import { createSchedulerManualRunPreflightTools } from "../tools/scheduler-manual-run-preflight.js";
 import { createSchedulerManualRunAuditTools } from "../tools/scheduler-manual-run-audit.js";
 import { createSchedulerManualRunRequestLifecycleTools } from "../tools/scheduler-manual-run-request-lifecycle.js";
+import { createSchedulerManualRunApprovalDiagnosticsTools } from "../tools/scheduler-manual-run-approval-diagnostics.js";
 import { WorkflowStore } from "../workflow-store.js";
 
 class MemoryLogger implements AuditLogger { entries: AuditLogEntry[] = []; async log(entry: AuditLogEntry) { this.entries.push(entry); } }
@@ -26,7 +27,7 @@ async function context(): Promise<AgentHostMcpContext> {
 }
 
 async function call(value: AgentHostMcpContext, name: string, input: unknown) {
-  const tools = [...createSchedulerActivationTools(), ...createSchedulerManualRunTools(), ...createSchedulerManualRunPreflightTools(), ...createSchedulerManualRunAuditTools(), ...createSchedulerManualRunRequestLifecycleTools()];
+  const tools = [...createSchedulerActivationTools(), ...createSchedulerManualRunTools(), ...createSchedulerManualRunPreflightTools(), ...createSchedulerManualRunAuditTools(), ...createSchedulerManualRunRequestLifecycleTools(), ...createSchedulerManualRunApprovalDiagnosticsTools()];
   const tool = tools.find((item) => item.name === name); if (tool === undefined) throw new Error(`tool_missing:${name}`); return runTool(tool, input, value);
 }
 
@@ -101,5 +102,20 @@ describe("manual-run request approval lifecycle", () => {
     const listed = await call(value, "scheduler.manual_run_request_review_list", { manualRunRequestId: requestId });
     expect(listed).toMatchObject({ ok: true, data: { reviews: expect.any(Array) } }); expect(JSON.stringify(listed)).not.toContain("private@example.test");
     expect(await call(value, "scheduler.manual_run_request_review_get", { reviewId: revokeReviewId })).toMatchObject({ ok: true, data: { review: { reviewId: revokeReviewId } } });
+  });
+
+  it("records bounded expiry and explains stale approval without refresh", async () => {
+    const value = await context(); const requestId = await approvedRequest(value);
+    const reviewed = await call(value, "scheduler.manual_run_request_review", { manualRunRequestId: requestId, decision: "approve" });
+    const reviewId = (reviewed.data as { review: { reviewId: string } }).review.reviewId;
+    const applied = await call(value, "scheduler.manual_run_request_apply_review", { reviewId });
+    expect(applied).toMatchObject({ ok: true, data: { request: { approvalStatus: "approval_approved", executionAuthorized: false, executable: false, expiresAt: expect.any(String), approvalDependencySnapshot: expect.any(Object) } } });
+    const valid = await call(value, "scheduler.manual_run_request_approval_validity", { manualRunRequestId: requestId });
+    expect(valid).toMatchObject({ ok: true, data: { validity: { validityStatus: "valid", executionAuthorized: false, executable: false, actionsExecuted: false, confirmationTokensCreated: false } } });
+    const explained = await call(value, "scheduler.manual_run_request_approval_explain", { manualRunRequestId: requestId });
+    expect(explained).toMatchObject({ ok: true, data: { explanation: { redacted: true, recoveryActions: [] } } });
+    const stored = await value.scheduler!.getManualRunRequest(requestId); stored.expiresAt = new Date(Date.now() - 1000).toISOString(); await value.scheduler!.saveManualRunRequest(stored);
+    expect(await call(value, "scheduler.manual_run_request_approval_validity", { manualRunRequestId: requestId })).toMatchObject({ ok: true, data: { validity: { validityStatus: "expired", stale: true } } });
+    expect(value.confirmations).not.toHaveProperty("tokens");
   });
 });

@@ -81,6 +81,7 @@ import { createSchedulerManualRunTools } from "./tools/scheduler-manual-run.js";
 import { createSchedulerManualRunPreflightTools } from "./tools/scheduler-manual-run-preflight.js";
 import { createSchedulerManualRunAuditTools } from "./tools/scheduler-manual-run-audit.js";
 import { createSchedulerManualRunRequestLifecycleTools } from "./tools/scheduler-manual-run-request-lifecycle.js";
+import { createSchedulerManualRunApprovalDiagnosticsTools } from "./tools/scheduler-manual-run-approval-diagnostics.js";
 import { SchedulerStore } from "./scheduler-store.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { WorkflowReplayStore } from "./workflow-replay-store.js";
@@ -246,6 +247,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createSchedulerManualRunPreflightTools(),
     ...createSchedulerManualRunAuditTools(),
     ...createSchedulerManualRunRequestLifecycleTools(),
+    ...createSchedulerManualRunApprovalDiagnosticsTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),
     ...createAdapterTools(),
