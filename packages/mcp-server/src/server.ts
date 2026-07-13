@@ -51,7 +51,7 @@ import {
   ,analyzeLinuxImage
 } from "@agenthost/os-linux";
 import { BrowserBridgeServer, createBrowserAdapter, type BrowserBridgeAdapter } from "@agenthost/app-browser";
-import { HeadlessOverlayRenderer, OverlayManager } from "@agenthost/app-overlay";
+import { createOverlayRenderer, OverlayManager } from "@agenthost/app-overlay";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { ConfirmationManager } from "./confirmation.js";
 import { ForgeStore } from "./forge-store.js";
@@ -173,7 +173,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   await scheduler.ensureStructure();
   const receipts = new ToolReceiptManager();
   const visionEvidence = new VisionEvidenceStore();
-  const overlay = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId });
+  const overlay = new OverlayManager(createOverlayRenderer(config.overlayRendererMode ?? "headless", { sessionId }), { sessionId });
   const grants = new GrantStore({
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
@@ -331,7 +331,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     return toMcpToolResult(result);
   });
 
-  server.onclose = () => { void browserBridge?.close(); };
+  server.onclose = () => { void browserBridge?.close(); void overlay.close(); };
   return {
     server,
     context

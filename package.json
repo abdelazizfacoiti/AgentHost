@@ -20,7 +20,8 @@
     "browser:extension:prepare": "node scripts/prepare-browser-extension.mjs",
     "browser:extension:firefox": "node scripts/prepare-browser-extension.mjs --browser firefox",
     "browser:extension:chromium": "node scripts/prepare-browser-extension.mjs --browser chromium",
-    "browser:setup": "node scripts/prepare-browser-extension.mjs --setup"
+    "browser:setup": "node scripts/prepare-browser-extension.mjs --setup",
+    "demo:overlay": "node scripts/demo-overlay.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.0",

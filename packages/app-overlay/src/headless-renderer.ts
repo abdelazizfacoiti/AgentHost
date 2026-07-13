@@ -5,7 +5,7 @@ export class HeadlessOverlayRenderer implements OverlayRenderer {
   readonly #records = new Map<string, OverlayRenderRecord>();
   readonly #events: OverlayWidgetEvent[] = [];
   #emergencyHidden = false;
-  readonly #report: OverlayCapabilityReport = { supported: false, renderer: "headless", rendererStatus: "headless", sessionType: "unknown", displayAvailable: false, clickThrough: false, interactiveWidgets: false, multipleDisplays: false, reason: "Headless renderer stores deterministic state only.", limitations: ["No real overlay window is opened.", "Visual output unavailable until supported renderer is selected."] };
+  readonly #report: OverlayCapabilityReport = { supported: false, renderer: "headless", rendererStatus: "headless", sessionType: "unknown", displayAvailable: false, clickThrough: false, interactiveWidgets: false, multipleDisplays: false, globalOverlayAvailable: false, clickThroughAvailable: false, multiDisplayAvailable: false, animationAvailable: false, interactiveWidgetsAvailable: false, reason: "Headless renderer stores deterministic state only.", limitations: ["No real overlay window is opened.", "Visual output unavailable until supported renderer is selected."] };
 
   capabilities() { return this.#report; }
   show(record: OverlayRenderRecord): OverlayOperationResult { this.#emergencyHidden = false; this.#records.set(record.overlayId, record); return { ok: true, reason: "headless_state_recorded" }; }

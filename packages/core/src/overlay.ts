@@ -2,6 +2,7 @@ import { redactSensitiveText } from "./safety/redaction.js";
 
 export type OverlayPrimitiveType = "pointer" | "arrow" | "highlight" | "spotlight" | "tooltip" | "instruction_card" | "approval_card" | "warning" | "progress" | "checkpoint_result" | "status_toast" | "comparison" | "cancel_control" | "emergency_stop_control";
 export type OverlayRendererStatus = "available" | "degraded" | "headless" | "unavailable";
+export type OverlayRendererMode = "headless" | "auto" | "gtk3-x11";
 export type OverlaySensitivity = "public" | "private" | "secret";
 export type OverlayTheme = "system" | "light" | "dark";
 export type OverlayDensity = "compact" | "normal";
@@ -42,7 +43,7 @@ export type OverlayWidgetComponent =
 export interface OverlayWidget { widgetId?: string; title: string; components: OverlayWidgetComponent[]; target?: OverlayTargetBinding; style?: OverlayStyleTokens; animation?: OverlayAnimation; interaction?: OverlayInteractionPolicy; accessibilityLabel?: string; sensitivity: OverlaySensitivity; ttlMs?: number; }
 export interface OverlayWidgetEvent { eventId: string; overlayId: string; event: OverlayEventName; createdAt: string; ownerSessionId: string; }
 
-export interface OverlayCapabilityReport { supported: boolean; renderer: string; rendererStatus: OverlayRendererStatus; sessionType: "x11" | "wayland" | "unknown"; displayAvailable: boolean; clickThrough: boolean; interactiveWidgets: boolean; multipleDisplays: boolean; reason: string; limitations: string[]; }
+export interface OverlayCapabilityReport { supported: boolean; renderer: string; rendererStatus: OverlayRendererStatus; sessionType: "x11" | "wayland" | "unknown"; displayAvailable: boolean; clickThrough: boolean; interactiveWidgets: boolean; multipleDisplays: boolean; globalOverlayAvailable: boolean; clickThroughAvailable: boolean; multiDisplayAvailable: boolean; animationAvailable: boolean; interactiveWidgetsAvailable: boolean; fallbackRenderer?: "headless" | undefined; reason: string; limitations: string[]; }
 export interface OverlayStateSummary { overlayId: string; ownerSessionId: string; type: OverlayPrimitiveType | "widget"; target?: OverlayTargetSummary; sensitivity: OverlaySensitivity; interactive: boolean; visible: boolean; createdAt: string; updatedAt: string; expiresAt: string; lastEvent?: OverlayWidgetEvent; }
 export interface OverlayStateSnapshot { renderer: OverlayCapabilityReport; overlays: OverlayStateSummary[]; pendingEvents: OverlayWidgetEvent[]; emergencyHidden: boolean; }
 

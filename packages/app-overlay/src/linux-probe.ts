@@ -1,9 +1,26 @@
 import type { OverlayCapabilityReport } from "@agenthost/core";
+import { spawn } from "node:child_process";
 
-export interface OverlayEnvironment { XDG_SESSION_TYPE?: string; DISPLAY?: string; WAYLAND_DISPLAY?: string; }
+export interface OverlayEnvironment { XDG_SESSION_TYPE?: string; DISPLAY?: string; WAYLAND_DISPLAY?: string; XAUTHORITY?: string; PATH?: string; }
+export interface OverlayProbeOptions { gtk3Available?: boolean; }
 
-export function probeLinuxOverlay(environment: OverlayEnvironment = process.env): OverlayCapabilityReport {
+export function probeLinuxOverlay(environment: OverlayEnvironment = process.env, options: OverlayProbeOptions = {}): OverlayCapabilityReport {
   const session = (environment.XDG_SESSION_TYPE ?? (environment.DISPLAY ? "x11" : environment.WAYLAND_DISPLAY ? "wayland" : "unknown")).toLowerCase();
   const displayAvailable = session === "x11" ? Boolean(environment.DISPLAY) : session === "wayland" ? Boolean(environment.WAYLAND_DISPLAY) : false;
-  return { supported: false, renderer: "linux-unavailable", rendererStatus: "unavailable", sessionType: session === "x11" || session === "wayland" ? session : "unknown", displayAvailable, clickThrough: false, interactiveWidgets: false, multipleDisplays: false, reason: displayAvailable ? "No approved dependency-free click-through overlay backend is configured." : "No supported graphical display session is available.", limitations: session === "wayland" ? ["Wayland compositor-specific overlay support is not enabled."] : ["Visible rendering is unavailable; headless state remains safe and deterministic."] };
+  const sessionType = session === "x11" || session === "wayland" ? session : "unknown";
+  if (sessionType === "x11" && displayAvailable && options.gtk3Available === true) return { supported: true, renderer: "gtk3-x11", rendererStatus: "available", sessionType, displayAvailable, clickThrough: true, interactiveWidgets: true, multipleDisplays: true, globalOverlayAvailable: true, clickThroughAvailable: true, multiDisplayAvailable: true, animationAvailable: true, interactiveWidgetsAvailable: true, reason: "GTK3 X11 overlay backend is available.", limitations: ["Compositor and window-manager z-order behavior may vary."] };
+  const limitations = sessionType === "wayland" ? ["Wayland compositor-specific overlay support is not enabled.", "Global coordinates, layer-shell, and guaranteed click-through are unavailable."] : ["Visible rendering is unavailable; headless state remains safe and deterministic."];
+  const reason = sessionType === "x11" && displayAvailable && options.gtk3Available === false ? "GTK3 PyGObject backend is unavailable." : displayAvailable ? "No supported Linux overlay backend is available for this session." : "No supported graphical display session is available.";
+  return { supported: false, renderer: "linux-unavailable", rendererStatus: "unavailable", sessionType, displayAvailable, clickThrough: false, interactiveWidgets: false, multipleDisplays: false, globalOverlayAvailable: false, clickThroughAvailable: false, multiDisplayAvailable: false, animationAvailable: false, interactiveWidgetsAvailable: false, reason, limitations };
+}
+
+export async function probeGtk3(environment: OverlayEnvironment = process.env, timeoutMs = 2_000): Promise<boolean> {
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
+    const child = spawn("python3", ["-c", "import gi; gi.require_version('Gtk','3.0'); from gi.repository import Gtk; raise SystemExit(0)"], { stdio: ["ignore", "ignore", "ignore"], env: { PATH: environment.PATH ?? process.env.PATH ?? "/usr/bin:/bin", ...(environment.DISPLAY === undefined ? {} : { DISPLAY: environment.DISPLAY }), ...(environment.XAUTHORITY === undefined ? {} : { XAUTHORITY: environment.XAUTHORITY }), ...(environment.XDG_SESSION_TYPE === undefined ? {} : { XDG_SESSION_TYPE: environment.XDG_SESSION_TYPE }) } });
+    const timer = setTimeout(() => { child.kill("SIGKILL"); finish(false); }, timeoutMs);
+    child.once("error", () => finish(false));
+    child.once("exit", (code) => finish(code === 0));
+  });
 }
