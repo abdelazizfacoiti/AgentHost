@@ -13,6 +13,7 @@ export class ToolReceiptManager {
   readonly #secret = randomBytes(32); readonly #records = new Map<string, ReceiptRecord>(); readonly #expectations = new Map<string, Expectation>();
   fingerprintInput(input: unknown): string { return this.#sign(stable(strip(input))).slice(0, 32); }
   registerReplayExpectation(input: Expectation): void { this.#expectations.set(input.prepareId, input); }
+  invalidateReplayExpectations(replaySessionId: string): number { const matches = [...this.#expectations.entries()].filter(([, item]) => item.replaySessionId === replaySessionId); for (const [prepareId] of matches) this.#expectations.delete(prepareId); return matches.length; }
   issue(input: { sessionId: string; tool: string; rawInput: unknown; result: ToolResult; riskLevel: RiskLevel; target?: unknown }): ToolResultReceipt {
     const createdAt = new Date().toISOString(); const preview = input.result.preview === true; const status = !input.result.ok ? "failed" : preview ? "preview" : "executed"; const inputFingerprint = this.fingerprintInput(input.rawInput);
     const replayBinding = [...this.#expectations.values()].find((item) => item.sessionId === input.sessionId && item.tool === input.tool && item.inputFingerprint === inputFingerprint && item.preview === preview);
