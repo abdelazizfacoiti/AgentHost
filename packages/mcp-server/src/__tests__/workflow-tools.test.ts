@@ -219,4 +219,24 @@ describe("workflow tools", () => {
     expect(verified).toMatchObject({ ok: true, data: { status: "completed", currentStepIndex: 1 } });
     expect(value.linux).not.toHaveProperty("click");
   });
+
+  it("diagnoses, cancels, archives, and recreates replay sessions without reusing private material", async () => {
+    const value = await context(); const trace = await value.workflowTrace!.createTrace({ sessionId: value.sessionId, name: "Recovery" });
+    await value.workflowTrace!.capture({ sessionId: value.sessionId, step: { stepId: "step_one", timestamp: new Date().toISOString(), tool: "browser.click_element", strategy: "browser", actionType: "click_element", riskLevel: "medium", inputSummary: "private omitted", outputSummary: "omitted", preview: false, ok: true } });
+    await value.workflowTrace!.stopTrace({ sessionId: value.sessionId, traceId: trace.traceId });
+    const saved = await call(value, "workflow.skill_save_from_trace", { traceId: trace.traceId, name: "Recovery", description: "Generic", parameters: [{ name: "target", type: "string", required: true }] }); const skillId = (saved.data as { skillId: string }).skillId;
+    const started = await call(value, "workflow.replay_session_start", { skillId, parameters: { target: "private-value" } }); const replaySessionId = (started.data as { replaySessionId: string }).replaySessionId;
+    await expect(call(value, "workflow.replay_session_diagnose", { replaySessionId })).resolves.toMatchObject({ ok: true, data: { diagnosticCode: "waiting_for_prepare", continuable: true } });
+    await call(value, "workflow.replay_step_prepare", { replaySessionId, underlyingInput: { elementId: "private-element" } });
+    await expect(call(value, "workflow.replay_session_diagnose", { replaySessionId })).resolves.toMatchObject({ ok: true, data: { diagnosticCode: "waiting_for_original_tool_result", receiptState: "awaiting" } });
+    const cancelled = await call(value, "workflow.replay_session_cancel", { replaySessionId }); expect(cancelled).toMatchObject({ ok: true, data: { status: "cancelled", cancellation: { invalidatedPrepared: true } } });
+    await expect(call(value, "workflow.replay_session_cancel", { replaySessionId })).resolves.toMatchObject({ ok: true, data: { status: "cancelled" } });
+    await expect(call(value, "workflow.replay_step_prepare", { replaySessionId, underlyingInput: {} })).resolves.toMatchObject({ ok: false, error: { code: "session_cancelled" } });
+    const listed = await call(value, "workflow.replay_session_list", {}); expect(JSON.stringify(listed)).not.toContain("private-value"); expect(JSON.stringify(listed)).not.toContain("private-element");
+    const archived = await call(value, "workflow.replay_session_archive", { replaySessionId }); expect(archived).toMatchObject({ ok: true, data: { status: "archived" } });
+    await expect(call(value, "workflow.replay_step_prepare", { replaySessionId, underlyingInput: {} })).resolves.toMatchObject({ ok: false, error: { code: "session_archived" } });
+    await expect(call(value, "workflow.replay_session_recreate_from_plan", { replaySessionId })).resolves.toMatchObject({ ok: false, error: { code: "needs_parameters" } });
+    const recreated = await call(value, "workflow.replay_session_recreate_from_plan", { replaySessionId, parameters: { target: "fresh" } }); expect(recreated).toMatchObject({ ok: true, preview: true, data: { status: "active", receiptReused: false, preparedInputReused: false } });
+    expect(value.linux).not.toHaveProperty("click");
+  });
 });

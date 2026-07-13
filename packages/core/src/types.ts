@@ -340,8 +340,15 @@ export interface WorkflowSkillReplayDryRun {
   executable: false;
 }
 
-export type WorkflowReplaySessionStatus = "planned" | "active" | "paused" | "blocked" | "completed" | "cancelled" | "failed";
+export type WorkflowReplaySessionStatus = "planned" | "active" | "paused" | "blocked" | "completed" | "cancelled" | "failed" | "archived";
 export type WorkflowReplayStepState = "pending" | "prepared_dryrun" | "dryrun_applied" | "prepared_execute" | "prepared_observe" | "observe_applied" | "executed_applied" | "verified" | "failed" | "blocked";
+export type WorkflowReplayDiagnosticCode = "waiting_for_prepare" | "waiting_for_original_tool_result" | "waiting_for_execution_prepare" | "waiting_for_checkpoint_verification" | "session_recoverable_with_parameters" | "session_recreate_required" | "needs_parameters" | "cancelled_by_user" | "archived" | "cannot_resume_ephemeral_missing" | "receipt_state_terminal" | "outstanding_prepare_invalidated" | "safe_to_archive" | "no_recovery_available" | "blocked_by_previous_step";
+export interface WorkflowReplayDiagnosticSummary {
+  sessionId: string; status: WorkflowReplaySessionStatus; currentStepIndex: number; currentStepState: WorkflowReplayStepState | "complete";
+  continuable: boolean; recoverable: boolean; cancellationAvailable: boolean; allowedNextActions: string[]; nextRecommendedAction: string;
+  diagnosticCode: WorkflowReplayDiagnosticCode; safeExplanation: string; blockerCount: number; warningCount: number;
+  receiptState: "none" | "awaiting" | "active" | "reserved" | "consumed" | "unavailable"; ephemeralMaterialStatus: "available" | "missing" | "invalidated";
+}
 export interface WorkflowReplayStepResultSummary { stepId: string; tool: string; status: "prepared" | "dryrun_done" | "executed" | "failed"; ok: boolean; preview: boolean; confirmationAccepted: boolean; trusted?: boolean; receiptId?: string; errorCode?: string; summary: string; createdAt: string; }
 export interface WorkflowReplayCheckpointResultSummary { stepId: string; status: "passed" | "failed" | "blocked" | "timeout"; summary: string; checkedAt: string; }
 export interface WorkflowReplaySession {
@@ -350,6 +357,7 @@ export interface WorkflowReplaySession {
   stepResults: WorkflowReplayStepResultSummary[]; checkpointResults: WorkflowReplayCheckpointResultSummary[]; blockers: WorkflowSkillReplayBlocker[]; warnings: string[];
   /** Persisted transition state. Missing values from older sessions normalize to pending. */
   stepStates?: WorkflowReplayStepState[];
+  archivedAt?: string; archivedFromStatus?: Exclude<WorkflowReplaySessionStatus, "archived">; lastDiagnosticCode?: WorkflowReplayDiagnosticCode;
 }
 
 export type ConfirmationStatus =
