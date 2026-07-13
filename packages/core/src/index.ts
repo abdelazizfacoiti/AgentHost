@@ -26,3 +26,4 @@ export * from "./workflow-replay.js";
 export * from "./workflow-redaction.js";
 export * from "./vision.js";
 export * from "./checkpoint.js";
+export * from "./overlay.js";

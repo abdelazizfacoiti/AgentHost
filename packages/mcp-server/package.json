@@ -19,6 +19,7 @@
   "dependencies": {
     "@agenthost/core": "file:../core",
     "@agenthost/app-browser": "file:../app-browser",
+    "@agenthost/app-overlay": "file:../app-overlay",
     "@agenthost/os-linux": "file:../os-linux",
     "@modelcontextprotocol/sdk": "^1.13.0",
     "zod": "^3.25.76"

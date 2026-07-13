@@ -51,6 +51,7 @@ import {
   ,analyzeLinuxImage
 } from "@agenthost/os-linux";
 import { BrowserBridgeServer, createBrowserAdapter, type BrowserBridgeAdapter } from "@agenthost/app-browser";
+import { HeadlessOverlayRenderer, OverlayManager } from "@agenthost/app-overlay";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { ConfirmationManager } from "./confirmation.js";
 import { ForgeStore } from "./forge-store.js";
@@ -82,6 +83,7 @@ import { createSchedulerManualRunPreflightTools } from "./tools/scheduler-manual
 import { createSchedulerManualRunAuditTools } from "./tools/scheduler-manual-run-audit.js";
 import { createSchedulerManualRunRequestLifecycleTools } from "./tools/scheduler-manual-run-request-lifecycle.js";
 import { createSchedulerManualRunApprovalDiagnosticsTools } from "./tools/scheduler-manual-run-approval-diagnostics.js";
+import { createOverlayTools } from "./tools/overlay.js";
 import { SchedulerStore } from "./scheduler-store.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { WorkflowReplayStore } from "./workflow-replay-store.js";
@@ -154,6 +156,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   context: AgentHostMcpContext;
 }> {
   const config = options.config ?? (await loadAgentHostConfig());
+  const sessionId = options.sessionId ?? createSessionId();
   const registry = options.registry ?? createBaseCapabilityRegistry();
   const adapters = options.adapters ?? createAdapterRegistry();
   await registerOptionalBlenderRuntime(registry, adapters);
@@ -170,6 +173,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   await scheduler.ensureStructure();
   const receipts = new ToolReceiptManager();
   const visionEvidence = new VisionEvidenceStore();
+  const overlay = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId });
   const grants = new GrantStore({
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
@@ -217,7 +221,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
         focusLinuxAccessibilityElement(input, { agentHostDir: config.agentHostDir })
     };
   const context: AgentHostMcpContext = {
-    sessionId: options.sessionId ?? createSessionId(),
+    sessionId,
     config,
     policy,
     registry,
@@ -231,6 +235,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     scheduler,
     receipts,
     visionEvidence,
+    overlay,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux
   };
@@ -248,6 +253,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createSchedulerManualRunAuditTools(),
     ...createSchedulerManualRunRequestLifecycleTools(),
     ...createSchedulerManualRunApprovalDiagnosticsTools(),
+    ...createOverlayTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),
     ...createAdapterTools(),

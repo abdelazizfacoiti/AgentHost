@@ -16,6 +16,9 @@
       ],
       "@agenthost/app-browser": [
         "packages/app-browser/src/index.ts"
+      ],
+      "@agenthost/app-overlay": [
+        "packages/app-overlay/src/index.ts"
       ]
     },
     "strict": true,

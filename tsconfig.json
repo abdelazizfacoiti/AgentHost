@@ -8,6 +8,9 @@
       "path": "./packages/app-browser"
     },
     {
+      "path": "./packages/app-overlay"
+    },
+    {
       "path": "./packages/core"
     },
     {
