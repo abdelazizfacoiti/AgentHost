@@ -74,6 +74,8 @@ import { createBrowserSetupTools } from "./tools/browser-setup.js";
 import { createWorkflowTools } from "./tools/workflow.js";
 import { createVisionTools } from "./tools/vision.js";
 import { createCheckpointTools } from "./tools/checkpoint.js";
+import { createSchedulerTools } from "./tools/scheduler.js";
+import { SchedulerStore } from "./scheduler-store.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { WorkflowReplayStore } from "./workflow-replay-store.js";
 import { ToolReceiptManager } from "./tool-receipts.js";
@@ -157,6 +159,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   await workflowTrace.ensureStructure();
   const workflowReplay = new WorkflowReplayStore(config.agentHostDir);
   await workflowReplay.ensureStructure();
+  const scheduler = new SchedulerStore(config.agentHostDir);
+  await scheduler.ensureStructure();
   const receipts = new ToolReceiptManager();
   const visionEvidence = new VisionEvidenceStore();
   const grants = new GrantStore({
@@ -217,6 +221,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     forge,
     workflowTrace,
     workflowReplay,
+    scheduler,
     receipts,
     visionEvidence,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
@@ -228,6 +233,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createForgeSandboxTools(),
     ...createBrowserTools(), ...createBrowserSetupTools(),
     ...createWorkflowTools(),
+    ...createSchedulerTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),
     ...createAdapterTools(),

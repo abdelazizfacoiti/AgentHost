@@ -12,6 +12,13 @@ describe("CapabilityRegistry", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
+      "scheduler.job_propose",
+      "scheduler.job_review",
+      "scheduler.job_apply_review",
+      "scheduler.job_get",
+      "scheduler.job_list",
+      "scheduler.job_archive",
+      "scheduler.job_disable",
       "checkpoint.evaluate",
       "checkpoint.wait_for",
       "vision.prepare_pointer_action",
