@@ -97,6 +97,10 @@ describe("workflow tools", () => {
       checkpointTemplates: [{ templateId: "output_exists", name: "Output exists", description: "Check output", kind: "file_exists", strategy: "file", sensitivity: "public", expectedTemplate: { path: "{{outputPath}}" }, parameters: ["outputPath"], requiredGrants: [], safetyNotes: [] }]
     });
     const skillId = (saved.data as { skillId: string }).skillId;
+    const proposed = await call(value, "workflow.skill_checkpoint_template_propose", { skillId, operation: "update", changeSummary: "Approve file checkpoint", template: { templateId: "output_exists", name: "Output exists", description: "Check output", kind: "file_exists", strategy: "file", sensitivity: "public", expectedTemplate: { path: "{{outputPath}}" }, parameters: ["outputPath"], requiredGrants: [], safetyNotes: [] } });
+    const reviewId = (proposed.data as { reviewId: string }).reviewId;
+    await call(value, "workflow.skill_checkpoint_template_review", { reviewId, decision: "approve" });
+    await call(value, "workflow.skill_checkpoint_template_apply", { reviewId });
     const bound = await call(value, "workflow.skill_bind_checkpoints", { skillId, parameters: { outputPath: "/tmp/private-output" } });
     expect(bound).toMatchObject({ ok: true, preview: true, data: { actionsExecuted: false, templates: [{ templateId: "output_exists", expectedFields: ["path"], redacted: true }] } });
     expect(JSON.stringify(bound)).not.toContain("private-output");
@@ -118,7 +122,47 @@ describe("workflow tools", () => {
       { templateId: "secret_check", name: "Secret", description: "Never inspect", kind: "manual_check", strategy: "manual", sensitivity: "secret", expectedTemplate: {}, parameters: [], requiredGrants: [], safetyNotes: [] },
       { templateId: "private_check", name: "Private", description: "Needs grant", kind: "manual_check", strategy: "manual", sensitivity: "private", expectedTemplate: {}, parameters: [], requiredGrants: ["grant_private"], safetyNotes: [] }
     ] });
-    const result = await call(value, "workflow.skill_checkpoints_dryrun", { skillId: (saved.data as { skillId: string }).skillId, evaluate: true });
-    expect(result).toMatchObject({ ok: true, data: { actionsExecuted: false, status: "blocked", templates: [{ blockedReasons: ["secret_checkpoint_blocked"] }, { blockedReasons: ["checkpoint_grant_missing"] }] } });
+    const result = await call(value, "workflow.skill_checkpoints_dryrun", { skillId: (saved.data as { skillId: string }).skillId, evaluate: true, reviewMode: true });
+    expect(result).toMatchObject({ ok: true, preview: true, data: { actionsExecuted: false, evaluated: false, templates: [{ blockedReasons: ["secret_checkpoint_blocked"] }, { blockedReasons: ["checkpoint_grant_missing"] }] } });
+  });
+
+  it("proposes, reviews, applies, versions, archives, and redacts checkpoint templates", async () => {
+    const value = await context();
+    const started = await call(value, "workflow.trace_start", { name: "Review lifecycle" });
+    const traceId = (started.data as { traceId: string }).traceId;
+    await call(value, "workflow.trace_stop", { traceId });
+    const saved = await call(value, "workflow.skill_save_from_trace", { traceId, name: "Skill", description: "Generic", parameters: [{ name: "target", type: "string", required: true }] });
+    const skillId = (saved.data as { skillId: string }).skillId;
+    const proposed = await call(value, "workflow.skill_checkpoint_template_propose", { skillId, operation: "create", changeSummary: "Add file check", template: { templateId: "file_check", name: "File", description: "Check", kind: "file_exists", strategy: "file", sensitivity: "public", expectedTemplate: { path: "{{target}}" }, parameters: ["target"], requiredGrants: [], safetyNotes: [] } });
+    expect(proposed).toMatchObject({ ok: true, preview: true, data: { status: "pending", afterSummary: { expectedTemplateRedacted: true } } });
+    expect(JSON.stringify(proposed)).not.toContain("{{target}}");
+    const reviewId = (proposed.data as { reviewId: string }).reviewId;
+    await expect(call(value, "workflow.skill_checkpoint_template_apply", { reviewId })).resolves.toMatchObject({ ok: false, error: { code: "checkpoint_review_not_approved" } });
+    expect(await call(value, "workflow.skill_checkpoint_template_review", { reviewId, decision: "approve" })).toMatchObject({ ok: true, data: { status: "approved" } });
+    expect(await call(value, "workflow.skill_checkpoint_template_apply", { reviewId })).toMatchObject({ ok: true, data: { status: "applied" } });
+    const skill = await call(value, "workflow.skill_get", { skillId });
+    expect(skill).toMatchObject({ ok: true, data: { checkpointTemplates: [{ templateId: "file_check", status: "approved", version: 1, expectedTemplateRedacted: true }] } });
+    expect(JSON.stringify(skill)).not.toContain("{{target}}");
+    const update = await call(value, "workflow.skill_checkpoint_template_propose", { skillId, operation: "update", changeSummary: "Tune timeout", template: { templateId: "file_check", name: "File", description: "Check", kind: "file_exists", strategy: "file", sensitivity: "public", expectedTemplate: { path: "{{target}}" }, parameters: ["target"], requiredGrants: [], safetyNotes: [], timeoutMs: 1000 } });
+    const updateId = (update.data as { reviewId: string }).reviewId;
+    await call(value, "workflow.skill_checkpoint_template_review", { reviewId: updateId, decision: "approve" });
+    await call(value, "workflow.skill_checkpoint_template_apply", { reviewId: updateId });
+    const archived = await call(value, "workflow.skill_checkpoint_template_archive", { skillId, templateId: "file_check", changeSummary: "Retire" });
+    expect(archived).toMatchObject({ ok: true, data: { status: "archived", version: 3 } });
+    const listed = await call(value, "workflow.skill_checkpoint_template_list_reviews", { skillId });
+    expect(listed).toMatchObject({ ok: true, data: { reviews: expect.any(Array) } });
+    expect(value.confirmations).not.toHaveProperty("tokens");
+  });
+
+  it("blocks unsafe proposals and excludes unapproved templates by default", async () => {
+    const value = await context(); const started = await call(value, "workflow.trace_start", { name: "Unsafe reviews" }); const traceId = (started.data as { traceId: string }).traceId;
+    await call(value, "workflow.trace_stop", { traceId }); const saved = await call(value, "workflow.skill_save_from_trace", { traceId, name: "Skill", description: "Generic", parameters: [{ name: "path", type: "string", required: true }] }); const skillId = (saved.data as { skillId: string }).skillId;
+    const secret = await call(value, "workflow.skill_checkpoint_template_propose", { skillId, operation: "create", changeSummary: "Secret", template: { templateId: "secret", name: "Secret", description: "Check", kind: "manual_check", strategy: "manual", sensitivity: "secret", expectedTemplate: {}, parameters: [], requiredGrants: [], safetyNotes: [] } });
+    const secretId = (secret.data as { reviewId: string }).reviewId;
+    expect(await call(value, "workflow.skill_checkpoint_template_review", { reviewId: secretId, decision: "approve" })).toMatchObject({ ok: true, data: { status: "blocked", blockedReasons: ["secret_checkpoint_blocked"] } });
+    await expect(call(value, "workflow.skill_checkpoint_template_propose", { skillId, operation: "create", changeSummary: "Private", template: { templateId: "private", name: "Private", description: "Check", kind: "manual_check", strategy: "manual", sensitivity: "private", expectedTemplate: { text: "raw@private.test" }, parameters: [], requiredGrants: ["grant"], safetyNotes: [] } })).resolves.toMatchObject({ ok: false, error: { code: "checkpoint_template_private_literal_blocked" } });
+    await expect(call(value, "workflow.skill_checkpoint_template_propose", { skillId, operation: "create", changeSummary: "Bad", template: { templateId: "bad", name: "Bad", description: "Check", kind: "file_exists", strategy: "file", sensitivity: "public", expectedTemplate: { path: "{{process.env.HOME}}" }, parameters: [], requiredGrants: [], safetyNotes: [] } })).resolves.toMatchObject({ ok: false, error: { code: "checkpoint_template_invalid_interpolation" } });
+    const bound = await call(value, "workflow.skill_bind_checkpoints", { skillId, parameters: { path: "/tmp/x" } });
+    expect(bound).toMatchObject({ ok: true, data: { templates: [] } });
   });
 });
