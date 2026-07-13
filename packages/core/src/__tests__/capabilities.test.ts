@@ -8,7 +8,7 @@ describe("CapabilityRegistry", () => {
     expect(registry.listStrategies()).toEqual([...AUTOMATION_STRATEGIES]);
   });
 
-  it("registers base AgentHost tools through Phase 46", () => {
+  it("registers base AgentHost tools through Phase 49", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
@@ -55,6 +55,16 @@ describe("CapabilityRegistry", () => {
       "scheduler.manual_run_request_approval_validity",
       "scheduler.manual_run_request_approval_explain",
       "scheduler.manual_run_request_approval_list_stale",
+      "overlay.get_capabilities",
+      "overlay.get_state",
+      "overlay.show_pointer",
+      "overlay.highlight_target",
+      "overlay.show_tooltip",
+      "overlay.show_widget",
+      "overlay.update",
+      "overlay.dismiss",
+      "overlay.clear",
+      "overlay.emergency_hide",
       "checkpoint.evaluate",
       "checkpoint.wait_for",
       "vision.prepare_pointer_action",

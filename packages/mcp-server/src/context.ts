@@ -38,6 +38,7 @@ import type {
   ,VisionGroundingResult, VisionMode
 } from "@agenthost/core";
 import type { BrowserBridgeAdapter, BrowserBridgeServer } from "@agenthost/app-browser";
+import type { OverlayManager } from "@agenthost/app-overlay";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
 import type { ConfirmationManager } from "./confirmation.js";
 import type { ForgeStore } from "./forge-store.js";
@@ -155,5 +156,6 @@ export interface AgentHostMcpContext {
   scheduler?: SchedulerStore;
   browser?: BrowserBridgeAdapter;
   browserBridge?: BrowserBridgeServer;
+  overlay?: OverlayManager;
   linux: LinuxAutomation;
 }
