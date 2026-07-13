@@ -43,6 +43,13 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
 
   for (const capability of [
+    { name: "scheduler.job_propose", riskLevel: "low" as const, description: "Creates inert scheduled-job proposal." },
+    { name: "scheduler.job_review", riskLevel: "low" as const, description: "Reviews inert scheduled-job safety." },
+    { name: "scheduler.job_apply_review", riskLevel: "low" as const, description: "Applies approved inert scheduled-job review." },
+    { name: "scheduler.job_get", riskLevel: "observe" as const, description: "Gets redacted scheduled-job metadata." },
+    { name: "scheduler.job_list", riskLevel: "observe" as const, description: "Lists redacted scheduled-job metadata." },
+    { name: "scheduler.job_archive", riskLevel: "low" as const, description: "Archives inert scheduled-job metadata." },
+    { name: "scheduler.job_disable", riskLevel: "low" as const, description: "Disables inert scheduled-job metadata." },
     { name: "checkpoint.evaluate", riskLevel: "low" as const, description: "Evaluates read-only semantic post-action checkpoints." },
     { name: "checkpoint.wait_for", riskLevel: "low" as const, description: "Polls read-only semantic checkpoints with bounded timeout." },
     { name: "vision.prepare_pointer_action", riskLevel: "medium" as const, strategy: "gui_control" as const, description: "Prepares validated desktop.click dry-run suggestion from fresh trusted screenshot evidence." },

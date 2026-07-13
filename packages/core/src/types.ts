@@ -491,7 +491,17 @@ export interface PolicyProfile {
   requireExactTargetForStateChanging: boolean;
   defaults: PermissionDefaults;
   grants: CapabilityGrant[];
+  scheduler?: SchedulerPolicy;
 }
+
+export interface SchedulerPolicy { allowSchedulerSpecs: boolean; allowScheduledExecution: false; requireReviewForJobs: boolean; requireApprovalForJobActivation: true; allowExternalDelivery: false; minRecurringIntervalMinutes: number; allowConditionWatch: false; }
+export type ScheduledJobStatus = "draft" | "review_required" | "approved" | "rejected" | "archived" | "disabled";
+export type ScheduledJobSchedule = { kind: "once"; runAt: string; timezone: string; nextRunPreview?: string } | { kind: "recurring"; everyMinutes: number; timezone: string; nextRunPreview?: string } | { kind: "condition_watch_future"; timezone: string };
+export type ScheduledJobTask = { type: "skill_replay_dryrun" | "skill_replay_stepwise_future" | "browser_research_future" | "file_check_future" | "shell_safe_future" | "notification_future" | "custom_future"; skillId?: string; dataSensitivity: DataSensitivity; parameterNames: string[]; requiredGrantIds: string[]; };
+export type ScheduledJobDeliveryPolicy = { kind: "local_log" | "local_file" | "desktop_notification_future" | "draft_message_future" | "draft_email_future" | "external_send_blocked"; outputName?: string; };
+export interface ScheduledJobSafetyReview { scheduleFindings: string[]; taskFindings: string[]; deliveryFindings: string[]; blockedReasons: string[]; requiredGrantIds: string[]; missingGrantIds: string[]; }
+export interface ScheduledJobSpec { jobId: string; name: string; description: string; createdAt: string; updatedAt: string; status: ScheduledJobStatus; schedule: ScheduledJobSchedule; task: ScheduledJobTask; delivery: ScheduledJobDeliveryPolicy; parametersSummary: Array<{ name: string; provided: boolean; redacted: true }>; requiredGrants: string[]; requiredConfirmations: string[]; safetyRestrictions: string[]; retryPolicy: "none"; maxAttempts: 1; reviewId?: string; version: number; jobHash: string; executable: false; scheduledExecutionEnabled: false; archivedAt?: string; }
+export interface ScheduledJobReview { reviewId: string; jobId: string; action: "create" | "update" | "approve" | "reject" | "archive" | "disable"; createdAt: string; updatedAt: string; status: "pending" | "approved" | "rejected" | "blocked" | "applied" | "archived"; version: number; jobHash: string; beforeSummary?: Record<string, unknown>; afterSummary: Record<string, unknown>; safety: ScheduledJobSafetyReview; reviewer?: string; }
 
 export interface AgentHostConfig {
   agentHostDir: string;
