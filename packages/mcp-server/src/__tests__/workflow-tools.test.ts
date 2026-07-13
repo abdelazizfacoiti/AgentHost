@@ -3,6 +3,7 @@ import {
   createAdapterRegistry,
   createBaseCapabilityRegistry,
   getPolicyProfile,
+  toolSuccess,
   type AgentHostConfig,
   type AuditLogEntry,
   type AuditLogger
@@ -17,6 +18,7 @@ import { runTool, type AgentHostToolDefinition } from "../tool-runner.js";
 import { createWorkflowTools } from "../tools/workflow.js";
 import { WorkflowStore } from "../workflow-store.js";
 import { WorkflowReplayStore } from "../workflow-replay-store.js";
+import { ToolReceiptManager } from "../tool-receipts.js";
 
 class MemoryLogger implements AuditLogger {
   entries: AuditLogEntry[] = [];
@@ -31,7 +33,7 @@ async function context(): Promise<AgentHostMcpContext> {
   const workflowReplay = new WorkflowReplayStore(agentHostDir); await workflowReplay.ensureStructure();
   return {
     sessionId: "session_workflow", config, policy, registry: createBaseCapabilityRegistry(), adapters: createAdapterRegistry(), logger: new MemoryLogger(),
-    confirmations: new ConfirmationManager(), grants: new GrantStore({ persistentGrants: [] }), forge: new ForgeStore(agentHostDir), workflowTrace, workflowReplay,
+    confirmations: new ConfirmationManager(), grants: new GrantStore({ persistentGrants: [] }), forge: new ForgeStore(agentHostDir), workflowTrace, workflowReplay, receipts: new ToolReceiptManager(),
     linux: {} as AgentHostMcpContext["linux"]
   };
 }
@@ -54,7 +56,10 @@ describe("workflow tools", () => {
       auditOutputSummary: () => "Result content intentionally omitted.",
       async handler(input) { return { ok: true, tool: "browser.fill_text", riskLevel: "medium", approval: { required: false, status: "not_required" }, data: { text: input.text }, observations: [], error: null }; }
     };
-    await runTool(privateTool, { text: "super-secret message" }, value);
+    const privateResult = await runTool(privateTool, { text: "super-secret message" }, value);
+    expect(privateResult.receipt).toMatchObject({ tool: "browser.fill_text", sessionId: value.sessionId, executionStatus: "executed" });
+    expect(JSON.stringify(privateResult.receipt)).not.toContain("super-secret message");
+    expect(JSON.stringify((value.logger as MemoryLogger).entries)).not.toContain("receiptSignature");
     const stopped = await call(value, "workflow.trace_stop", { traceId, outcome: "success" });
     expect(stopped.ok).toBe(true);
     const trace = await call(value, "workflow.trace_get", { traceId });
@@ -203,11 +208,13 @@ describe("workflow tools", () => {
     const first = await call(value, "workflow.replay_step_prepare", { replaySessionId, underlyingInput: { elementId: "private-element" } });
     expect(first).toMatchObject({ ok: true, data: { tool: "browser.click_element", underlyingToolCall: { input: { dryRun: true }, inputOmitted: true } } });
     expect(JSON.stringify(await call(value, "workflow.replay_session_get", { replaySessionId }))).not.toContain("private-element");
-    await expect(call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "wrong", tool: "browser.click_element", ok: true, preview: true })).resolves.toMatchObject({ ok: false, error: { code: "replay_result_mismatch" } });
-    await call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "step_click", tool: "browser.click_element", ok: true, preview: true });
+    const previewReceipt = value.receipts!.issue({ sessionId: value.sessionId, tool: "browser.click_element", rawInput: { elementId: "private-element", dryRun: true }, result: toolSuccess({ tool: "browser.click_element", riskLevel: "medium", preview: true, data: {} }), riskLevel: "medium" });
+    await expect(call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "wrong", receipt: previewReceipt })).resolves.toMatchObject({ ok: false, error: { code: "replay_receipt_mismatch" } });
+    await call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "step_click", receipt: previewReceipt });
     const second = await call(value, "workflow.replay_step_prepare", { replaySessionId, underlyingInput: { elementId: "private-element" } });
     expect(second).toMatchObject({ ok: true, data: { requiresOriginalConfirmationToken: true } });
-    await call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "step_click", tool: "browser.click_element", ok: true, preview: false, executed: true, confirmationAccepted: true });
+    const executionReceipt = value.receipts!.issue({ sessionId: value.sessionId, tool: "browser.click_element", rawInput: { elementId: "private-element", confirmationToken: "secret" }, result: toolSuccess({ tool: "browser.click_element", riskLevel: "medium", confirmation: { status: "tokenAccepted", used: true, accepted: true, executed: true, reason: "accepted" }, data: {} }), riskLevel: "medium" });
+    await call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "step_click", receipt: executionReceipt });
     const verified = await call(value, "workflow.replay_step_verify", { replaySessionId });
     expect(verified).toMatchObject({ ok: true, data: { status: "completed", currentStepIndex: 1 } });
     expect(value.linux).not.toHaveProperty("click");

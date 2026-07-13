@@ -126,12 +126,18 @@ export interface ToolResult<T = unknown> {
   strategy?: AutomationStrategy;
   preview?: boolean;
   confirmation?: ToolConfirmationInfo;
+  receipt?: ToolResultReceipt;
   grantDecision?: GrantDecision;
   approval: ApprovalInfo;
   data: T | null;
   observations: string[];
   error: ToolError | null;
 }
+
+export type ToolResultReceiptStatus = "preview" | "executed" | "failed" | "blocked";
+export interface ToolResultReceiptPayload { receiptId: string; sessionId: string; tool: string; createdAt: string; expiresAt: string; resultFingerprint: string; inputFingerprint?: string; targetFingerprint?: string; riskLevel: RiskLevel; preview: boolean; confirmationStatus?: ConfirmationStatus; executionStatus: ToolResultReceiptStatus; replayBinding?: { replaySessionId: string; preparedStepId: string; prepareId: string; stepIndex: number; }; }
+export interface ToolResultReceipt extends ToolResultReceiptPayload { receiptSignature: string; }
+export interface ToolResultReceiptVerification { ok: boolean; reason: string; receipt?: ToolResultReceipt; }
 
 export interface WorkflowSafetyDecisionSummary {
   allowed: boolean;
@@ -335,7 +341,7 @@ export interface WorkflowSkillReplayDryRun {
 }
 
 export type WorkflowReplaySessionStatus = "planned" | "active" | "paused" | "blocked" | "completed" | "cancelled" | "failed";
-export interface WorkflowReplayStepResultSummary { stepId: string; tool: string; status: "prepared" | "dryrun_done" | "executed" | "failed"; ok: boolean; preview: boolean; confirmationAccepted: boolean; errorCode?: string; summary: string; createdAt: string; }
+export interface WorkflowReplayStepResultSummary { stepId: string; tool: string; status: "prepared" | "dryrun_done" | "executed" | "failed"; ok: boolean; preview: boolean; confirmationAccepted: boolean; trusted?: boolean; receiptId?: string; errorCode?: string; summary: string; createdAt: string; }
 export interface WorkflowReplayCheckpointResultSummary { stepId: string; status: "passed" | "failed" | "blocked" | "timeout"; summary: string; checkedAt: string; }
 export interface WorkflowReplaySession {
   replaySessionId: string; skillId: string; skillVersion: number; createdAt: string; updatedAt: string; status: WorkflowReplaySessionStatus; currentStepIndex: number;
@@ -1964,6 +1970,7 @@ export interface AuditLogEntry {
   confirmationStatus?: ConfirmationStatus;
   confirmationTokenId?: string;
   confirmationReason?: string;
+  receiptId?: string;
   matchedGrantIds?: string[];
   deniedGrantIds?: string[];
   guideOnlyGrantIds?: string[];

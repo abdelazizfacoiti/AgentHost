@@ -76,6 +76,7 @@ import { createVisionTools } from "./tools/vision.js";
 import { createCheckpointTools } from "./tools/checkpoint.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { WorkflowReplayStore } from "./workflow-replay-store.js";
+import { ToolReceiptManager } from "./tool-receipts.js";
 import { VisionEvidenceStore } from "./vision-evidence.js";
 
 const SERVER_VERSION = "0.1.0";
@@ -156,6 +157,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   await workflowTrace.ensureStructure();
   const workflowReplay = new WorkflowReplayStore(config.agentHostDir);
   await workflowReplay.ensureStructure();
+  const receipts = new ToolReceiptManager();
   const visionEvidence = new VisionEvidenceStore();
   const grants = new GrantStore({
     persistentGrants: policy.grants,
@@ -215,6 +217,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     forge,
     workflowTrace,
     workflowReplay,
+    receipts,
     visionEvidence,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux
