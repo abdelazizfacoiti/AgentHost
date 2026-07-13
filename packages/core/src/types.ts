@@ -234,6 +234,38 @@ export interface WorkflowCheckpointTemplate {
   timeoutMs?: number;
   pollIntervalMs?: number;
   redactionPolicy?: "summary_only" | "counts_only";
+  /** Phase 32 local review lifecycle. Missing legacy values normalize to review_required. */
+  status?: "draft" | "review_required" | "approved" | "rejected" | "archived";
+  version?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  approvedAt?: string;
+  archivedAt?: string;
+  templateHash?: string;
+  reviewId?: string;
+  changeSummary?: string;
+}
+
+export type WorkflowCheckpointTemplateReviewStatus = "pending" | "approved" | "rejected" | "blocked" | "applied" | "archived";
+export type WorkflowCheckpointTemplateReviewAction = "create" | "update" | "approve" | "reject" | "archive";
+
+/** Local, redacted review metadata. Candidate template stays internal to workflow storage. */
+export interface WorkflowCheckpointTemplateReview {
+  reviewId: string;
+  skillId: string;
+  templateId: string;
+  action: WorkflowCheckpointTemplateReviewAction;
+  createdAt: string;
+  updatedAt: string;
+  status: WorkflowCheckpointTemplateReviewStatus;
+  version: number;
+  templateHash: string;
+  beforeSummary?: Record<string, unknown>;
+  afterSummary: Record<string, unknown>;
+  safetyFindings: string[];
+  requiredGrantsSummary: string[];
+  blockedReasons: string[];
+  reviewer?: string;
 }
 
 export interface WorkflowSkill {
