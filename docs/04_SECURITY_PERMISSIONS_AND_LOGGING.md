@@ -30,6 +30,8 @@ Fixed commands expose sanitized tabs, URLs, page context/text, element discovery
 
 Setup diagnostics return state/error codes, prepared paths, timestamps, and recovery steps only. They never return browser URLs, page data, session tokens, pairing tokens, cookies, or storage. Pairing-token rotation/reset is dry-run and confirmation gated; only explicit token generation returns raw token once.
 
+Extension absence does not weaken policy. Accessibility, local OCR/vision, pointer, and guide alternatives remain separately safety-gated and must be selected explicitly. No browser failure may silently trigger click/type/action fallback.
+
 Browser `elementId` values are opaque, short-lived, tab/page-bound references. Actions require a unique reference, revalidate URL/session, visibility, enabled state, identity, and ambiguity. Direct selectors cannot act. Stale or changed references fail.
 
 ## Browser content and action policy

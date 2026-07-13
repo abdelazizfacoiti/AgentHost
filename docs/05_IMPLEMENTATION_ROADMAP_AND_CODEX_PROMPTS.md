@@ -36,11 +36,15 @@ Use plan, explicit approval, scoped implementation, build/test/lint/smoke, revie
 
 AgentHost is a universal local workstation runtime. Provider names such as Gmail, WhatsApp, Google, Zoom, Slack, Outlook, and LinkedIn remain examples for future adapters/workflows, not roadmap anchors. Communication sending and sensitive financial/credential actions remain blocked or explicitly gated.
 
-## Phase 31.5 — Documentation sync
+## Phase 31.5 — Browser Extension Packaging and Pairing Reliability
 
-Current maintenance phase. Keep product, architecture, MCP, security, and roadmap documents synchronized with capability registry, package layout, runtime limits, browser bridge behavior, vision evidence, checkpoint safety, and workflow-template behavior.
+Completed. Stable unpacked preparation, local setup command, pairing diagnostics, popup status, reset/recovery, and safe token handling.
 
-Phase 31.5 also hardens browser extension packaging, setup diagnostics, pairing recovery, stable unpacked paths, and Firefox temporary-add-on guidance. No browser action capability expands.
+No browser action capability expanded.
+
+## Phase 31.6 — Browser Agentic Setup Validation and Documentation Sync
+
+Completed. Documents setup states, reset/re-pair behavior, Firefox temporary-add-on limitation, Chromium unpacked behavior, manual browser smoke, explicit fallback routing, and token/logging safety. No browser action capability expanded.
 
 ## Recommended next phases
 

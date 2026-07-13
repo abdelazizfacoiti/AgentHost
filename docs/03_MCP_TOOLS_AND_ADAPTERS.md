@@ -58,6 +58,8 @@ Bridge is disabled by default. Fixed commands run through paired `127.0.0.1` Web
 
 Setup tools report prepared bundle path, manifest state, bridge state, last seen time, and safe recovery instructions. Token generation/reset requires dry-run and confirmation. Only explicit `browser.generate_pairing_token` returns a token once; logs never contain it.
 
+Use [Browser Setup Validation](06_BROWSER_SETUP_VALIDATION.md) for state meanings, Firefox restart recovery, Chromium unpacked behavior, pairing reset, manual smoke, and explicit fallback checks.
+
 `browser.open_url` requires dry-run and exact confirmation. Content is redacted and sensitivity-gated. No send, submit, upload, download, cookie, storage, password, debugger, or arbitrary script command exists.
 
 ### Vision and screenshot handoff
