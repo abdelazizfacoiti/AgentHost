@@ -27,7 +27,7 @@ Agent / Codex
 
 GUI remains fallback. Browser tools never silently fall back to screenshots or mouse control.
 
-## Current capability state: Phase 31
+## Current capability state: Phase 31.6
 
 Completed foundation includes:
 
@@ -38,6 +38,7 @@ Completed foundation includes:
 - Tool Forge manifest validation, reviews, artifact lifecycle, inert project scaffolding, static validation, inert harness, registration gates, runtime eligibility, capability grants, bounded JSON subprocess runner, optional OS sandboxing, and controlled generated dispatch
 - generated artifacts remain non-live; generated JavaScript/Python is never dynamically imported or executed
 - browser bridge foundation for Firefox/Chromium through paired localhost WebExtension; tab metadata, sanitized URL navigation, page context, bounded text, element discovery, safe element click/fill/focus, state waits, form metadata, and selected-text reads
+- stable unpacked extension preparation, setup/pairing diagnostics, reset/recovery, and documented manual validation
 - short-lived, tab-bound browser `elementId` references; direct selectors cannot perform actions
 - local Tesseract OCR grounding: text boxes, bounds, centers, target candidates, redaction, and clean unsupported results when unavailable
 - trusted screenshot evidence and `vision.prepare_pointer_action`, which only returns a validated `desktop.click` dry-run suggestion
@@ -47,6 +48,8 @@ Completed foundation includes:
 ## Browser and vision boundaries
 
 Browser bridge is disabled by default, binds only to `127.0.0.1`, uses pairing/session tokens, fixed commands, bounded bodies/timeouts, and one active session. It has no cookies, storage, debugger, arbitrary script, upload, submit, send, or form API.
+
+Extension DOM bridge is recommended for structured browser automation, not required. If unavailable, AgentHost may recommend accessibility, local OCR/vision, pointer fallback, or guide mode according to safety and strategy priority. It never silently executes another strategy after browser failure. See [Browser Setup Validation](06_BROWSER_SETUP_VALIDATION.md).
 
 Communication pages require private-data grants for content reads. Financial, credential/security, password-manager, and admin pages are blocked or guide-only. Login, CAPTCHA, MFA, payment confirmation, secret extraction, and communication sending remain unavailable by default.
 

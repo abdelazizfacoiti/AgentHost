@@ -88,6 +88,8 @@ Chromium: open `chrome://extensions`, enable Developer mode, select **Load unpac
 
 Use `browser.setup_status` and `browser.diagnose_bridge` for safe setup state. Generate token through `browser.generate_pairing_token` with dry-run/confirmation, paste returned token into popup, click **Pair / Re-pair**, then call `browser.verify_pairing`. `browser.reset_pairing` revokes current pairing without returning token. Tokens never enter audit logs. Bridge binds only to `127.0.0.1`; it never exposes cookies, saved passwords, storage, browser debugging, or arbitrary JavaScript.
 
+Full state checklist, restart recovery, manual smoke, blocked-action, and explicit fallback validation: [Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md).
+
 Forge bounded runtime defaults to `forgeRuntimeSandboxMode: "auto"`. It uses Bubblewrap only when `bwrap` and unprivileged user namespaces are available; otherwise it keeps existing fixed child runner and records fallback warning. Set `forgeRuntimeSandboxMode` in `~/.agenthost/config.json`, or `AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE` to `auto`, `none`, `bubblewrap`, `firejail`, or `unshare`. Explicit `firejail`/`unshare` currently fail closed: no reviewed allow-only filesystem profile exists.
 
 Run unit tests:

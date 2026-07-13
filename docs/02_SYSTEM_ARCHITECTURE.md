@@ -44,6 +44,8 @@ MCP request -> schema -> risk/sensitivity -> policy/grants
 
 Browser content tools classify sanitized tab metadata before requesting content. Element actions require a fresh, unique, tab-bound, short-lived `elementId`, then revalidate page, visibility, enabled state, identity, and ambiguity.
 
+Browser setup prepares stable unpacked Firefox/Chromium folders, enables local bridge config only through explicit user command, and exposes setup/diagnostic/verification tools. Pairing/session failures return state codes and recovery steps without tokens. When bridge is unavailable, strategy routing may recommend accessibility, local vision, pointer, or guide mode; it never silently runs a fallback.
+
 Vision never acts. Trusted screenshot evidence is session-bound, hash-checked, and valid for 10 seconds. Handoff can only produce a `desktop.click` dry-run suggestion.
 
 ## Forge runtime boundary
