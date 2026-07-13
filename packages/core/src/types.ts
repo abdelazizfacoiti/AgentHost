@@ -334,6 +334,15 @@ export interface WorkflowSkillReplayDryRun {
   executable: false;
 }
 
+export type WorkflowReplaySessionStatus = "planned" | "active" | "paused" | "blocked" | "completed" | "cancelled" | "failed";
+export interface WorkflowReplayStepResultSummary { stepId: string; tool: string; status: "prepared" | "dryrun_done" | "executed" | "failed"; ok: boolean; preview: boolean; confirmationAccepted: boolean; errorCode?: string; summary: string; createdAt: string; }
+export interface WorkflowReplayCheckpointResultSummary { stepId: string; status: "passed" | "failed" | "blocked" | "timeout"; summary: string; checkedAt: string; }
+export interface WorkflowReplaySession {
+  replaySessionId: string; skillId: string; skillVersion: number; createdAt: string; updatedAt: string; status: WorkflowReplaySessionStatus; currentStepIndex: number;
+  parametersSummary: WorkflowSkillReplayDryRun["parametersSummary"]; dryRunSnapshot: WorkflowSkillReplayDryRun; dryRunSnapshotHash: string;
+  stepResults: WorkflowReplayStepResultSummary[]; checkpointResults: WorkflowReplayCheckpointResultSummary[]; blockers: WorkflowSkillReplayBlocker[]; warnings: string[];
+}
+
 export type ConfirmationStatus =
   | "previewGenerated"
   | "tokenUsed"

@@ -16,6 +16,7 @@ import { GrantStore } from "../grants.js";
 import { runTool, type AgentHostToolDefinition } from "../tool-runner.js";
 import { createWorkflowTools } from "../tools/workflow.js";
 import { WorkflowStore } from "../workflow-store.js";
+import { WorkflowReplayStore } from "../workflow-replay-store.js";
 
 class MemoryLogger implements AuditLogger {
   entries: AuditLogEntry[] = [];
@@ -27,9 +28,10 @@ async function context(): Promise<AgentHostMcpContext> {
   const policy = getPolicyProfile("dev");
   const config: AgentHostConfig = { agentHostDir, configPath: `${agentHostDir}/config.json`, logFile: `${agentHostDir}/logs/test.jsonl`, profile: "dev", policy };
   const workflowTrace = new WorkflowStore(agentHostDir); await workflowTrace.ensureStructure();
+  const workflowReplay = new WorkflowReplayStore(agentHostDir); await workflowReplay.ensureStructure();
   return {
     sessionId: "session_workflow", config, policy, registry: createBaseCapabilityRegistry(), adapters: createAdapterRegistry(), logger: new MemoryLogger(),
-    confirmations: new ConfirmationManager(), grants: new GrantStore({ persistentGrants: [] }), forge: new ForgeStore(agentHostDir), workflowTrace,
+    confirmations: new ConfirmationManager(), grants: new GrantStore({ persistentGrants: [] }), forge: new ForgeStore(agentHostDir), workflowTrace, workflowReplay,
     linux: {} as AgentHostMcpContext["linux"]
   };
 }
@@ -189,5 +191,25 @@ describe("workflow tools", () => {
     expect(JSON.stringify(reviewMode)).not.toContain("private-target");
     await expect(call(value, "workflow.skill_replay_dryrun", { skillId, parameters: { unknown: "x" } })).resolves.toMatchObject({ ok: true, data: { blockers: expect.arrayContaining([expect.objectContaining({ code: "checkpoint_parameter_unknown" })]) } });
     expect(createWorkflowTools().map((tool) => tool.name)).toContain("workflow.skill_replay_dryrun");
+  });
+
+  it("runs controlled replay session one prepared step at a time without invoking it", async () => {
+    const value = await context(); const trace = await value.workflowTrace!.createTrace({ sessionId: value.sessionId, name: "Step replay" });
+    await value.workflowTrace!.capture({ sessionId: value.sessionId, step: { stepId: "step_click", timestamp: new Date().toISOString(), tool: "browser.click_element", strategy: "browser", actionType: "click_element", riskLevel: "medium", inputSummary: "omitted", outputSummary: "omitted", preview: false, ok: true } });
+    await value.workflowTrace!.stopTrace({ sessionId: value.sessionId, traceId: trace.traceId });
+    const skill = await call(value, "workflow.skill_save_from_trace", { traceId: trace.traceId, name: "Replay", description: "Generic" }); const skillId = (skill.data as { skillId: string }).skillId;
+    const started = await call(value, "workflow.replay_session_start", { skillId, parameters: {} });
+    expect(started).toMatchObject({ ok: true, preview: true, data: { status: "active", currentStepIndex: 0 } }); const replaySessionId = (started.data as { replaySessionId: string }).replaySessionId;
+    const first = await call(value, "workflow.replay_step_prepare", { replaySessionId, underlyingInput: { elementId: "private-element" } });
+    expect(first).toMatchObject({ ok: true, data: { tool: "browser.click_element", underlyingToolCall: { input: { dryRun: true }, inputOmitted: true } } });
+    expect(JSON.stringify(await call(value, "workflow.replay_session_get", { replaySessionId }))).not.toContain("private-element");
+    await expect(call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "wrong", tool: "browser.click_element", ok: true, preview: true })).resolves.toMatchObject({ ok: false, error: { code: "replay_result_mismatch" } });
+    await call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "step_click", tool: "browser.click_element", ok: true, preview: true });
+    const second = await call(value, "workflow.replay_step_prepare", { replaySessionId, underlyingInput: { elementId: "private-element" } });
+    expect(second).toMatchObject({ ok: true, data: { requiresOriginalConfirmationToken: true } });
+    await call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "step_click", tool: "browser.click_element", ok: true, preview: false, executed: true, confirmationAccepted: true });
+    const verified = await call(value, "workflow.replay_step_verify", { replaySessionId });
+    expect(verified).toMatchObject({ ok: true, data: { status: "completed", currentStepIndex: 1 } });
+    expect(value.linux).not.toHaveProperty("click");
   });
 });
