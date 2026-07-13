@@ -76,6 +76,7 @@ import { createVisionTools } from "./tools/vision.js";
 import { createCheckpointTools } from "./tools/checkpoint.js";
 import { createSchedulerTools } from "./tools/scheduler.js";
 import { createSchedulerReadinessTools } from "./tools/scheduler-readiness.js";
+import { createSchedulerActivationTools } from "./tools/scheduler-activation.js";
 import { SchedulerStore } from "./scheduler-store.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { WorkflowReplayStore } from "./workflow-replay-store.js";
@@ -236,6 +237,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createWorkflowTools(),
     ...createSchedulerTools(),
     ...createSchedulerReadinessTools(),
+    ...createSchedulerActivationTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),
     ...createAdapterTools(),
