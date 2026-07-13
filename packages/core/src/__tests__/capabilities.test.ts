@@ -19,6 +19,8 @@ describe("CapabilityRegistry", () => {
       "scheduler.job_list",
       "scheduler.job_archive",
       "scheduler.job_disable",
+      "scheduler.job_readiness",
+      "scheduler.job_activation_preview",
       "checkpoint.evaluate",
       "checkpoint.wait_for",
       "vision.prepare_pointer_action",
