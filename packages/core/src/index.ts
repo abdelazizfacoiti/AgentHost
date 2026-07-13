@@ -14,6 +14,7 @@ export * from "./types.js";
 export * from "./workflow.js";
 export * from "./workflow-checkpoints.js";
 export * from "./workflow-checkpoint-reviews.js";
+export * from "./workflow-replay.js";
 export * from "./workflow-redaction.js";
 export * from "./vision.js";
 export * from "./checkpoint.js";

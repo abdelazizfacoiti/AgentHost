@@ -30,6 +30,7 @@ describe("CapabilityRegistry", () => {
       "workflow.skill_run_dryrun",
       "workflow.skill_bind_checkpoints",
       "workflow.skill_checkpoints_dryrun",
+      "workflow.skill_replay_dryrun",
       "workflow.skill_checkpoint_template_propose",
       "workflow.skill_checkpoint_template_review",
       "workflow.skill_checkpoint_template_apply",

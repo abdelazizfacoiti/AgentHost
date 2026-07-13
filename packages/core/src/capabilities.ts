@@ -61,6 +61,7 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "workflow.skill_run_dryrun", riskLevel: "low" as const, description: "Previews a workflow skill without executing any workflow action." },
     { name: "workflow.skill_bind_checkpoints", riskLevel: "low" as const, description: "Validates redacted workflow checkpoint bindings without evaluation or actions." },
     { name: "workflow.skill_checkpoints_dryrun", riskLevel: "low" as const, description: "Previews or read-only evaluates bound workflow checkpoints without skill replay." },
+    { name: "workflow.skill_replay_dryrun", riskLevel: "low" as const, description: "Builds a redacted future skill replay plan without executing or storing workflow actions." },
     { name: "workflow.skill_checkpoint_template_propose", riskLevel: "low" as const, description: "Creates a local non-executable checkpoint-template review proposal." },
     { name: "workflow.skill_checkpoint_template_review", riskLevel: "low" as const, description: "Reviews checkpoint-template safety without applying or executing it." },
     { name: "workflow.skill_checkpoint_template_apply", riskLevel: "low" as const, description: "Applies an approved safe checkpoint-template review without workflow execution." },

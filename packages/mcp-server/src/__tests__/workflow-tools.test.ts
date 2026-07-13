@@ -165,4 +165,29 @@ describe("workflow tools", () => {
     const bound = await call(value, "workflow.skill_bind_checkpoints", { skillId, parameters: { path: "/tmp/x" } });
     expect(bound).toMatchObject({ ok: true, data: { templates: [] } });
   });
+
+  it("builds ordered replay plan without executing actions or creating tokens", async () => {
+    const value = await context();
+    const trace = await value.workflowTrace!.createTrace({ sessionId: value.sessionId, name: "Replay" });
+    await value.workflowTrace!.capture({ sessionId: value.sessionId, step: { stepId: "step_click", timestamp: new Date().toISOString(), tool: "browser.click_element", strategy: "browser", actionType: "click_element", riskLevel: "medium", inputSummary: "private text omitted", outputSummary: "result omitted", preview: false, ok: true } });
+    await value.workflowTrace!.capture({ sessionId: value.sessionId, step: { stepId: "step_send", timestamp: new Date().toISOString(), tool: "browser.send_message", strategy: "browser", actionType: "tool_action", riskLevel: "high", inputSummary: "private text omitted", outputSummary: "result omitted", preview: false, ok: true } });
+    await value.workflowTrace!.stopTrace({ sessionId: value.sessionId, traceId: trace.traceId });
+    const saved = await call(value, "workflow.skill_save_from_trace", { traceId: trace.traceId, name: "Replay", description: "Generic", parameters: [{ name: "target", type: "string", required: true }] });
+    const skillId = (saved.data as { skillId: string }).skillId;
+    const missing = await call(value, "workflow.skill_replay_dryrun", { skillId, parameters: {}, evaluateCheckpoints: true });
+    expect(missing).toMatchObject({ ok: true, preview: true, data: { actionsExecuted: false, confirmationTokensCreated: false, executable: false, steps: [{ stepId: "step_click", order: 1, stateChanging: true, wouldRequireDryRun: true, wouldRequireConfirmation: true }, { stepId: "step_send", order: 2, blocked: true, supported: false }], blockers: expect.any(Array) } });
+    expect(JSON.stringify(missing)).not.toContain("private text omitted");
+    expect((missing.data as { warnings: string[] }).warnings).toContain("Checkpoint evaluation deferred; Phase 33 does not evaluate checkpoints.");
+    const approved = await call(value, "workflow.skill_checkpoint_template_propose", { skillId, operation: "create", changeSummary: "Add", template: { templateId: "exists", name: "Exists", description: "Check", kind: "file_exists", strategy: "file", sensitivity: "public", expectedTemplate: { path: "{{target}}" }, parameters: ["target"], requiredGrants: [], safetyNotes: [] } });
+    const approvedId = (approved.data as { reviewId: string }).reviewId;
+    await call(value, "workflow.skill_checkpoint_template_review", { reviewId: approvedId, decision: "approve" }); await call(value, "workflow.skill_checkpoint_template_apply", { reviewId: approvedId });
+    const normal = await call(value, "workflow.skill_replay_dryrun", { skillId, parameters: { target: "/tmp/private-target" } });
+    expect(normal).toMatchObject({ ok: true, data: { checkpoints: [{ templateId: "exists", status: "approved" }] } });
+    expect((normal.data as { checkpoints: unknown[] }).checkpoints).toHaveLength(1);
+    const reviewMode = await call(value, "workflow.skill_replay_dryrun", { skillId, parameters: { target: "/tmp/private-target" }, reviewMode: true });
+    expect(reviewMode).toMatchObject({ ok: true, preview: true, data: { actionsExecuted: false } });
+    expect(JSON.stringify(reviewMode)).not.toContain("private-target");
+    await expect(call(value, "workflow.skill_replay_dryrun", { skillId, parameters: { unknown: "x" } })).resolves.toMatchObject({ ok: true, data: { blockers: expect.arrayContaining([expect.objectContaining({ code: "checkpoint_parameter_unknown" })]) } });
+    expect(createWorkflowTools().map((tool) => tool.name)).toContain("workflow.skill_replay_dryrun");
+  });
 });

@@ -313,6 +313,27 @@ export interface WorkflowSkillDryRunResult {
   }>;
 }
 
+export interface WorkflowSkillReplayBlocker { code: string; stepId?: string; templateId?: string; message: string; }
+export interface WorkflowSkillReplayGrantSummary { grantId: string; active: boolean; source: "skill" | "step" | "checkpoint"; }
+export interface WorkflowSkillReplayStepPreview {
+  stepId: string; sourceStepId: string; order: number; tool: string; strategy: WorkflowStrategy; actionType: WorkflowStepAction; riskLevel: RiskLevel;
+  stateChanging: boolean; wouldRequireDryRun: boolean; wouldRequireConfirmation: boolean; requiredGrants: string[];
+  blocked: boolean; blockedReasons: string[]; inputSummary: string; expectedOutputSummary: string; parameterBindingsUsed: string[];
+  supported: boolean; unsupportedReason?: string;
+}
+export interface WorkflowSkillReplayCheckpointPreview {
+  templateId: string; kind: CheckpointKind; strategy: CheckpointStrategy; sensitivity: CheckpointSensitivity; status: "draft" | "review_required" | "approved" | "rejected" | "archived";
+  requiredGrants: string[]; missingGrants: string[]; parameterNames: string[]; expectedFields: string[]; blocked: boolean; blockedReasons: string[]; previewOnly: true;
+}
+export interface WorkflowSkillReplayDryRun {
+  dryRunId: string; skillId: string; skillVersion: number; createdAt: string; parametersSummary: Array<{ name: string; type: WorkflowSkillParameter["type"]; required: boolean; sensitive: boolean; provided: boolean; redacted: true }>;
+  steps: WorkflowSkillReplayStepPreview[]; checkpoints: WorkflowSkillReplayCheckpointPreview[]; requiredGrants: WorkflowSkillReplayGrantSummary[]; missingGrants: string[];
+  confirmationRequirements: string[]; blockers: WorkflowSkillReplayBlocker[]; warnings: string[]; executableInFuture: boolean; reason?: string;
+  actionsExecuted: false; confirmationTokensCreated: false; previewOnly: true;
+  /** Backward-compatible: replay execution still does not exist. */
+  executable: false;
+}
+
 export type ConfirmationStatus =
   | "previewGenerated"
   | "tokenUsed"
