@@ -1,0 +1,27 @@
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
+import type { WorkflowReplayCheckpointResultSummary, WorkflowReplaySession, WorkflowReplayStepResultSummary, WorkflowSkillReplayDryRun } from "@agenthost/core";
+
+function now() { return new Date().toISOString(); }
+function hash(value: unknown) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
+async function writeJson(file: string, value: unknown) { await mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); const temp = `${file}.${randomUUID()}.tmp`; await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); await chmod(temp, 0o600); await rename(temp, file); }
+
+type MemoryMaterial = { parameters: Record<string, unknown>; prepared?: { stepIndex: number; tool: string; input: Record<string, unknown>; stateChanging: boolean; previewRequired: boolean; }; };
+export class WorkflowReplayStore {
+  readonly #dir: string; readonly #memory = new Map<string, MemoryMaterial>();
+  constructor(agentHostDir: string) { this.#dir = path.join(agentHostDir, "workflows", "replay-sessions"); }
+  async ensureStructure() { await mkdir(this.#dir, { recursive: true, mode: 0o700 }); }
+  async start(input: { dryRun: WorkflowSkillReplayDryRun; parameters: Record<string, unknown> }): Promise<WorkflowReplaySession> {
+    const timestamp = now(); const session: WorkflowReplaySession = { replaySessionId: `replay_${randomUUID()}`, skillId: input.dryRun.skillId, skillVersion: input.dryRun.skillVersion, createdAt: timestamp, updatedAt: timestamp, status: input.dryRun.blockers.length === 0 ? "active" : "blocked", currentStepIndex: 0, parametersSummary: input.dryRun.parametersSummary, dryRunSnapshot: input.dryRun, dryRunSnapshotHash: hash(input.dryRun), stepResults: [], checkpointResults: [], blockers: input.dryRun.blockers, warnings: input.dryRun.warnings };
+    this.#memory.set(session.replaySessionId, { parameters: input.parameters }); await this.#save(session); return session;
+  }
+  async get(id: string): Promise<WorkflowReplaySession> { try { return JSON.parse(await readFile(this.#path(id), "utf8")) as WorkflowReplaySession; } catch { throw new Error("replay_session_not_found"); } }
+  memory(id: string): MemoryMaterial { const value = this.#memory.get(id); if (value === undefined) throw new Error("replay_ephemeral_inputs_unavailable"); return value; }
+  async prepare(id: string, input: { tool: string; stepIndex: number; underlyingInput: Record<string, unknown>; stateChanging: boolean; previewRequired: boolean }): Promise<WorkflowReplaySession> { const session = await this.get(id); this.memory(id).prepared = { stepIndex: input.stepIndex, tool: input.tool, input: input.underlyingInput, stateChanging: input.stateChanging, previewRequired: input.previewRequired }; const result: WorkflowReplayStepResultSummary = { stepId: session.dryRunSnapshot.steps[input.stepIndex]!.stepId, tool: input.tool, status: "prepared", ok: true, preview: input.previewRequired, confirmationAccepted: false, summary: "Underlying input accepted in memory; values omitted.", createdAt: now() }; session.stepResults = [...session.stepResults.filter((item) => item.stepId !== result.stepId), result]; session.updatedAt = now(); await this.#save(session); return session; }
+  async apply(id: string, result: Omit<WorkflowReplayStepResultSummary, "createdAt" | "summary" | "status"> & { summary?: string }): Promise<WorkflowReplaySession> { const session = await this.get(id); const memory = this.memory(id); const prepared = memory.prepared; if (prepared === undefined || prepared.tool !== result.tool || prepared.stepIndex !== session.currentStepIndex) throw new Error("replay_result_not_prepared"); const step = session.dryRunSnapshot.steps[session.currentStepIndex]!; const status = !result.ok ? "failed" : result.preview ? "dryrun_done" : "executed"; const saved: WorkflowReplayStepResultSummary = { ...result, status, summary: result.ok ? "Original tool result accepted; content omitted." : "Original tool failed; content omitted.", createdAt: now() }; session.stepResults = [...session.stepResults.filter((item) => item.stepId !== step.stepId), saved]; session.updatedAt = now(); if (!result.ok) session.status = "paused"; await this.#save(session); return session; }
+  async verify(id: string, result: WorkflowReplayCheckpointResultSummary): Promise<WorkflowReplaySession> { const session = await this.get(id); session.checkpointResults = [...session.checkpointResults.filter((item) => item.stepId !== result.stepId), result]; session.updatedAt = now(); if (result.status === "passed") { session.currentStepIndex += 1; delete this.memory(id).prepared; session.status = session.currentStepIndex >= session.dryRunSnapshot.steps.length ? "completed" : "active"; } else session.status = result.status === "blocked" ? "blocked" : "paused"; await this.#save(session); return session; }
+  async cancel(id: string): Promise<WorkflowReplaySession> { const session = await this.get(id); if (session.status === "completed" || session.status === "cancelled") throw new Error("replay_session_terminal"); session.status = "cancelled"; session.updatedAt = now(); await this.#save(session); return session; }
+  #path(id: string) { return path.join(this.#dir, `${id.replace(/[^A-Za-z0-9_-]/g, "_")}.json`); }
+  async #save(session: WorkflowReplaySession) { await writeJson(this.#path(session.replaySessionId), session); }
+}
