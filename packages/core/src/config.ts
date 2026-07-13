@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { getPolicyProfile } from "./policies.js";
 import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, ForgeRuntimeSandboxMode, PolicyProfileName } from "./types.js";
+import type { OverlayRendererMode } from "./overlay.js";
 
 const policyProfileNameSchema = z.enum([
   "strict",
@@ -15,6 +16,7 @@ const policyProfileNameSchema = z.enum([
 ]);
 
 const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "firejail", "unshare"]);
+const overlayRendererModeSchema = z.enum(["headless", "auto", "gtk3-x11"]);
 const browserBridgeSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), pairingTokenFile: z.string().min(1).optional() }).strict();
 
 const automationStrategySchema = z.enum([
@@ -103,6 +105,7 @@ const configFileSchema = z
     logFile: z.string().min(1).optional(),
     profile: policyProfileNameSchema.optional(),
     forgeRuntimeSandboxMode: forgeRuntimeSandboxModeSchema.optional(),
+    overlayRendererMode: overlayRendererModeSchema.optional(),
     browserBridge: browserBridgeSchema.optional(),
     grants: z.array(capabilityGrantSchema).max(500).optional()
   })
@@ -210,6 +213,9 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const forgeRuntimeSandboxMode = forgeRuntimeSandboxModeSchema.parse(
     (env.AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE ?? fileConfig.forgeRuntimeSandboxMode ?? "auto") as ForgeRuntimeSandboxMode
   );
+  const overlayRendererMode = overlayRendererModeSchema.parse(
+    (env.AGENTHOST_OVERLAY_MODE ?? fileConfig.overlayRendererMode ?? "headless") as OverlayRendererMode
+  );
   const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
   const browserEnabled = env.AGENTHOST_BROWSER_BRIDGE_ENABLED === undefined ? fileConfig.browserBridge?.enabled ?? false : env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1";
   const browserPort = env.AGENTHOST_BROWSER_BRIDGE_PORT === undefined ? fileConfig.browserBridge?.port ?? 43117 : Number(env.AGENTHOST_BROWSER_BRIDGE_PORT);
@@ -225,6 +231,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     logFile,
     profile: parsedProfile,
     forgeRuntimeSandboxMode,
+    overlayRendererMode,
     browserBridge,
     policy: getPolicyProfile(parsedProfile, { grants })
   };

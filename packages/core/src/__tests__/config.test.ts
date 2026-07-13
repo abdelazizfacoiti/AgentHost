@@ -13,6 +13,7 @@ describe("loadAgentHostConfig", () => {
     expect(config.profile).toBe("strict");
     expect(config.policy.name).toBe("strict");
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
+    expect(config.overlayRendererMode).toBe("headless");
   });
 
   it("loads profile and paths from a config file", async () => {
@@ -97,5 +98,11 @@ describe("loadAgentHostConfig", () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-sandbox-"));
     const config = await loadAgentHostConfig({ env: { AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE: "bubblewrap" }, homeDir });
     expect(config.forgeRuntimeSandboxMode).toBe("bubblewrap");
+  });
+
+  it("allows explicitly selecting the local overlay renderer mode", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-overlay-"));
+    const config = await loadAgentHostConfig({ env: { AGENTHOST_OVERLAY_MODE: "gtk3-x11" }, homeDir });
+    expect(config.overlayRendererMode).toBe("gtk3-x11");
   });
 });

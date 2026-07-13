@@ -546,6 +546,7 @@ export interface AgentHostConfig {
   profile: PolicyProfileName;
   /** Undefined only for older in-memory callers; loader always supplies `auto` by default. */
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
+  overlayRendererMode?: import("./overlay.js").OverlayRendererMode;
   browserBridge?: BrowserBridgeConfig;
   policy: PolicyProfile;
 }
