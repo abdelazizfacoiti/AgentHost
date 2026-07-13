@@ -24,7 +24,14 @@ export interface ToolExecutionContext {
   registry: CapabilityRegistrySnapshot;
   logger: AuditLogger;
   grants: GrantStore;
-  receipts?: { issue(input: { sessionId: string; tool: string; rawInput: unknown; result: ToolResult; riskLevel: RiskLevel; target?: unknown }): import("@agenthost/core").ToolResultReceipt };
+  receipts?: {
+    issue(input: { sessionId: string; tool: string; rawInput: unknown; result: ToolResult; riskLevel: RiskLevel; target?: unknown }): import("@agenthost/core").ToolResultReceipt;
+    fingerprintInput(input: unknown): string;
+    registerReplayExpectation(input: { replaySessionId: string; preparedStepId: string; prepareId: string; stepIndex: number; sessionId: string; tool: string; inputFingerprint: string; preview: boolean }): void;
+    reserveForReplay(receipt: import("@agenthost/core").ToolResultReceipt, binding: { replaySessionId: string; preparedStepId: string; prepareId: string; stepIndex: number }): { ok: boolean; reason: string; reservationId?: string; receipt?: import("@agenthost/core").ToolResultReceipt };
+    commitReservation(receiptId: string, reservationId: string): void;
+    releaseReservation(receiptId: string, reservationId: string): void;
+  };
   workflowTrace?: { capture(event: { sessionId: string; step: WorkflowTraceStep }): Promise<void> };
 }
 
