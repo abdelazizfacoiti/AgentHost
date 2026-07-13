@@ -24,6 +24,7 @@ export interface ToolExecutionContext {
   registry: CapabilityRegistrySnapshot;
   logger: AuditLogger;
   grants: GrantStore;
+  receipts?: { issue(input: { sessionId: string; tool: string; rawInput: unknown; result: ToolResult; riskLevel: RiskLevel; target?: unknown }): import("@agenthost/core").ToolResultReceipt };
   workflowTrace?: { capture(event: { sessionId: string; step: WorkflowTraceStep }): Promise<void> };
 }
 
@@ -84,6 +85,7 @@ function createAuditLogEntry(
           ...(result.confirmation.tokenId === undefined ? {} : { confirmationTokenId: result.confirmation.tokenId }),
           confirmationReason: result.confirmation.reason
         }),
+    ...(result.receipt === undefined ? {} : { receiptId: result.receipt.receiptId }),
     ...(result.grantDecision === undefined
       ? {}
       : {
@@ -207,6 +209,9 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
   }
 
   const durationMs = Math.round(performance.now() - start);
+  if (context.receipts !== undefined && parsed.success) {
+    result = { ...result, receipt: context.receipts.issue({ sessionId: context.sessionId, tool: definition.name, rawInput: parsed.data, result, riskLevel: result.riskLevel }) };
+  }
   const inputSummary = parsed.success && definition.auditInputSummary !== undefined
     ? definition.auditInputSummary(parsed.data)
     : definition.inputSummary;

@@ -44,6 +44,7 @@ import type { ForgeStore } from "./forge-store.js";
 import type { GrantStore } from "./grants.js";
 import type { WorkflowStore } from "./workflow-store.js";
 import type { WorkflowReplayStore } from "./workflow-replay-store.js";
+import type { ToolReceiptManager } from "./tool-receipts.js";
 import type { VisionEvidenceStore } from "./vision-evidence.js";
 
 export interface LinuxAutomation {
@@ -148,6 +149,7 @@ export interface AgentHostMcpContext {
   forge: ForgeStore;
   workflowTrace?: WorkflowStore;
   workflowReplay?: WorkflowReplayStore;
+  receipts?: ToolReceiptManager;
   visionEvidence?: VisionEvidenceStore;
   browser?: BrowserBridgeAdapter;
   browserBridge?: BrowserBridgeServer;
