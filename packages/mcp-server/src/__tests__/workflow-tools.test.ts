@@ -209,7 +209,7 @@ describe("workflow tools", () => {
     expect(first).toMatchObject({ ok: true, data: { tool: "browser.click_element", underlyingToolCall: { input: { dryRun: true }, inputOmitted: true } } });
     expect(JSON.stringify(await call(value, "workflow.replay_session_get", { replaySessionId }))).not.toContain("private-element");
     const previewReceipt = value.receipts!.issue({ sessionId: value.sessionId, tool: "browser.click_element", rawInput: { elementId: "private-element", dryRun: true }, result: toolSuccess({ tool: "browser.click_element", riskLevel: "medium", preview: true, data: {} }), riskLevel: "medium" });
-    await expect(call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "wrong", receipt: previewReceipt })).resolves.toMatchObject({ ok: false, error: { code: "replay_receipt_mismatch" } });
+    await expect(call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "wrong", receipt: previewReceipt })).resolves.toMatchObject({ ok: false, error: { code: "wrong_replay_step" } });
     await call(value, "workflow.replay_step_apply_result", { replaySessionId, preparedStepId: "step_click", receipt: previewReceipt });
     const second = await call(value, "workflow.replay_step_prepare", { replaySessionId, underlyingInput: { elementId: "private-element" } });
     expect(second).toMatchObject({ ok: true, data: { requiresOriginalConfirmationToken: true } });

@@ -341,12 +341,15 @@ export interface WorkflowSkillReplayDryRun {
 }
 
 export type WorkflowReplaySessionStatus = "planned" | "active" | "paused" | "blocked" | "completed" | "cancelled" | "failed";
+export type WorkflowReplayStepState = "pending" | "prepared_dryrun" | "dryrun_applied" | "prepared_execute" | "prepared_observe" | "observe_applied" | "executed_applied" | "verified" | "failed" | "blocked";
 export interface WorkflowReplayStepResultSummary { stepId: string; tool: string; status: "prepared" | "dryrun_done" | "executed" | "failed"; ok: boolean; preview: boolean; confirmationAccepted: boolean; trusted?: boolean; receiptId?: string; errorCode?: string; summary: string; createdAt: string; }
 export interface WorkflowReplayCheckpointResultSummary { stepId: string; status: "passed" | "failed" | "blocked" | "timeout"; summary: string; checkedAt: string; }
 export interface WorkflowReplaySession {
   replaySessionId: string; skillId: string; skillVersion: number; createdAt: string; updatedAt: string; status: WorkflowReplaySessionStatus; currentStepIndex: number;
   parametersSummary: WorkflowSkillReplayDryRun["parametersSummary"]; dryRunSnapshot: WorkflowSkillReplayDryRun; dryRunSnapshotHash: string;
   stepResults: WorkflowReplayStepResultSummary[]; checkpointResults: WorkflowReplayCheckpointResultSummary[]; blockers: WorkflowSkillReplayBlocker[]; warnings: string[];
+  /** Persisted transition state. Missing values from older sessions normalize to pending. */
+  stepStates?: WorkflowReplayStepState[];
 }
 
 export type ConfirmationStatus =
