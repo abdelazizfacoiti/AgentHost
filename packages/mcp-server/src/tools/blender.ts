@@ -118,6 +118,7 @@ export function createBlenderTools(): AgentHostToolDefinition<BlenderToolInput, 
       },
       inputSummary: "Run Blender Python",
       preview: { isDryRun: (input) => input.dryRun === true },
+      allowLegacyPreflightWithoutConfirmation: true,
       safety: {
         actionType: "file_write",
         getInput: (input) => {

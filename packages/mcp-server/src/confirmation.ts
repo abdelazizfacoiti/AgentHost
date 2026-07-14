@@ -142,6 +142,47 @@ export class ConfirmationManager {
   }
 
   verifyAndConsume(token: string, input: VerifyConfirmationInput): ConfirmationVerificationResult {
+    const verification = this.verifyEnvelope(token, input);
+    if (!verification.ok) {
+      return verification;
+    }
+
+    const tokenHash = sha256Hex(token);
+    const record = this.#records.get(tokenHash);
+    if (record === undefined) {
+      return { ok: false, reason: "Confirmation token was not found." };
+    }
+
+    const targetFingerprint = input.target === undefined ? undefined : this.fingerprintTarget(input.target);
+    if (record.targetFingerprint !== targetFingerprint) {
+      return {
+        ok: false,
+        tokenId: record.tokenId,
+        reason: "Confirmation token target does not match the current resolved target.",
+        inputFingerprint: verification.inputFingerprint ?? this.fingerprintInput(input.input),
+        ...(targetFingerprint === undefined ? {} : { targetFingerprint })
+      };
+    }
+
+    record.used = true;
+    this.#records.set(tokenHash, record);
+
+    return {
+      ...verification,
+      ok: true,
+      tokenId: record.tokenId,
+      reason: "Confirmation token accepted.",
+      inputFingerprint: verification.inputFingerprint ?? this.fingerprintInput(input.input),
+      ...(targetFingerprint === undefined ? {} : { targetFingerprint })
+    };
+  }
+
+  /**
+   * Validates the session/tool/input envelope without consuming the token.
+   * Domain handlers remain responsible for exact-target validation and the
+   * single consuming verifyAndConsume call.
+   */
+  verifyEnvelope(token: string, input: Omit<VerifyConfirmationInput, "target">): ConfirmationVerificationResult {
     const tokenHash = sha256Hex(token);
     const record = this.#records.get(tokenHash);
 
@@ -194,36 +235,20 @@ export class ConfirmationManager {
       };
     }
 
-    const targetFingerprint = input.target === undefined ? undefined : this.fingerprintTarget(input.target);
-    if (record.targetFingerprint !== targetFingerprint) {
-      return {
-        ok: false,
-        tokenId: record.tokenId,
-        reason: "Confirmation token target does not match the current resolved target.",
-        inputFingerprint,
-        ...(targetFingerprint === undefined ? {} : { targetFingerprint })
-      };
-    }
-
     if (riskRank(input.riskLevel) > riskRank(record.riskLevel)) {
       return {
         ok: false,
         tokenId: record.tokenId,
         reason: "Confirmation token risk level no longer matches the current action.",
-        inputFingerprint,
-        ...(targetFingerprint === undefined ? {} : { targetFingerprint })
+        inputFingerprint
       };
     }
-
-    record.used = true;
-    this.#records.set(tokenHash, record);
 
     return {
       ok: true,
       tokenId: record.tokenId,
       reason: "Confirmation token accepted.",
-      inputFingerprint,
-      ...(targetFingerprint === undefined ? {} : { targetFingerprint })
+      inputFingerprint
     };
   }
 
