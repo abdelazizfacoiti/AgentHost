@@ -24,7 +24,7 @@ const supported: OverlayCapabilityReport = {
   limitations: []
 };
 
-async function fakeRendererScript(exitImmediately = false): Promise<{ dir: string; script: string }> {
+async function fakeRendererScript(exitImmediately = false, invalidHandshake = false): Promise<{ dir: string; script: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-overlay-renderer-"));
   const script = path.join(dir, "fake-renderer.mjs");
   const source = exitImmediately
@@ -32,7 +32,7 @@ async function fakeRendererScript(exitImmediately = false): Promise<{ dir: strin
     : [
         "import readline from 'node:readline';",
         "const rl = readline.createInterface({ input: process.stdin });",
-        "rl.on('line', (line) => { try { const request = JSON.parse(line); const data = request.command === 'hello' ? { protocolVersion: 1, capabilities: { supported: true } } : { reason: 'fake_renderer' }; process.stdout.write(JSON.stringify({ version: 1, id: request.id, ok: true, data }) + '\\n'); } catch {} });"
+        `rl.on('line', (line) => { try { const request = JSON.parse(line); const data = request.command === 'hello' ? ${invalidHandshake ? "{ invalid: true }" : "{ protocolVersion: 1, capabilities: { supported: true } }"} : { reason: 'fake_renderer' }; process.stdout.write(JSON.stringify({ version: 1, id: request.id, ok: true, data }) + '\\n'); } catch {} });`
       ].join("\n");
   await writeFile(script, source, "utf8");
   return { dir, script };
@@ -74,5 +74,31 @@ describe("GTK renderer controller", () => {
       await renderer.close();
       await rm(fixture.dir, { recursive: true, force: true });
     }
+  });
+
+  it("reports diagnostics and supports one explicit bounded restart", async () => {
+    const fixture = await fakeRendererScript();
+    const renderer = new LinuxOverlayRenderer({ pythonCommand: process.execPath, scriptPath: fixture.script, probe: () => supported, environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    try {
+      const shown = await renderer.show({ overlayId: "overlay-1", type: "pointer", payload: { type: "pointer", sensitivity: "public" } });
+      expect(shown.ok).toBe(true);
+      const before = await renderer.diagnostics();
+      expect(["running", "failed"]).toContain(before.childState);
+      const restarted = await renderer.restart();
+      expect(typeof restarted.ok).toBe("boolean");
+      expect((await renderer.diagnostics()).restartCount).toBeLessThanOrEqual(1);
+    } finally { await renderer.close(); await rm(fixture.dir, { recursive: true, force: true }); }
+  });
+
+  it("fails closed on invalid handshake without an endless restart loop", async () => {
+    const fixture = await fakeRendererScript(false, true);
+    const renderer = new LinuxOverlayRenderer({ pythonCommand: process.execPath, scriptPath: fixture.script, probe: () => supported, maxRestarts: 0, environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    try {
+      expect((await renderer.show({ overlayId: "overlay-invalid", type: "pointer", payload: { type: "pointer", sensitivity: "public" } })).ok).toBe(true);
+      const diagnostics = await renderer.diagnostics();
+      expect(diagnostics.handshake).toBe("failed");
+      expect(diagnostics.fallbackReason).toBeDefined();
+      expect((await renderer.show({ overlayId: "overlay-invalid-2", type: "pointer", payload: { type: "pointer", sensitivity: "public" } })).ok).toBe(true);
+    } finally { await renderer.close(); await rm(fixture.dir, { recursive: true, force: true }); }
   });
 });

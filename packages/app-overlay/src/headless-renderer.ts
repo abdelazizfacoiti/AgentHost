@@ -1,5 +1,5 @@
 import type { OverlayCapabilityReport, OverlayStateSnapshot, OverlayWidgetEvent } from "@agenthost/core";
-import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer } from "./renderer.js";
+import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer, OverlayRendererDiagnostics, OverlayRendererRestartResult } from "./renderer.js";
 
 export class HeadlessOverlayRenderer implements OverlayRenderer {
   readonly #records = new Map<string, OverlayRenderRecord>();
@@ -15,5 +15,7 @@ export class HeadlessOverlayRenderer implements OverlayRenderer {
   emergencyHide(): OverlayOperationResult { this.#records.clear(); this.#emergencyHidden = true; return { ok: true, reason: "emergency_hide_complete" }; }
   state(): OverlayStateSnapshot { return { renderer: this.#report, overlays: [], pendingEvents: [...this.#events], emergencyHidden: this.#emergencyHidden }; }
   events() { return [...this.#events]; }
+  diagnostics(): OverlayRendererDiagnostics { return { requestedMode: "headless", effectiveBackend: "headless", rendererStatus: "headless", sessionType: "unknown", displayPresent: false, waylandDisplayPresent: false, pythonExecutable: "not_used", gtk3Available: false, rendererScriptPresent: false, childState: "stopped", handshake: "not_attempted", capabilities: this.#report, activeOverlayCount: this.#records.size, restartCount: 0, restartAllowed: false, recommendedAction: "Select auto or gtk3-x11 on supported X11 desktop, or keep headless." }; }
+  restart(): OverlayRendererRestartResult { return { ok: false, reason: "headless_renderer_restart_not_supported", diagnostics: this.diagnostics() }; }
   pushEvent(event: OverlayWidgetEvent) { this.#events.push(event); if (this.#events.length > 100) this.#events.splice(0, this.#events.length - 100); }
 }

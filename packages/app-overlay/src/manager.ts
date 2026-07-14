@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { redactOverlayText, validateOverlayAnimation, validateOverlayInteractionPolicy, validateOverlayStyleTokens, validateOverlayTargetBinding, validateOverlayWidget, type OverlayCapabilityReport, type OverlayPrimitive, type OverlaySensitivity, type OverlayStateSnapshot, type OverlayStateSummary, type OverlayTargetBinding, type OverlayTargetSummary, type OverlayWidget, type OverlayWidgetEvent } from "@agenthost/core";
-import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer } from "./renderer.js";
+import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer, OverlayRendererDiagnostics, OverlayRendererRestartResult } from "./renderer.js";
 
 export interface OverlayTargetResolution { ok: boolean; summary?: OverlayTargetSummary; reason?: string; }
 export type OverlayTargetResolver = (binding: OverlayTargetBinding, sessionId: string) => Promise<OverlayTargetResolution> | OverlayTargetResolution;
@@ -21,6 +21,7 @@ export class OverlayManager {
   #emergencyHidden = false;
   constructor(renderer: OverlayRenderer, owner: OverlayOwner) { this.#renderer = renderer; this.#owner = owner; }
   capabilities(): Promise<OverlayCapabilityReport> | OverlayCapabilityReport { return this.#renderer.capabilities(); }
+  async diagnostics(): Promise<OverlayRendererDiagnostics> { const diagnostics = await this.#renderer.diagnostics?.(); if (diagnostics !== undefined) return { ...diagnostics, activeOverlayCount: this.#records.size }; const capabilities = await this.#renderer.capabilities(); return { requestedMode: "headless", effectiveBackend: "headless", rendererStatus: "headless", sessionType: "unknown", displayPresent: false, waylandDisplayPresent: false, pythonExecutable: "not_used", gtk3Available: false, rendererScriptPresent: false, childState: "stopped", handshake: "not_attempted", capabilities, activeOverlayCount: this.#records.size, restartCount: 0, restartAllowed: false, recommendedAction: "Use headless renderer." }; }
   async state(): Promise<OverlayStateSnapshot> { this.#expire(); await this.#revalidateTargets(); const renderer = await this.#renderer.state(); return { ...renderer, overlays: [...this.#records.values()].filter((item) => item.visible), emergencyHidden: this.#emergencyHidden }; }
   async showPrimitive(input: OverlayPrimitive, resolver?: OverlayTargetResolver, reducedMotion = false): Promise<{ ok: boolean; overlay?: OverlayStateSummary; errors: string[] }> {
     const errors = [...validateOverlayAnimation(input.animation, reducedMotion), ...validateOverlayStyleTokens(input.style), ...validateOverlayInteractionPolicy(input.interaction)];
@@ -63,6 +64,7 @@ export class OverlayManager {
   async clear(): Promise<OverlayOperationResult> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); return this.#renderer.clear(); }
   async emergencyHide(): Promise<OverlayOperationResult> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); this.#emergencyHidden = true; return this.#renderer.emergencyHide(); }
   async close(): Promise<void> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); await this.#renderer.close?.(); }
+  async restartRenderer(): Promise<OverlayRendererRestartResult> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); const result = await this.#renderer.restart?.(); if (result === undefined) return { ok: false, reason: "overlay_renderer_restart_unsupported" }; return result; }
   pushEvent(event: OverlayWidgetEvent): void { if (event.ownerSessionId !== this.#owner.sessionId) return; const renderer = this.#renderer as OverlayRenderer & { pushEvent?: (event: OverlayWidgetEvent) => void }; renderer.pushEvent?.(event); }
   #expire() { const now = Date.now(); for (const [id, record] of this.#records) if (Date.parse(record.expiresAt) <= now) { this.#records.delete(id); this.#payloads.delete(id); this.#targets.delete(id); void this.#renderer.dismiss(id); } }
   async #revalidateTargets(): Promise<void> { for (const [id, target] of this.#targets) { if (target.resolver === undefined) continue; const resolved = await target.resolver(target.binding, this.#owner.sessionId); if (!resolved.ok || resolved.summary === undefined) { this.#records.delete(id); this.#payloads.delete(id); this.#targets.delete(id); await this.#renderer.dismiss(id); continue; } const current = this.#records.get(id); if (current !== undefined) this.#records.set(id, { ...current, target: resolved.summary, updatedAt: new Date().toISOString(), expiresAt: new Date(Math.min(Date.parse(current.expiresAt), Date.parse(resolved.summary.expiresAt))).toISOString() }); } }
