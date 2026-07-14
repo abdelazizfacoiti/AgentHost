@@ -84,11 +84,14 @@ import { createSchedulerManualRunAuditTools } from "./tools/scheduler-manual-run
 import { createSchedulerManualRunRequestLifecycleTools } from "./tools/scheduler-manual-run-request-lifecycle.js";
 import { createSchedulerManualRunApprovalDiagnosticsTools } from "./tools/scheduler-manual-run-approval-diagnostics.js";
 import { createOverlayTools } from "./tools/overlay.js";
+import { createOverlayDiagnosticsTools } from "./tools/overlay-diagnostics.js";
+import { createOverlayAssistanceTools } from "./tools/overlay-assistance.js";
 import { SchedulerStore } from "./scheduler-store.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { WorkflowReplayStore } from "./workflow-replay-store.js";
 import { ToolReceiptManager } from "./tool-receipts.js";
 import { VisionEvidenceStore } from "./vision-evidence.js";
+import { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -174,6 +177,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const receipts = new ToolReceiptManager();
   const visionEvidence = new VisionEvidenceStore();
   const overlay = new OverlayManager(createOverlayRenderer(config.overlayRendererMode ?? "headless", { sessionId }), { sessionId });
+  const overlayAssistance = new OverlayAssistanceStore(config.agentHostDir, overlay, sessionId);
+  await overlayAssistance.ensureStructure();
   const grants = new GrantStore({
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
@@ -236,6 +241,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     receipts,
     visionEvidence,
     overlay,
+    overlayAssistance,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux
   };
@@ -254,6 +260,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createSchedulerManualRunRequestLifecycleTools(),
     ...createSchedulerManualRunApprovalDiagnosticsTools(),
     ...createOverlayTools(),
+    ...createOverlayDiagnosticsTools(),
+    ...createOverlayAssistanceTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),
     ...createAdapterTools(),
@@ -331,7 +339,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     return toMcpToolResult(result);
   });
 
-  server.onclose = () => { void browserBridge?.close(); void overlay.close(); };
+  server.onclose = () => { void browserBridge?.close(); void overlayAssistance.close(); void overlay.close(); };
   return {
     server,
     context

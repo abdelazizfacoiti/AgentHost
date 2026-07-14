@@ -48,6 +48,7 @@ import type { WorkflowReplayStore } from "./workflow-replay-store.js";
 import type { ToolReceiptManager } from "./tool-receipts.js";
 import type { VisionEvidenceStore } from "./vision-evidence.js";
 import type { SchedulerStore } from "./scheduler-store.js";
+import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -157,5 +158,6 @@ export interface AgentHostMcpContext {
   browser?: BrowserBridgeAdapter;
   browserBridge?: BrowserBridgeServer;
   overlay?: OverlayManager;
+  overlayAssistance?: OverlayAssistanceStore;
   linux: LinuxAutomation;
 }

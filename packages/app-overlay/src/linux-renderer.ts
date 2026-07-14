@@ -1,19 +1,21 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { OverlayCapabilityReport, OverlayStateSnapshot, OverlayWidgetEvent } from "@agenthost/core";
+import type { OverlayCapabilityReport, OverlayRendererMode, OverlayStateSnapshot, OverlayWidgetEvent } from "@agenthost/core";
 import { HeadlessOverlayRenderer } from "./headless-renderer.js";
 import { probeGtk3, probeLinuxOverlay, type OverlayEnvironment } from "./linux-probe.js";
 import { OVERLAY_IPC_MAX_BYTES, OVERLAY_IPC_MAX_IN_FLIGHT, OVERLAY_IPC_VERSION, serializeRendererMessage, validateRendererHandshake, validateRendererReply, type OverlayRendererCommand, type OverlayRendererReply, type OverlayRendererRequest } from "./linux-renderer-protocol.js";
-import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer } from "./renderer.js";
+import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer, OverlayRendererDiagnostics, OverlayRendererRestartResult } from "./renderer.js";
 
-export interface LinuxOverlayRendererOptions { environment?: OverlayEnvironment; sessionId?: string; pythonCommand?: string; scriptPath?: string; commandTimeoutMs?: number; startupTimeoutMs?: number; maxRestarts?: number; probe?: () => Promise<OverlayCapabilityReport> | OverlayCapabilityReport; }
+export interface LinuxOverlayRendererOptions { environment?: OverlayEnvironment; mode?: OverlayRendererMode; sessionId?: string; pythonCommand?: string; scriptPath?: string; commandTimeoutMs?: number; startupTimeoutMs?: number; maxRestarts?: number; probe?: () => Promise<OverlayCapabilityReport> | OverlayCapabilityReport; }
 
 const fallbackReport = (report: OverlayCapabilityReport, reason: string): OverlayCapabilityReport => ({ ...report, supported: false, rendererStatus: "degraded", fallbackRenderer: "headless", reason, limitations: [...report.limitations, "Headless renderer fallback is active."] });
 
 export class LinuxOverlayRenderer implements OverlayRenderer {
   readonly #fallback = new HeadlessOverlayRenderer();
   readonly #environment: OverlayEnvironment;
+  readonly #mode: OverlayRendererMode;
   readonly #sessionId: string;
   readonly #pythonCommand: string;
   readonly #scriptPath: string;
@@ -30,9 +32,14 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   #starting: Promise<boolean> | undefined;
   #closed = false;
   #restarts = 0;
+  #childState: "stopped" | "starting" | "running" | "failed" | "closed" = "stopped";
+  #handshake: "not_attempted" | "pending" | "passed" | "failed" = "not_attempted";
+  #gtk3Available: boolean | undefined;
+  #lastFailure: string | undefined;
 
   constructor(options: LinuxOverlayRendererOptions = {}) {
     this.#environment = options.environment ?? process.env;
+    this.#mode = options.mode ?? "auto";
     this.#sessionId = options.sessionId ?? `overlay-session-${randomUUID()}`;
     this.#pythonCommand = options.pythonCommand ?? "python3";
     this.#scriptPath = options.scriptPath ?? fileURLToPath(new URL("../runtime/gtk3-renderer.py", import.meta.url));
@@ -46,6 +53,20 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     if (this.#probePromise === undefined) this.#probePromise = this.#probe();
     await this.#probePromise;
     return this.#report;
+  }
+
+  async diagnostics(): Promise<OverlayRendererDiagnostics> {
+    const capabilities = await this.capabilities();
+    return { requestedMode: this.#mode, effectiveBackend: capabilities.renderer, rendererStatus: capabilities.rendererStatus, sessionType: capabilities.sessionType, displayPresent: this.#environment.DISPLAY !== undefined, waylandDisplayPresent: this.#environment.WAYLAND_DISPLAY !== undefined, pythonExecutable: this.#pythonCommand, ...(this.#gtk3Available === undefined ? {} : { gtk3Available: this.#gtk3Available }), rendererScriptPresent: existsSync(this.#scriptPath), childState: this.#childState, handshake: this.#handshake, capabilities, activeOverlayCount: 0, restartCount: this.#restarts, restartAllowed: this.#childState === "failed" || capabilities.fallbackRenderer === "headless", ...(capabilities.fallbackRenderer === "headless" ? { fallbackReason: capabilities.reason } : {}), ...(this.#lastFailure === undefined ? {} : { lastFailure: this.#lastFailure }), recommendedAction: capabilities.supported ? "Renderer healthy." : "Use headless mode or inspect setup instructions." };
+  }
+
+  async restart(): Promise<OverlayRendererRestartResult> {
+    if (this.#closed) return { ok: false, reason: "overlay_renderer_closed", diagnostics: await this.diagnostics() };
+    if (this.#child !== undefined) { this.#child.kill("SIGTERM"); this.#child = undefined; }
+    this.#rejectPending(new Error("overlay_renderer_restarting"));
+    this.#buffer = ""; this.#restarts = 0; this.#lastFailure = undefined; this.#childState = "stopped"; this.#handshake = "not_attempted"; this.#report = probeLinuxOverlay({}); this.#probePromise = undefined;
+    const started = await this.#ensureStarted();
+    return { ok: started, reason: started ? "overlay_renderer_restarted" : "overlay_renderer_restart_failed", diagnostics: await this.diagnostics() };
   }
 
   async show(record: OverlayRenderRecord): Promise<OverlayOperationResult> { return await this.#operation("show", record, () => this.#fallback.show(record)); }
@@ -65,6 +86,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
 
   async close(): Promise<void> {
     this.#closed = true;
+    this.#childState = "closed";
     if (this.#child !== undefined) {
       await this.#request("close", {}).catch(() => undefined);
       this.#child.kill("SIGTERM");
@@ -75,10 +97,10 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   }
 
   async #probe(): Promise<OverlayCapabilityReport> {
-    if (this.#probeOverride !== undefined) { this.#report = await this.#probeOverride(); return this.#report; }
+    if (this.#probeOverride !== undefined) { this.#gtk3Available = true; this.#report = await this.#probeOverride(); return this.#report; }
     const session = (this.#environment.XDG_SESSION_TYPE ?? (this.#environment.DISPLAY ? "x11" : this.#environment.WAYLAND_DISPLAY ? "wayland" : "unknown")).toLowerCase();
-    if (session !== "x11" || this.#environment.DISPLAY === undefined) { const report = probeLinuxOverlay(this.#environment, { gtk3Available: false }); this.#report = fallbackReport(report, report.reason); return this.#report; }
-    const gtkAvailable = await probeGtk3(this.#environment);
+    if (session !== "x11" || this.#environment.DISPLAY === undefined) { this.#gtk3Available = false; const report = probeLinuxOverlay(this.#environment, { gtk3Available: false }); this.#report = fallbackReport(report, report.reason); return this.#report; }
+    const gtkAvailable = await probeGtk3(this.#environment); this.#gtk3Available = gtkAvailable;
     const report = probeLinuxOverlay(this.#environment, { gtk3Available: gtkAvailable });
     this.#report = report.supported ? report : fallbackReport(report, report.reason);
     return this.#report;
@@ -103,6 +125,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     const report = await this.capabilities();
     if (!report.supported || this.#restarts > this.#maxRestarts) return false;
     const child = spawn(this.#pythonCommand, [this.#scriptPath, "--protocol"], { stdio: ["pipe", "pipe", "pipe"], env: this.#safeEnvironment() });
+    this.#childState = "starting"; this.#handshake = "pending";
     this.#child = child;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => this.#read(chunk));
@@ -111,7 +134,8 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     child.once("error", () => this.#childFailed("overlay_renderer_process_error"));
     child.once("exit", () => { if (!this.#closed) this.#childFailed("overlay_renderer_process_crashed"); });
     const hello = await this.#request("hello", { sessionId: this.#sessionId }, this.#startupTimeoutMs).catch(() => undefined);
-    if (hello?.ok !== true || !validateRendererHandshake(hello.data)) { this.#childFailed("overlay_renderer_handshake_failed"); return false; }
+    if (hello?.ok !== true || !validateRendererHandshake(hello.data)) { this.#handshake = "failed"; this.#childFailed("overlay_renderer_handshake_failed"); return false; }
+    this.#handshake = "passed"; this.#childState = "running";
     return true;
   }
 
@@ -141,6 +165,6 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     }
   }
 
-  #childFailed(reason: string): void { const child = this.#child; this.#child = undefined; if (child !== undefined && !child.killed) child.kill("SIGKILL"); this.#rejectPending(new Error(reason)); this.#report = fallbackReport(this.#report, reason); if (!this.#closed) this.#restarts += 1; }
+  #childFailed(reason: string): void { const child = this.#child; this.#child = undefined; if (child !== undefined && !child.killed) child.kill("SIGKILL"); this.#rejectPending(new Error(reason)); this.#report = fallbackReport(this.#report, reason); this.#lastFailure = reason; this.#childState = this.#closed ? "closed" : "failed"; this.#handshake = this.#handshake === "passed" ? this.#handshake : "failed"; if (!this.#closed) this.#restarts += 1; }
   #rejectPending(error: Error): void { for (const [id, pending] of this.#pending) { clearTimeout(pending.timer); pending.reject(error); this.#pending.delete(id); } }
 }

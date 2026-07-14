@@ -4,5 +4,5 @@ import { LinuxOverlayRenderer, type LinuxOverlayRendererOptions } from "./linux-
 import type { OverlayRenderer } from "./renderer.js";
 
 export function createOverlayRenderer(mode: OverlayRendererMode = "headless", options: LinuxOverlayRendererOptions = {}): OverlayRenderer {
-  return mode === "headless" ? new HeadlessOverlayRenderer() : new LinuxOverlayRenderer(options);
+  return mode === "headless" ? new HeadlessOverlayRenderer() : new LinuxOverlayRenderer({ ...options, mode });
 }
