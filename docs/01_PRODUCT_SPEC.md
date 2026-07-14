@@ -1,81 +1,109 @@
 # AgentHost Product Specification
 
-## Product
+## Product definition
 
-AgentHost is a local workstation capability runtime: a safe, permissioned body for Codex and other AI agents. It exposes structured local tools through MCP while keeping policy, grants, previews, confirmations, redaction, and audit logging in one safety boundary.
-
-AgentHost is universal and provider-agnostic. Gmail, WhatsApp Web, LinkedIn, Google, Zoom, Slack, Outlook, Blender, and similar names are examples of possible apps, not hardcoded product targets.
+AgentHost is a universal adaptive local capability runtime: a safe, permissioned body for Codex and other agents on a real workstation. It is also a visual copilot for showing bounded, operator-visible guidance. The core is provider-agnostic and application-agnostic; product examples never become hardcoded architecture.
 
 ```text
-Agent / Codex
+Codex / agent
   -> AgentHost MCP server
-  -> schema + risk + policy + grants
-  -> dry-run + confirmation when required
-  -> safest available adapter or OS strategy
-  -> structured result + redacted audit record
+  -> schema + execution metadata + risk + policy + grants
+  -> dry-run and confirmation when required
+  -> safest available local strategy
+  -> bounded result + receipt + redacted audit record
 ```
 
 ## Strategy priority
 
-1. app adapter or official API/plugin API
-2. CLI/script interface
-3. browser DOM
-4. accessibility tree
-5. local screenshot OCR/vision grounding
-6. pointer GUI fallback
-7. guide mode
+1. app adapter/API
+2. official API/plugin API
+3. CLI/script
+4. browser DOM
+5. accessibility
+6. local screenshot OCR/vision grounding
+7. pointer GUI fallback
+8. guide mode
 
-GUI remains fallback. Browser tools never silently fall back to screenshots or mouse control.
+The browser extension is preferred for structured DOM work, but is not required. Browser failure never silently invokes another strategy. Accessibility, OCR, pointer, and guide alternatives are explicit and independently safety-gated.
 
-## Current capability state: Phase 31.6
+## Current implementation status
 
-Completed foundation includes:
+The default loaded registry currently contains 196 tools with validated execution metadata:
 
-- universal core types, `ToolResult`, capability registry, config, policy profiles, grants, risk classification, redaction, JSONL audit logging
-- system, app, file, shell, window, accessibility, desktop, guide, adapter, and optional Blender tools
-- dry-run previews and exact, session-bound, expiring confirmation tokens
-- desktop pointer actions: move, scroll, double-click, right-click, drag
-- Tool Forge manifest validation, reviews, artifact lifecycle, inert project scaffolding, static validation, inert harness, registration gates, runtime eligibility, capability grants, bounded JSON subprocess runner, optional OS sandboxing, and controlled generated dispatch
-- generated artifacts remain non-live; generated JavaScript/Python is never dynamically imported or executed
-- browser bridge foundation for Firefox/Chromium through paired localhost WebExtension; tab metadata, sanitized URL navigation, page context, bounded text, element discovery, safe element click/fill/focus, state waits, form metadata, and selected-text reads
-- stable unpacked extension preparation, setup/pairing diagnostics, reset/recovery, and documented manual validation
-- short-lived, tab-bound browser `elementId` references; direct selectors cannot perform actions
-- local Tesseract OCR grounding: text boxes, bounds, centers, target candidates, redaction, and clean unsupported results when unavailable
-- trusted screenshot evidence and `vision.prepare_pointer_action`, which only returns a validated `desktop.click` dry-run suggestion
-- semantic read-only checkpoints and reviewable workflow checkpoint templates
-- redacted workflow traces and inert workflow skills with explicit parameter binding and checkpoint-only dry-runs
+- 40 `read_only`
+- 3 `diagnostic`
+- 104 `metadata_only`
+- 25 `state_changing`
+- 24 `visual_only`
+
+The execution model also defines `inert`, but no currently loaded tool materializes with that class. Review-only and generated metadata are currently represented as `metadata_only`; `inert` remains available for future explicit definitions.
+
+### Functional and executable when policy permits
+
+- local app opening;
+- approved file operations and bounded safe shell execution;
+- window and accessibility operations;
+- desktop and pointer actions on supported Linux/X11 environments;
+- browser DOM observation and guarded actions through the paired bridge;
+- local screenshot OCR and vision grounding;
+- bounded Forge JSON runtime dispatch through `forge.run_sandboxed_tool` and `forge.dispatch_generated_tool`.
+
+All state-changing execution remains subject to schema validation, execution metadata, policy, grants, dry-run, confirmation, target checks, and audit logging.
+
+### Visual-only
+
+Overlay primitives, the GTK/X11 renderer, bounded widgets, visual-assistance sessions, overlay events, and `overlay.emergency_hide` are visual/session state only. They never click, type, navigate, or invoke another AgentHost tool. Emergency hide affects AgentHost-owned overlays only; it is not a global circuit breaker.
+
+### Metadata-only, inert, or review-only
+
+Workflow traces and skills, checkpoint-template lifecycle, replay planning/session governance, scheduler jobs and activation/manual-run records, receipts, and Forge manifest/artifact/registration metadata are records and reviews. They do not create autonomous execution. Generated capabilities remain absent from the live MCP tool array.
+
+### Optional and experimental
+
+Application adapters are optional. Blender is the current reference adapter: disabled by default, explicitly enabled only through configuration, experimental, reviewed, bounded, and not core product direction. Other adapters must follow the same generic optional-adapter policy.
+
+### Unsupported or future
+
+- autonomous workflow replay;
+- scheduler execution workers and background jobs;
+- live generated MCP tools;
+- arbitrary generated JavaScript or Python execution;
+- hidden persistence or background autonomy;
+- remote browser bridges;
+- Windows and macOS support;
+- silent send, submit, upload, delete, archive, pay, or buy actions;
+- CAPTCHA, MFA, login, payment, or security bypass.
 
 ## Browser and vision boundaries
 
-Browser bridge is disabled by default, binds only to `127.0.0.1`, uses pairing/session tokens, fixed commands, bounded bodies/timeouts, and one active session. It has no cookies, storage, debugger, arbitrary script, upload, submit, send, or form API.
+The browser bridge is disabled by default, binds only to `127.0.0.1`, uses paired Firefox/Chromium WebExtension sessions, fixed commands, bounded bodies/timeouts, and short-lived tab-bound `elementId` references. Direct selectors cannot execute actions. Cookies, storage, debugger access, arbitrary JavaScript, passwords, and communication APIs are not exposed.
 
-Extension DOM bridge is recommended for structured browser automation, not required. If unavailable, AgentHost may recommend accessibility, local OCR/vision, pointer fallback, or guide mode according to safety and strategy priority. It never silently executes another strategy after browser failure. See [Browser Setup Validation](06_BROWSER_SETUP_VALIDATION.md).
+Vision uses local Tesseract when available. It analyzes approved local images, returns bounded redacted text boxes and target suggestions, and never clicks or types. `vision.prepare_pointer_action` validates fresh trusted evidence and returns only a `desktop.click` dry-run suggestion; it never executes the click.
 
-Communication pages require private-data grants for content reads. Financial, credential/security, password-manager, and admin pages are blocked or guide-only. Login, CAPTCHA, MFA, payment confirmation, secret extraction, and communication sending remain unavailable by default.
+Communication content requires explicit private-data grants. Financial, credential/security, password-manager, and administration contexts are blocked or guide-only. Provider names such as Gmail, WhatsApp, LinkedIn, Google, Zoom, Slack, and Outlook are examples only.
 
-Vision tools analyze approved local images only. They never click or type, never upload screenshots, and never call cloud OCR. Screenshot handoff validates freshness, hash, coordinate space, bounds, active window, risk, and sensitivity before returning a dry-run suggestion.
+## Forge and workflow model
 
-## Workflow and Forge model
-
-Workflow traces store redacted tool summaries, safety decisions, grants, and checkpoint results. Skills are drafts/metadata only. `workflow.skill_bind_checkpoints` and `workflow.skill_checkpoints_dryrun` validate declared parameters and optionally evaluate read-only checkpoints; they never replay skill actions or create confirmation tokens.
-
-Tool Forge follows:
+Forge follows:
 
 ```text
 manifest -> review -> artifact -> static validation -> inert harness
 -> registration gate -> runtime eligibility/grants -> fixed JSON handler runner
 ```
 
-Runtime execution is deny-by-default, capability-granted, bounded, timeout-limited, environment-filtered, network-free, GUI-free, shell-free, and optionally wrapped by bubblewrap/firejail/unshare. Generated tools never appear as independent live MCP tools.
+The runtime executes only bounded `runtime/handler.json` operations in a fixed child process. Generated source is not imported. The runner is capability-granted, timeout/output limited, environment-filtered, network-free, GUI-free, shell-free, and optionally wrapped by Bubblewrap. Auto mode falls back to the fixed runner when no verified OS sandbox is available.
+
+Workflow traces are redacted. Skills, checkpoint templates, replay dry-runs, replay sessions, receipts, and scheduler governance remain manually controlled and non-autonomous. Replay prepares one step at a time; the caller must invoke the original tool and provide a trusted receipt. Scheduler records remain non-executable.
 
 ## Platform scope
 
-Linux is first. X11 supports pointer and window backends when safe dependencies exist. Wayland returns clean unsupported/guide results where no safe backend exists. Windows and macOS remain future platform work.
+Linux is first. X11 supports the GTK3 overlay and pointer/window backends when dependencies are available. Wayland reports honest limitations and uses safe unavailable/headless behavior where no supported backend exists. Windows and macOS are future platform work.
 
 ## Non-negotiables
 
-- no silent send, submit, post, upload, delete, archive, pay, buy, or publish
-- no CAPTCHA/MFA/login/payment/security bypass
-- no passwords, cookies, tokens, private keys, browser storage, or secret extraction
-- no public bridge, stealth control, persistence, background autonomy, sudo, dependency installation, or unsafe network access
-- state-changing tools retain policy, grant, dry-run, confirmation, and audit requirements
+- no silent send, submit, post, upload, delete, archive, pay, buy, or publish;
+- no login, CAPTCHA, MFA, payment, security, or approval bypass;
+- no passwords, cookies, tokens, private keys, browser storage, or secret extraction;
+- no public bridge, stealth control, hidden persistence, background autonomy, sudo, dependency installation, or unsafe network access;
+- optional adapters never become core features by implication;
+- policy, grants, dry-run, confirmation, exact-target checks, receipts, checkpoints, and redacted audit logging remain in force.

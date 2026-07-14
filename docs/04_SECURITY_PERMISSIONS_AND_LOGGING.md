@@ -2,64 +2,93 @@
 
 ## Security goal
 
-AgentHost is local-first, visible, permissioned, previewable, confirmation-bound, auditable, and conservative. It must never behave like malware, spyware, credential theft software, or stealth remote control.
-
-Every tool follows schema validation, risk/sensitivity classification, policy and grant checks, dry-run when required, confirmation when required, bounded execution, result/checkpoint validation, and safe audit logging.
+AgentHost is local-first, visible, permissioned, previewable, confirmation-bound, bounded, auditable, and conservative. It must never behave like malware, spyware, credential theft software, stealth remote control, or an unattended automation service.
 
 ## Hard non-negotiables
 
-- no silent send, submit, post, upload, delete, archive, pay, buy, publish, or destructive overwrite
-- no login, CAPTCHA, MFA, payment, security, or approval bypass
-- no passwords, cookies, browser storage, tokens, API keys, private keys, or secret extraction
-- no public browser bridge, remote access, stealth control, hidden persistence, background autonomy, sudo, package installation, or unsafe network access
-- generated runtime has no network, shell, GUI/DBus, private-data, or arbitrary-code capability
+- no silent send, submit, post, upload, delete, archive, pay, buy, publish, or destructive overwrite;
+- no login, CAPTCHA, MFA, payment, security, or approval bypass;
+- no password, cookie, browser-storage, token, API-key, private-key, or secret extraction;
+- no public bridge, remote access, stealth control, hidden persistence, background autonomy, sudo, package installation, or unsafe network access;
+- no arbitrary generated JavaScript/Python execution;
+- no generated tools as independent live MCP tools.
 
-## Policy and grants
+## Central execution baseline
 
-Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. Grants are explicit, scoped, session/persistent, and rechecked immediately before execution. Demo mode reduces friction only for approved local/demo roots and normal apps; hard safety blocks remain.
+Every loaded tool has validated execution metadata. Missing or contradictory metadata fails closed. For state-changing tools, the central runner:
 
-State-changing tools retain dry-run and exact confirmation requirements unless a narrow profile/grant explicitly permits local behavior. Tokens are session-bound, short-lived, single-use, fingerprint-bound, and never logged raw.
+1. validates schema and metadata;
+2. evaluates policy, grants, protected context, risk, and guide-only restrictions;
+3. requires the declared prior dry-run and confirmation contract;
+4. verifies the session/tool/input confirmation envelope without consuming it;
+5. invokes the handler only after acceptance.
 
-Communication apps (mail, chat, collaboration, social messaging) are private/high-risk. Financial, payment, credential/security, password-manager, and system-admin apps are blocked or guide-only for sensitive reads/actions.
+The handler remains responsible for current target resolution, exact target/input checks, app-specific sensitivity, path/backend constraints, and the single consuming confirmation operation. Receipts are issued after the result. Narrow legacy preflight paths are explicit and tested; there is no implicit safety opt-out.
 
-## Browser bridge safety
+Confirmation tokens are short-lived, session-bound, input-fingerprint-bound, risk-bound, single-use, and never logged raw. Confirmation verifies intent; it does not bypass policy, grants, protected contexts, or handler checks.
 
-Firefox/Chromium WebExtension bridge is disabled by default, binds only to `127.0.0.1`, uses a protected pairing token plus rotating session token, permits one active session, and has bounded body/command/long-poll limits. Extension origin and tokens are validated; invalid/missing tokens fail cleanly.
+## Profiles and grants
 
-Fixed commands expose sanitized tabs, URLs, page context/text, element discovery, safe actions, and state waits. There is no arbitrary JavaScript, CDP/debugger, cookies, storage, history, webRequest, password API, upload, submit, send, or form command.
+Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. Demo mode only reduces friction for approved local/demo roots and normal apps; hard safety blocks remain.
 
-Setup diagnostics return state/error codes, prepared paths, timestamps, and recovery steps only. They never return browser URLs, page data, session tokens, pairing tokens, cookies, or storage. Pairing-token rotation/reset is dry-run and confirmation gated; only explicit token generation returns raw token once.
+Persistent grant config is strict and round-trips these runtime fields without synthesizing permissions:
 
-Extension absence does not weaken policy. Accessibility, local OCR/vision, pointer, and guide alternatives remain separately safety-gated and must be selected explicitly. No browser failure may silently trigger click/type/action fallback.
+- generated registration/tool/capability scopes;
+- `sandboxRoots` and `outputRoots`;
+- `allowedOperations`;
+- positive `maxInputBytes`, `maxOutputBytes`, and `maxRuntimeMs` limits;
+- dry-run, confirmation, approval, exact-target, risk, path, app, sensitivity, and expiry requirements.
 
-Browser `elementId` values are opaque, short-lived, tab/page-bound references. Actions require a unique reference, revalidate URL/session, visibility, enabled state, identity, and ambiguity. Direct selectors cannot act. Stale or changed references fail.
+Unknown fields, malformed values, unsupported dangerous capabilities, invalid roots, and limits above hard runtime limits reject. Runtime matching intersects grants with hard limits; persisted grants cannot expand them. Current Forge hard limits are 64 KiB input, 64 KiB output, and 5 seconds unless a narrower grant applies.
 
-## Browser content and action policy
+## Browser bridge and element safety
 
-URLs are normalized and redacted before results/logs. Email, phone, token, auth-looking, query, fragment, and credential material is redacted. Communication content requires explicit private-data grants. Financial/credential/security/admin content is blocked or guide-only. Fill is draft-only; send/submit/post/upload/delete/pay/buy remain blocked or high-risk.
+The Firefox/Chromium bridge is disabled by default, binds only to `127.0.0.1`, requires a protected pairing token and rotating session token, allows one active session, and caps bodies, commands, and polling. Extension origins are checked. No cookies, storage, history, debugger, webRequest, password APIs, arbitrary JavaScript, upload, submit, send, or form API exists.
 
-## OCR and vision safety
+Setup diagnostics expose state codes and recovery steps, not tokens, page content, or private URLs. Pairing-token generation/reset is dry-run and confirmation-gated; explicit generation returns the token once. Tokens never enter logs.
 
-Vision accepts only approved AgentHost screenshot/output roots unless separately granted. It uses local Tesseract only; no cloud OCR, upload, network, or dependency installation. Protected active windows and sensitive paths are blocked. OCR results are bounded and redacted; logs contain no image bytes or full private text.
+Browser element IDs are opaque, short-lived, tab/page-bound references. Actions require a unique reference and revalidate session, URL, identity, visibility, enabled state, and ambiguity. Direct selectors cannot execute actions. Communication reads require private-data grants. Financial, credential/security, password-manager, and admin contexts are blocked or guide-only.
 
-`vision.find_target` returns suggestions only. `vision.prepare_pointer_action` requires session match, image hash, coordinate-space proof, dimensions, active-window match, fresh evidence within 10 seconds, bounds, confidence, and risk checks. It returns only a `desktop.click` dry-run suggestion and never clicks or types.
+## Vision, screenshot evidence, and checkpoints
 
-## Checkpoint safety
+Vision accepts approved local AgentHost screenshot/output roots and uses local Tesseract only. It never uploads images, uses cloud OCR, clicks, types, or logs image bytes/full private OCR. Text, email, phone, URL, token, and auth-looking values are redacted.
 
-`checkpoint.evaluate` and `checkpoint.wait_for` are read-only. They inspect metadata/state through existing safety boundaries and return bounded evidence summaries. Secret checkpoints block. Private checkpoints require grants. File paths, browser URLs, accessibility queries, and vision evidence retain path, app sensitivity, grant, and redaction checks.
+Trusted screenshot handoff requires session binding, image hash, coordinate-space proof, dimensions, active-window match, bounds, confidence, sensitivity checks, and a 10-second freshness window. It returns only a desktop-click dry-run suggestion.
 
-Checkpoint templates are review metadata, not action scripts. They accept only declared parameters and literal `{{parameterName}}` interpolation. No expressions, shell/env/glob expansion, code execution, or hidden tool calls. Secret/private literal expectations are rejected or blocked; sensitive bindings stay in memory and never enter skill records, traces, ToolResults, or logs. Skills cannot replay actions or create confirmation tokens.
+`checkpoint.evaluate` and `checkpoint.wait_for` are read-only. Secret checkpoints block; private checkpoints require grants. Checkpoint templates are review metadata with declared parameters and literal `{{parameter}}` interpolation only. No expression, shell, environment, glob, code, or hidden tool execution is allowed.
 
-## Tool Forge and OS sandboxing
+## Receipts and replay protections
 
-Forge manifests declare capabilities and risk. Reviews, artifact validation, registration gates, runtime eligibility, and grants precede execution. Generated artifacts remain non-live and absent from `system.list_capabilities` live tools.
+The runner attaches a short-lived HMAC-signed receipt containing fingerprints, tool/risk/preview/execution status, and safe confirmation metadata. It contains no raw input/output, token, page text, OCR, secret, or private content.
 
-Runtime runs execute only bounded `runtime/handler.json` JSON operations in a fixed child runner. Generated JavaScript/Python is not imported or executed. Inputs/outputs, stdout/stderr, runtime, environment, and filesystem are capped. Network, GUI/DBus, secrets, broad filesystem, shell, private data, and dangerous capabilities are denied.
+Replay receipt states are active, reserved, and consumed. Reservation binds one session, step, prepare ID, and tool/input fingerprint. Tampered, missing, expired, wrong, reused, or stale receipts fail closed. Replay sessions permit one explicit current step; no loop, retry, background task, or action execution is performed by the replay layer. Semantic completion still requires a read-only checkpoint.
 
-Optional sandbox selection prefers bubblewrap/bwrap, then firejail, then safe unshare. Auto mode falls back to the fixed runner with limitations when unavailable. No install or sudo is used. Run records include backend, limitations, grants, limits, env key names, status, and redacted summaries.
+## Forge runtime and OS sandboxing
 
-## Files and logs
+Forge review, artifact validation, registration, eligibility, grants, and fixed-runner boundaries precede runtime dispatch. Only bounded `runtime/handler.json` JSON operations run in a child process; generated source is not imported.
 
-Default writable roots are `~/.agenthost/` and approved AgentHost output roots. Protected paths include system roots, home-wide private data, SSH/GnuPG/keyrings, browser profiles, and credentials.
+The runner uses `shell:false`, a filtered environment, bounded stdin/stdout/stderr/output/runtime, per-run writable folders, and no GUI/DBus/API-key/private-data environment. It denies network, shell, broad filesystem, and dangerous capabilities.
 
-JSONL audit logs contain tool name, risk, policy decision, grant IDs/status, sanitized origin/app, counts, sizes, truncation, backend, and safe error codes. They never contain pairing/session/confirmation tokens, secrets, raw OCR text, page content, screenshots, private messages, full sensitive paths, or hidden environment values.
+`auto` prefers Bubblewrap/bwrap with unprivileged user namespaces, read-only project/runtime mounts, writable per-run storage, and an isolated network namespace. If unavailable, it falls back to the fixed runner with a limitation warning. Explicit `none` uses the fixed runner. Firejail and unshare are currently detected-only and fail closed because no reviewed filesystem profile exists. OS sandboxing does not authorize arbitrary source execution.
+
+## Optional adapters
+
+Optional external-process/application adapters must be disabled by default and declare experimental/stable status, execution metadata, fingerprint behavior, shell policy, environment allowlist, timeout/output caps, filesystem/output roots, and redacted audit policy.
+
+Blender is the reference optional adapter, not a core feature. When explicitly enabled, `blender.run_python` requires reviewed script input, dry-run, exact confirmation bound to the reviewed input/output target, static Python safety checks, shell-free bounded subprocess execution, filtered environment, AgentHost output-root validation, expected-output validation, timeout/output caps, and redacted results. It remains distinct from Forge’s bounded JSON runtime.
+
+## Overlay and renderer safety
+
+Overlay targets are fresh, owner/session-bound, sensitivity-checked, and TTL-limited. Widgets accept only allowlisted intent events. Events update overlay/session state only and never invoke another tool. The GTK child uses authenticated bounded JSONL IPC, filtered environment, handshake validation, crash detection, bounded restart, and headless fallback.
+
+`overlay.emergency_hide` hides AgentHost-owned overlays and clears owned visual state. It is not a global AgentHost process circuit breaker, does not kill target apps, and does not undo prior external actions.
+
+## Scheduler governance safety
+
+Jobs, activation, manual-run contracts, preflights, acknowledgements, requests, reviews, expiry, and staleness records are metadata-only. They cannot create timers, workers, run sessions, replay sessions, files, notifications, messages, or confirmation tokens. Approval records do not authorize execution. Any future worker must revalidate policy, grants, readiness, dry-run, confirmation, receipts, checkpoints, cancellation, and stop-on-failure at run time.
+
+## Files, redaction, and audit logs
+
+Default writable roots are `~/.agenthost/` and approved AgentHost output roots. Protected paths include system roots, home-wide private data, SSH/GnuPG/keyrings, browser profiles, credentials, and secrets.
+
+JSONL audit entries contain tool, risk, profile, policy/grant decision, safe IDs, sanitized origin/app, counts, sizes, truncation, backend, receipt ID, and error code. They never contain pairing/session/confirmation tokens, receipt signatures, passwords, secrets, raw OCR/page text, screenshots, private messages, hidden environment values, or full sensitive paths.

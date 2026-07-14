@@ -2,7 +2,7 @@
 
 ## Scope
 
-Phase 31.6 validates Phase 31.5 browser setup. No browser capability expands. This runbook uses a user-controlled public/test page only; provider names are examples, never required test targets.
+This runbook validates the current browser setup and pairing path. It does not expand browser capabilities. Use a user-controlled public/test page only; provider names are examples, never required test targets.
 
 ## One-time setup
 
@@ -10,14 +10,14 @@ Phase 31.6 validates Phase 31.5 browser setup. No browser capability expands. Th
 npm run browser:setup
 ```
 
-This explicitly prepares stable unpacked Firefox/Chromium bundles, enables local bridge config, and prints pairing token. It does not install extension silently.
+This explicitly prepares stable unpacked Firefox/Chromium bundles, enables local bridge config, and prints the pairing token once. It does not install an extension silently.
 
 Restart AgentHost MCP server. Then load:
 
 - Firefox: `about:debugging#/runtime/this-firefox`, **Load Temporary Add-on…**, select `~/AgentHost/browser-extension/firefox/manifest.json`.
 - Chromium: `chrome://extensions`, enable Developer mode, **Load unpacked**, select `~/AgentHost/browser-extension/chromium`.
 
-Paste token into popup, keep port `43117`, select **Pair / Re-pair**, then call `browser.verify_pairing`.
+Paste the token into the popup, keep the configured port (default `43117`), select **Pair / Re-pair**, then call `browser.verify_pairing`. The token file is text data, not a command: use `cat` or the setup tools to read it; never execute it and never use `sudo` on it.
 
 ## Setup-state checklist
 
@@ -28,11 +28,11 @@ Paste token into popup, keep port `43117`, select **Pair / Re-pair**, then call 
 | `extension_not_seen` | Bridge running, no extension request. | Prepare bundle, load extension, check popup port. |
 | `unpaired` | Extension seen, no valid session. | Paste pairing token; select Pair / Re-pair. |
 | `token_invalid` | Pair rejected; no session. | Run setup or explicit token generation; paste current token again. |
-| `token_expired` | Memory-only session expired/restarted. | Select Pair / Re-pair; no new token needed unless invalid. |
+| `token_expired` | A bridge request used an expired memory-only session. The setup status may subsequently show `unpaired`. | Select Pair / Re-pair. Generate a new token only if the pairing token itself is invalid or reset. |
 | `paired` | `browser.verify_pairing` returns `verified: true`. | Continue browser DOM tools. |
-| `manifest_missing` | Prepared bundle absent/invalid. | Run `npm run browser:extension:firefox` or `browser:extension:chromium`. |
+| `manifest_missing` | Extension package validation found no valid prepared manifest. This is setup/package state, not a bridge listener state. | Run `npm run browser:extension:firefox` or `browser:extension:chromium`. |
 
-`browser.diagnose_bridge` returns safe state and next steps. It never returns raw token, page content, or private URLs.
+`browser.diagnose_bridge` returns safe bridge state and next steps. It never returns a raw token, page content, or private URLs. A token mismatch is repaired by using the current token from setup/token generation and pairing again; running the token file is never required.
 
 ## Manual smoke
 
