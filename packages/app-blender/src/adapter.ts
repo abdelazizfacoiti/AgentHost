@@ -35,6 +35,25 @@ export function createBlenderAdapter(dependencies: BlenderRunnerDependencies = {
     displayName: "Blender",
     appIds: ["blender"],
     supportedPlatforms: ["linux"],
+    optionalExecutionPolicy: {
+      enabledByDefault: false,
+      stability: "experimental",
+      execution: {
+        executionClass: "state_changing",
+        externalEffect: true,
+        requiresDryRun: true,
+        requiresConfirmationToken: true,
+        requiresExactTarget: true,
+        source: "optional_adapter",
+        availability: "available"
+      },
+      fingerprinting: "required",
+      subprocess: { required: true, shell: false, commandAllowlist: ["blender"] },
+      environment: { allowlist: ["PATH", "LANG", "LC_ALL", "TMPDIR"], inherit: false },
+      limits: { maxRuntimeMs: 60_000, maxOutputBytes: 64 * 1024 },
+      filesystem: { allowedOutputRoots: ["$AGENTHOST_HOME/outputs/blender"], broadFilesystem: false },
+      audit: { redacted: true, rawInput: false, rawOutput: false }
+    },
     matchesApp: (input) => input.appId === "blender" || input.appName?.trim().toLowerCase() === "blender",
     getCapabilities(): AppCapability[] {
       return capabilities.map((capability) => ({ ...capability, safety: { ...capability.safety } }));

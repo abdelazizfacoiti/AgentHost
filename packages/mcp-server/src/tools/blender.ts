@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
 import type { AgentHostToolDefinition } from "../tool-runner.js";
 import { createSafetyEvaluationContext } from "../grants.js";
+import { acceptedConfirmation, buildPreviewResult, confirmationRequired, rejectedConfirmation } from "./preview.js";
 
 const blenderInputSchema = z
   .object({
@@ -11,7 +12,9 @@ const blenderInputSchema = z
     demo: z.enum(["coffee_cup"]).optional(),
     outputDir: z.string().trim().min(1).max(1000).optional(),
     expectedOutputs: z.array(z.string().trim().min(1).max(200)).min(1).max(5).optional(),
-    timeoutMs: z.number().int().min(1_000).max(60_000).optional()
+    timeoutMs: z.number().int().min(1_000).max(60_000).optional(),
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(2000).optional()
   })
   .strict()
   .superRefine((input, ctx) => {
@@ -36,7 +39,7 @@ export const BLENDER_RUN_PYTHON_TOOL = {
 };
 
 function defaultOutputDir(context: AgentHostMcpContext): string {
-  return path.join(context.config.agentHostDir, "outputs", "blender", `run-${context.sessionId}-${Date.now()}`);
+  return path.join(context.config.agentHostDir, "outputs", "blender", `run-${context.sessionId}`);
 }
 
 function toAdapterActionInput(input: BlenderToolInput, outputDir: string): BlenderToolInput {
@@ -101,11 +104,20 @@ export function createBlenderTools(): AgentHostToolDefinition<BlenderToolInput, 
             type: "integer",
             minimum: 1000,
             maximum: 60000
+          },
+          dryRun: {
+            type: "boolean"
+          },
+          confirmationToken: {
+            type: "string",
+            minLength: 1,
+            maxLength: 2000
           }
         },
         additionalProperties: false
       },
       inputSummary: "Run Blender Python",
+      preview: { isDryRun: (input) => input.dryRun === true },
       safety: {
         actionType: "file_write",
         getInput: (input) => {
@@ -125,7 +137,7 @@ export function createBlenderTools(): AgentHostToolDefinition<BlenderToolInput, 
           return safetyInput;
         }
       },
-      async handler(input, context): Promise<ToolResult<unknown>> {
+      async handler(input, context, runtime): Promise<ToolResult<unknown>> {
         const adapter = context.adapters.get("blender");
 
         if (adapter === undefined) {
@@ -155,6 +167,34 @@ export function createBlenderTools(): AgentHostToolDefinition<BlenderToolInput, 
           createSafetyEvaluationContext(context)
         );
 
+        const confirmationTarget = {
+          adapterId: "blender",
+          capabilityId: "blender.run_python",
+          outputDir
+        };
+
+        if (runtime?.isDryRun) {
+          return buildPreviewResult({
+            tool: BLENDER_RUN_PYTHON_TOOL.name,
+            riskLevel: postResolutionSafety.riskLevel,
+            strategy: "app_adapter",
+            safety: postResolutionSafety,
+            targetSummary: "Reviewed Blender script and approved output directory",
+            target: { kind: "app", summary: "Blender reviewed-script execution", appName: "Blender" },
+            wouldExecute: postResolutionSafety.allowed,
+            confirmation: postResolutionSafety.allowed
+              ? {
+                  manager: context.confirmations,
+                  sessionId: context.sessionId,
+                  input,
+                  target: confirmationTarget,
+                  explanation: "Use this token only for the exact reviewed Blender script and output target.",
+                  riskLevel: "medium"
+                }
+              : undefined
+          });
+        }
+
         if (!postResolutionSafety.allowed) {
           return toolFailure({
             tool: BLENDER_RUN_PYTHON_TOOL.name,
@@ -172,7 +212,41 @@ export function createBlenderTools(): AgentHostToolDefinition<BlenderToolInput, 
           });
         }
 
-        return adapter.execute(
+        if (input.confirmationToken === undefined) {
+          return toolFailure({
+            tool: BLENDER_RUN_PYTHON_TOOL.name,
+            riskLevel: "medium",
+            strategy: "app_adapter",
+            confirmation: confirmationRequired("Blender execution requires a fresh dry-run confirmation token."),
+            error: {
+              code: "confirmation_required",
+              message: "Blender execution requires a fresh dry-run confirmation token."
+            }
+          });
+        }
+
+        const verified = context.confirmations.verifyAndConsume(input.confirmationToken, {
+          sessionId: context.sessionId,
+          tool: BLENDER_RUN_PYTHON_TOOL.name,
+          input,
+          target: confirmationTarget,
+          riskLevel: "medium"
+        });
+
+        if (!verified.ok) {
+          return toolFailure({
+            tool: BLENDER_RUN_PYTHON_TOOL.name,
+            riskLevel: "medium",
+            strategy: "app_adapter",
+            confirmation: rejectedConfirmation(verified.tokenId, verified.reason),
+            error: {
+              code: "confirmation_rejected",
+              message: verified.reason
+            }
+          });
+        }
+
+        const result = await adapter.execute(
           {
             adapterId: "blender",
             capabilityId: "blender.run_python",
@@ -186,6 +260,7 @@ export function createBlenderTools(): AgentHostToolDefinition<BlenderToolInput, 
             registry: context.registry
           }
         );
+        return { ...result, confirmation: acceptedConfirmation(verified.tokenId, result.ok, "Blender confirmation accepted.") };
       }
     }
   ];

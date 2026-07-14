@@ -11,7 +11,8 @@ import type {
   RiskLevel,
   ToolResult,
   WorkflowCheckpoint,
-  WorkflowTraceStep
+  WorkflowTraceStep,
+  ToolExecutionMetadata
 } from "@agenthost/core";
 import { evaluateSafety, redactWorkflowSummary, summarizeToolResult, toolFailure, workflowActionForTool, workflowStrategyForTool } from "@agenthost/core";
 import type { z } from "zod";
@@ -62,6 +63,7 @@ export interface AgentHostToolDefinition<
   preview?: {
     isDryRun(input: TInput): boolean;
   };
+  execution?: ToolExecutionMetadata;
   handler(
     input: TInput,
     context: TContext,

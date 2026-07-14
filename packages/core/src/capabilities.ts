@@ -3,8 +3,29 @@ import {
   type AppCapability,
   type AutomationStrategy,
   type CapabilityRegistrySnapshot,
-  type ToolCapability
+  type ToolCapability,
+  type ToolExecutionMetadata
 } from "./types.js";
+
+function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
+  const visual = name.startsWith("overlay.");
+  let metadata: ToolExecutionMetadata["executionClass"] = "read_only";
+  if (name === "forge.check_sandbox_support" || name === "system.check_dependency") metadata = "diagnostic";
+  else if (/^forge\.(run_sandboxed_tool|dispatch_generated_tool)$/.test(name)) metadata = "state_changing";
+  else if (name.startsWith("workflow.") || name.startsWith("scheduler.") || name.startsWith("forge.")) metadata = "metadata_only";
+  else if (visual) metadata = "visual_only";
+  else if (/(^|\.)(open|write|delete|click|type|focus|hotkey|scroll|drag|mouse|invoke|set_value|run_|send|upload)/.test(name)) metadata = "state_changing";
+  const stateChanging = metadata === "state_changing";
+  return {
+    executionClass: metadata,
+    externalEffect: stateChanging,
+    requiresDryRun: stateChanging,
+    requiresConfirmationToken: stateChanging,
+    requiresExactTarget: stateChanging && /browser|desktop|window|accessibility|click|type|focus|scroll|drag|mouse/.test(name),
+    source: "base",
+    availability: "available"
+  };
+}
 
 export class CapabilityRegistry implements CapabilityRegistrySnapshot {
   readonly #tools = new Map<string, ToolCapability>();
@@ -15,7 +36,21 @@ export class CapabilityRegistry implements CapabilityRegistrySnapshot {
       throw new Error(`Tool capability is already registered: ${capability.name}`);
     }
 
-    this.#tools.set(capability.name, { ...capability });
+    this.#tools.set(capability.name, { ...capability, execution: capability.execution ?? bootstrapExecutionMetadata(capability.name) });
+  }
+
+  syncTools(capabilities: ToolCapability[]): void {
+    const names = new Set<string>();
+    for (const capability of capabilities) {
+      if (names.has(capability.name)) {
+        throw new Error(`Tool capability is duplicated in loaded tool set: ${capability.name}`);
+      }
+      names.add(capability.name);
+    }
+    this.#tools.clear();
+    for (const capability of capabilities) {
+      this.#tools.set(capability.name, { ...capability });
+    }
   }
 
   registerAppCapability(capability: AppCapability): void {
