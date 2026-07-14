@@ -277,7 +277,14 @@ export async function runBlenderPython(
     command: blenderPath,
     args: ["--background", "--python", scriptPath],
     cwd: outputDir,
-    timeoutMs: input.timeoutMs ?? 60_000
+    timeoutMs: input.timeoutMs ?? 60_000,
+    maxOutputBytes: 64 * 1024,
+    env: {
+      PATH: process.env.PATH ?? "",
+      LANG: process.env.LANG ?? "C",
+      LC_ALL: process.env.LC_ALL ?? "C",
+      TMPDIR: path.join(config.agentHostDir, "tmp", "blender")
+    }
   };
   const result = await runCommand(command);
 

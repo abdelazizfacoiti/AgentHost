@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AdapterRegistry, applyAdapterDetectionToAppResult, type AppAdapter } from "../index.js";
+import { AdapterRegistry, applyAdapterDetectionToAppResult, validateOptionalAdapterExecutionPolicy, type AppAdapter } from "../index.js";
 
 function createMockAdapter(overrides: Partial<AppAdapter> = {}): AppAdapter {
   return {
@@ -27,6 +27,10 @@ function createMockAdapter(overrides: Partial<AppAdapter> = {}): AppAdapter {
 }
 
 describe("AdapterRegistry", () => {
+  it("rejects optional adapters without explicit execution policy", () => {
+    expect(() => validateOptionalAdapterExecutionPolicy(createMockAdapter())).toThrow(/execution policy/);
+  });
+
   it("registers and lists supported adapters", () => {
     const registry = new AdapterRegistry({ platform: "linux" });
     const result = registry.register(createMockAdapter());

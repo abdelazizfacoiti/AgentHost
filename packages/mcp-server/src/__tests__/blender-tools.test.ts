@@ -342,7 +342,11 @@ describe("blender MCP tools", () => {
 
   it("runs the registered Blender adapter in dev profile and logs the call", async () => {
     const context = createContext("dev", true);
-    const result = await callTool(context, "blender.run_python", { demo: "coffee_cup" });
+    const preview = await callTool(context, "blender.run_python", { demo: "coffee_cup", dryRun: true });
+    const token = (preview.data as { confirmationToken?: string } | null)?.confirmationToken;
+    expect(preview).toMatchObject({ ok: true, preview: true });
+    expect(token).toEqual(expect.any(String));
+    const result = await callTool(context, "blender.run_python", { demo: "coffee_cup", confirmationToken: token });
 
     expect(result).toMatchObject({
       ok: true,
@@ -350,8 +354,8 @@ describe("blender MCP tools", () => {
       strategy: "app_adapter"
     });
     expect(context.calls()).toBe(1);
-    expect(context.logger.entries).toHaveLength(1);
-    expect(context.logger.entries[0]?.tool).toBe("blender.run_python");
+    expect(context.logger.entries).toHaveLength(2);
+    expect(context.logger.entries.every((entry) => entry.tool === "blender.run_python")).toBe(true);
   });
 
   it("reports Blender through adapter discovery and app strategy", async () => {
@@ -376,7 +380,7 @@ describe("blender MCP tools", () => {
     });
   });
 
-  it("registers the optional Blender adapter in the default MCP runtime", async () => {
+  it("keeps optional Blender adapter disabled unless explicitly enabled", async () => {
     const { context } = await createAgentHostMcpServer({
       config: {
         agentHostDir: "/tmp/agenthost-blender-server",
@@ -395,20 +399,21 @@ describe("blender MCP tools", () => {
       })
     });
 
-    expect(context.adapters.detectForApp({ appName: "Blender", appId: "blender" })).toMatchObject({
-      adapterAvailable: true,
-      adapters: [
-        {
-          id: "blender"
-        }
-      ]
-    });
-    expect(context.registry.listTools()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "blender.run_python"
-        })
-      ])
-    );
+    expect(context.adapters.detectForApp({ appName: "Blender", appId: "blender" }).adapterAvailable).toBe(false);
+    expect(context.registry.listTools().some((tool) => tool.name === "blender.run_python")).toBe(false);
+  });
+
+  it("loads Blender only with explicit experimental opt-in", async () => {
+    const config: AgentHostConfig = {
+      agentHostDir: "/tmp/agenthost-blender-server-optin",
+      configPath: "/tmp/agenthost-blender-server-optin/config.json",
+      logFile: "/tmp/agenthost-blender-server-optin/logs/agenthost.jsonl",
+      profile: "dev",
+      optionalAdapters: { blender: { enabled: true } },
+      policy: getPolicyProfile("dev")
+    };
+    const { context } = await createAgentHostMcpServer({ config, logger: new MemoryLogger(), linux: createLinuxAutomation(config) });
+    expect(context.adapters.detectForApp({ appName: "Blender", appId: "blender" }).adapterAvailable).toBe(true);
+    expect(context.registry.listTools()).toEqual(expect.arrayContaining([expect.objectContaining({ name: "blender.run_python" })]));
   });
 });

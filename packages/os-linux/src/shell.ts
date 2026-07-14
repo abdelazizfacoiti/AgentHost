@@ -12,6 +12,7 @@ export interface RunSafeCommandInput {
   cwd?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 function clamp(value: number | undefined, fallback: number, min: number, max: number): number {
@@ -55,6 +56,7 @@ export async function runSafeLinuxCommand(input: RunSafeCommandInput): Promise<S
   return await new Promise<ShellRunResult>((resolve, reject) => {
     const child = spawn(input.command, input.args ?? [], {
       cwd: input.cwd,
+      ...(input.env === undefined ? {} : { env: input.env }),
       shell: false,
       stdio: ["ignore", "pipe", "pipe"]
     });

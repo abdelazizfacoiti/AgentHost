@@ -12,6 +12,19 @@ import type {
   AutomationStrategy
 } from "./types.js";
 
+export function validateOptionalAdapterExecutionPolicy(adapter: AppAdapter): void {
+  const policy = adapter.optionalExecutionPolicy;
+  if (policy === undefined) {
+    throw new Error(`Optional adapter ${adapter.id} is missing execution policy metadata.`);
+  }
+  if (policy.enabledByDefault !== false || policy.subprocess.shell !== false || policy.environment.inherit !== false || policy.audit.redacted !== true || policy.audit.rawInput !== false || policy.audit.rawOutput !== false || policy.filesystem.broadFilesystem !== false) {
+    throw new Error(`Optional adapter ${adapter.id} has unsafe execution policy metadata.`);
+  }
+  if (!Number.isInteger(policy.limits.maxRuntimeMs) || policy.limits.maxRuntimeMs <= 0 || !Number.isInteger(policy.limits.maxOutputBytes) || policy.limits.maxOutputBytes <= 0) {
+    throw new Error(`Optional adapter ${adapter.id} has invalid execution limits.`);
+  }
+}
+
 const SENSITIVE_APP_CATEGORIES = new Set<AppSensitivity>([
   "communication",
   "financial",

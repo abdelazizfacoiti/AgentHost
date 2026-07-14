@@ -9,6 +9,7 @@ import {
   createSessionId,
   JsonlAuditLogger,
   loadAgentHostConfig,
+  validateOptionalAdapterExecutionPolicy,
   type AdapterRegistry,
   type AgentHostConfig,
   type AuditLogger,
@@ -60,7 +61,7 @@ import { runTool } from "./tool-runner.js";
 import { createAdapterTools } from "./tools/adapter.js";
 import { createAccessibilityTools } from "./tools/accessibility.js";
 import { createAppTools } from "./tools/app.js";
-import { BLENDER_RUN_PYTHON_TOOL, createBlenderTools } from "./tools/blender.js";
+import { createBlenderTools } from "./tools/blender.js";
 import { createDesktopTools } from "./tools/desktop.js";
 import { createFileTools } from "./tools/file.js";
 import { createForgeTools } from "./tools/forge.js";
@@ -92,6 +93,7 @@ import { WorkflowReplayStore } from "./workflow-replay-store.js";
 import { ToolReceiptManager } from "./tool-receipts.js";
 import { VisionEvidenceStore } from "./vision-evidence.js";
 import { OverlayAssistanceStore } from "./overlay-assistance-store.js";
+import { materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -106,25 +108,23 @@ function blenderModuleSpecifier(): string {
   return pathToFileURL(path.resolve(currentDir, target)).href;
 }
 
-async function registerOptionalBlenderRuntime(registry: CapabilityRegistry, adapters: AdapterRegistry): Promise<void> {
+async function registerOptionalBlenderRuntime(config: AgentHostConfig, adapters: AdapterRegistry): Promise<boolean> {
+  if (config.optionalAdapters?.blender?.enabled !== true) {
+    return false;
+  }
+
   if (adapters.get("blender") === undefined) {
     const blenderModule = (await import(blenderModuleSpecifier())) as {
-      createBlenderAdapter?: () => { id: string };
+      createBlenderAdapter?: () => { id: string; optionalExecutionPolicy?: unknown };
     };
 
     if (typeof blenderModule.createBlenderAdapter === "function") {
-      adapters.register(blenderModule.createBlenderAdapter() as never);
+      const adapter = blenderModule.createBlenderAdapter();
+      validateOptionalAdapterExecutionPolicy(adapter as never);
+      adapters.register(adapter as never);
     }
   }
-
-  if (!registry.listTools().some((tool) => tool.name === BLENDER_RUN_PYTHON_TOOL.name)) {
-    registry.registerTool({
-      name: BLENDER_RUN_PYTHON_TOOL.name,
-      riskLevel: BLENDER_RUN_PYTHON_TOOL.riskLevel,
-      strategy: BLENDER_RUN_PYTHON_TOOL.strategy,
-      description: BLENDER_RUN_PYTHON_TOOL.description
-    });
-  }
+  return adapters.get("blender") !== undefined;
 }
 
 export interface AgentHostServerOptions {
@@ -162,7 +162,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const sessionId = options.sessionId ?? createSessionId();
   const registry = options.registry ?? createBaseCapabilityRegistry();
   const adapters = options.adapters ?? createAdapterRegistry();
-  await registerOptionalBlenderRuntime(registry, adapters);
+  const blenderEnabled = await registerOptionalBlenderRuntime(config, adapters);
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
   const policy = options.policy ?? config.policy;
   const confirmations = new ConfirmationManager();
@@ -265,7 +265,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createVisionTools(),
     ...createCheckpointTools(),
     ...createAdapterTools(),
-    ...createBlenderTools(),
+    ...(blenderEnabled ? createBlenderTools() : []),
     ...createAppTools(),
     ...createShellTools(),
     ...createFileTools(),
@@ -275,6 +275,9 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createGuideTools(),
     ...createPolicyTools()
   ];
+
+  const loadedTools = materializeToolDefinitions(tools);
+  registry.syncTools(toolCapabilities(loadedTools));
 
   const server = new Server(
     {
@@ -290,7 +293,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map((tool) => ({
+    tools: loadedTools.map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.mcpInputSchema
@@ -298,7 +301,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const tool = tools.find((candidate) => candidate.name === request.params.name);
+    const tool = loadedTools.find((candidate) => candidate.name === request.params.name);
 
     if (tool === undefined) {
       const error = {

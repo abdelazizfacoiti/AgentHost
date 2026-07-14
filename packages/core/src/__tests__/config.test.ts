@@ -86,6 +86,68 @@ describe("loadAgentHostConfig", () => {
     });
   });
 
+  it("round-trips every supported runtime grant field without adding defaults", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-runtime-grant-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    await writeFile(configPath, JSON.stringify({
+      optionalAdapters: { blender: { enabled: false } },
+      grants: [{
+        id: "runtime-full",
+        scope: "persistent",
+        effect: "allow",
+        match: {
+          generatedToolIds: ["artifact-1"],
+          registrationIds: ["registration-1"],
+          runtimeToolNames: ["inspect"],
+          runtimeCapabilities: ["pure_compute", "read_runtime_input"],
+          tools: ["forge.run_sandboxed_tool"]
+        },
+        requirements: {
+          sandboxRoots: ["run", "temp"],
+          outputRoots: ["run"],
+          maxInputBytes: 1024,
+          maxOutputBytes: 2048,
+          maxRuntimeMs: 3000,
+          allowedOperations: ["const", "input", "object"]
+        }
+      }]
+    }), "utf8");
+
+    const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
+    expect(config.optionalAdapters).toEqual({ blender: { enabled: false } });
+    expect(config.policy.grants[0]).toMatchObject({
+      match: {
+        generatedToolIds: ["artifact-1"],
+        registrationIds: ["registration-1"],
+        runtimeToolNames: ["inspect"],
+        runtimeCapabilities: ["pure_compute", "read_runtime_input"]
+      },
+      requirements: {
+        sandboxRoots: ["run", "temp"],
+        outputRoots: ["run"],
+        maxInputBytes: 1024,
+        maxOutputBytes: 2048,
+        maxRuntimeMs: 3000,
+        allowedOperations: ["const", "input", "object"]
+      }
+    });
+  });
+
+  it("rejects unknown and over-broad runtime grant fields", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-runtime-invalid-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    await writeFile(configPath, JSON.stringify({ grants: [{ id: "bad", scope: "persistent", effect: "allow", match: { unknown: ["x"] } }] }), "utf8");
+    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
+    await writeFile(configPath, JSON.stringify({ grants: [{ id: "bad", scope: "persistent", effect: "allow", match: { runtimeCapabilities: ["network_fetch"] } }] }), "utf8");
+    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
+    await writeFile(configPath, JSON.stringify({ grants: [{ id: "bad", scope: "persistent", effect: "allow", match: { runtimeCapabilities: ["pure_compute"] }, requirements: { maxRuntimeMs: 5001 } }] }), "utf8");
+    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
+  });
+
   it("loads local demo profile", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-demo-"));
     const config = await loadAgentHostConfig({ env: { AGENTHOST_PROFILE: "demo-unlocked-local" }, homeDir });

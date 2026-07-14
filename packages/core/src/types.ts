@@ -383,6 +383,33 @@ export interface ToolCapability {
   strategy?: AutomationStrategy;
   inputSchema?: unknown;
   generated?: boolean;
+  execution?: ToolExecutionMetadata;
+}
+
+export const TOOL_EXECUTION_CLASSES = ["read_only", "diagnostic", "metadata_only", "inert", "visual_only", "state_changing"] as const;
+export type ToolExecutionClass = (typeof TOOL_EXECUTION_CLASSES)[number];
+export type ToolSource = "base" | "optional_adapter";
+export type ToolAvailability = "available" | "unavailable";
+export interface ToolExecutionMetadata {
+  executionClass: ToolExecutionClass;
+  externalEffect: boolean;
+  requiresDryRun: boolean;
+  requiresConfirmationToken: boolean;
+  requiresExactTarget: boolean;
+  source: ToolSource;
+  availability: ToolAvailability;
+}
+
+export interface OptionalAdapterExecutionPolicy {
+  enabledByDefault: false;
+  stability: "experimental" | "stable";
+  execution: ToolExecutionMetadata;
+  fingerprinting: "required" | "not_applicable";
+  subprocess: { required: boolean; shell: false; commandAllowlist: string[] };
+  environment: { allowlist: string[]; inherit: false };
+  limits: { maxRuntimeMs: number; maxOutputBytes: number };
+  filesystem: { allowedOutputRoots: string[]; broadFilesystem: false };
+  audit: { redacted: true; rawInput: false; rawOutput: false };
 }
 
 export interface AppCapability {
@@ -548,6 +575,7 @@ export interface AgentHostConfig {
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
   overlayRendererMode?: import("./overlay.js").OverlayRendererMode;
   browserBridge?: BrowserBridgeConfig;
+  optionalAdapters?: Record<string, { enabled: boolean }>;
   policy: PolicyProfile;
 }
 
@@ -651,6 +679,7 @@ export interface AppAdapter {
   displayName: string;
   appIds: string[];
   supportedPlatforms: string[];
+  optionalExecutionPolicy?: OptionalAdapterExecutionPolicy;
   matchesApp?(input: { appId?: string; appName?: string }): boolean;
   getCapabilities(): AppCapability[];
   execute(action: AdapterActionRequest, context: ToolContext): Promise<ToolResult>;
