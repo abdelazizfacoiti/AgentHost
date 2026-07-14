@@ -17,6 +17,7 @@ import type {
 import { evaluateSafety, redactWorkflowSummary, summarizeToolResult, toolFailure, workflowActionForTool, workflowStrategyForTool } from "@agenthost/core";
 import type { z } from "zod";
 import type { GrantStore } from "./grants.js";
+import { validateToolExecutionMetadata } from "./tool-metadata.js";
 
 export interface ToolExecutionContext {
   sessionId: string;
@@ -25,6 +26,17 @@ export interface ToolExecutionContext {
   registry: CapabilityRegistrySnapshot;
   logger: AuditLogger;
   grants: GrantStore;
+  /** Non-consuming envelope validation; handlers own exact-target consumption. */
+  confirmations?: {
+    verifyEnvelope(
+      token: string,
+      input: { sessionId: string; tool: string; input: unknown; riskLevel: RiskLevel }
+    ): import("./confirmation.js").ConfirmationVerificationResult;
+    verifyAndConsume(
+      token: string,
+      input: { sessionId: string; tool: string; input: unknown; target?: unknown; riskLevel: RiskLevel }
+    ): import("./confirmation.js").ConfirmationVerificationResult;
+  };
   receipts?: {
     issue(input: { sessionId: string; tool: string; rawInput: unknown; result: ToolResult; riskLevel: RiskLevel; target?: unknown }): import("@agenthost/core").ToolResultReceipt;
     fingerprintInput(input: unknown): string;
@@ -64,6 +76,16 @@ export interface AgentHostToolDefinition<
     isDryRun(input: TInput): boolean;
   };
   execution?: ToolExecutionMetadata;
+  /** Explicit delegation binding for wrappers that consume a token for one
+   * underlying fixed tool (for example Forge dispatch). */
+  confirmationTool?(input: TInput): string;
+  confirmationInput?(input: TInput): unknown;
+  /** Named compatibility path for wrappers whose handler performs a
+   * non-executing eligibility preflight before returning its own dry-run error. */
+  allowLegacyPreflightWithoutConfirmation?: boolean;
+  /** Narrow companion for handlers that must resolve a live target before
+   * returning their domain-specific protected-context decision. */
+  allowLegacyPreflightOnSafetyBlock?: boolean;
   handler(
     input: TInput,
     context: TContext,
@@ -132,7 +154,53 @@ function hasConfirmationToken(rawInput: unknown): boolean {
     return false;
   }
 
-  return typeof (rawInput as { confirmationToken?: unknown }).confirmationToken === "string";
+  const token = (rawInput as { confirmationToken?: unknown }).confirmationToken;
+  return typeof token === "string" && token.trim().length > 0;
+}
+
+function executionMetadataFor<TContext extends ToolExecutionContext>(
+  definition: AgentHostToolDefinition<unknown, unknown, TContext>,
+  context: TContext
+): ToolExecutionMetadata | undefined {
+  return definition.execution ?? context.registry.listTools().find((tool) => tool.name === definition.name)?.execution;
+}
+
+function centralFailure<TData>(input: {
+  definition: AgentHostToolDefinition<unknown, TData>;
+  code: string;
+  message: string;
+  riskLevel?: RiskLevel;
+  safetyDecision?: SafetyDecision;
+}): ToolResult<TData> {
+  return toolFailure<TData>({
+    tool: input.definition.name,
+    riskLevel: input.riskLevel ?? input.safetyDecision?.riskLevel ?? input.definition.riskLevel,
+    ...(input.safetyDecision?.grantDecision === undefined ? {} : { grantDecision: input.safetyDecision.grantDecision }),
+    ...(input.safetyDecision?.approval === undefined ? {} : { approval: input.safetyDecision.approval }),
+    error: { code: input.code, message: input.message },
+    observations: input.safetyDecision?.reasons ?? ["Central execution baseline rejected the request before handler execution."]
+  });
+}
+
+function centralSafetyActionType(definition: AnyAgentHostToolDefinition, execution: ToolExecutionMetadata): SafetyInput["actionType"] {
+  const declared = definition.safety?.actionType;
+  if (execution.executionClass !== "state_changing" || declared !== "inspect") {
+    return declared ?? "unknown";
+  }
+
+  const name = definition.name;
+  if (name.startsWith("shell.")) return "shell_command";
+  if (name === "app.open") return "app_launch";
+  if (name.startsWith("file.")) return name.includes("delete") ? "file_delete" : "file_write";
+  if (name === "browser.generate_pairing_token" || name === "browser.reset_pairing") return "inspect";
+  if (name.startsWith("browser.")) return "browser_action";
+  if (name.includes("set_value")) return "accessibility_set_value";
+  if (name.includes("invoke_action")) return "accessibility_action";
+  if (name.includes("focus_element")) return "accessibility_focus";
+  if (name.includes("type_text")) return "gui_type";
+  if (name.includes("click") || name.includes("pointer") || name.includes("hotkey") || name.includes("focus")) return "gui_click";
+  if (name.startsWith("blender.") || name.startsWith("forge.")) return "file_write";
+  return "unknown";
 }
 
 export async function runTool<TInput, TData, TContext extends ToolExecutionContext>(
@@ -141,7 +209,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
   context: TContext
 ): Promise<ToolResult<TData>> {
   const start = performance.now();
-  let result: ToolResult<TData>;
+  let result!: ToolResult<TData>;
   let safetyDecision: SafetyDecision | undefined;
   const parsed = definition.inputSchema.safeParse(rawInput ?? {});
 
@@ -159,51 +227,124 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
   } else {
     try {
       const isDryRun = definition.preview?.isDryRun(parsed.data) ?? false;
+      const execution = executionMetadataFor(
+        definition as AgentHostToolDefinition<unknown, unknown, TContext>,
+        context
+      );
 
-      if (definition.safety !== undefined) {
-        const dynamicSafetyInput = definition.safety.getInput?.(parsed.data) ?? {};
-        const safetyInput: SafetyInput = {
-          ...dynamicSafetyInput,
-          tool: definition.name,
-          actionType: definition.safety.actionType
-        };
-        safetyDecision = evaluateSafety(safetyInput, context.policy, {
-          agentHostDir: context.config.agentHostDir,
-          grants: context.grants.listActiveGrants()
+      if (execution === undefined) {
+        result = centralFailure({
+          definition: definition as AgentHostToolDefinition<unknown, TData>,
+          code: "execution_metadata_missing",
+          message: "Tool execution metadata is missing; the request was rejected before execution."
         });
-
-        if (!safetyDecision.allowed && !isDryRun) {
-          result = toolFailure<TData>({
-            tool: definition.name,
-            riskLevel: safetyDecision.riskLevel,
-            grantDecision: safetyDecision.grantDecision,
-            approval: safetyDecision.approval,
-            error: {
-              code: safetyDecision.blocked ? "safety_blocked" : "approval_required",
-              message: safetyDecision.blocked
-                ? "Tool execution was blocked by the safety engine."
-                : "Tool execution requires approval before it can run.",
-              details: safetyDecision
-            },
-            observations: safetyDecision.reasons
+      } else {
+        let metadataValid = true;
+        try {
+          validateToolExecutionMetadata(execution, definition.name);
+        } catch (error) {
+          metadataValid = false;
+          result = centralFailure({
+            definition: definition as AgentHostToolDefinition<unknown, TData>,
+            code: "execution_metadata_invalid",
+            message: error instanceof Error ? error.message : "Tool execution metadata is invalid."
           });
-        } else {
-          result = await definition.handler(parsed.data, context, {
-            isDryRun,
-            safetyDecision
-          });
+        }
 
-          if (result.grantDecision === undefined) {
-            result = {
-              ...result,
-              grantDecision: safetyDecision.grantDecision
-            };
+        if (metadataValid) {
+          // The state-changing baseline is intentionally fail-closed. Read-only,
+          // diagnostic, metadata-only, inert, and visual-only tools do not enter
+          // the confirmation gate.
+          const stateChanging = execution.executionClass === "state_changing";
+          if (stateChanging && definition.safety === undefined) {
+            result = centralFailure({
+              definition: definition as AgentHostToolDefinition<unknown, TData>,
+              code: "safety_metadata_missing",
+              message: "State-changing tools must declare safety metadata before execution."
+            });
+          } else if (stateChanging && isDryRun && definition.preview === undefined) {
+            result = centralFailure({
+              definition: definition as AgentHostToolDefinition<unknown, TData>,
+              code: "preview_handler_missing",
+              message: "This state-changing tool cannot prove a non-executing dry run."
+            });
+          } else {
+            if (definition.safety !== undefined) {
+              const dynamicSafetyInput = definition.safety.getInput?.(parsed.data) ?? {};
+              const safetyInput: SafetyInput = {
+                ...dynamicSafetyInput,
+                tool: definition.name,
+                actionType: centralSafetyActionType(definition, execution)
+              };
+              safetyDecision = evaluateSafety(safetyInput, context.policy, {
+                agentHostDir: context.config.agentHostDir,
+                grants: context.grants.listActiveGrants()
+              });
+            }
+
+            // Grant execution requirements are enforced centrally for tools
+            // classified as state-changing. Metadata/inert tools may persist
+            // their own redacted records and retain their existing domain
+            // checks without being upgraded into external-action tools.
+            const grantRequiresDryRun = stateChanging && safetyDecision?.grantDecision.requiresDryRun === true;
+            const grantRequiresConfirmation = stateChanging && safetyDecision?.grantDecision.requiresConfirmationToken === true;
+            const requiresConfirmation = (stateChanging && execution.requiresConfirmationToken) || grantRequiresConfirmation;
+
+            if (!isDryRun && safetyDecision !== undefined && (!safetyDecision.allowed || safetyDecision.guideOnly) && !definition.allowLegacyPreflightOnSafetyBlock) {
+              result = centralFailure({
+                definition: definition as AgentHostToolDefinition<unknown, TData>,
+                code: safetyDecision.blocked || safetyDecision.guideOnly ? "safety_blocked" : "approval_required",
+                message: safetyDecision.blocked || safetyDecision.guideOnly
+                  ? "Tool execution was blocked by the safety engine."
+                  : "Tool execution requires approval before it can run.",
+                safetyDecision
+              });
+            } else if (!isDryRun && (execution.requiresDryRun || grantRequiresDryRun) && !hasConfirmationToken(parsed.data) && !definition.allowLegacyPreflightWithoutConfirmation) {
+              result = centralFailure({
+                definition: definition as AgentHostToolDefinition<unknown, TData>,
+                code: "dry_run_required",
+                message: "A successful dry-run and its confirmation token are required before execution.",
+                ...(safetyDecision === undefined ? {} : { safetyDecision })
+              });
+            } else if (requiresConfirmation && !isDryRun && !hasConfirmationToken(parsed.data) && !definition.allowLegacyPreflightWithoutConfirmation) {
+              result = centralFailure({
+                definition: definition as AgentHostToolDefinition<unknown, TData>,
+                code: "confirmation_required",
+                message: "A confirmation token is required before this tool can execute.",
+                ...(safetyDecision === undefined ? {} : { safetyDecision })
+              });
+            } else if (!isDryRun && requiresConfirmation && hasConfirmationToken(parsed.data)) {
+              const token = typeof (parsed.data as Record<string, unknown>).confirmationToken === "string"
+                ? (parsed.data as Record<string, unknown>).confirmationToken as string
+                : undefined;
+              const confirmationTool = definition.confirmationTool?.(parsed.data) ?? definition.name;
+              const envelope = token === undefined || context.confirmations === undefined
+                ? { ok: false, reason: "Confirmation manager is unavailable for this state-changing request." }
+                : context.confirmations.verifyEnvelope(token, {
+                    sessionId: context.sessionId,
+                    tool: confirmationTool,
+                    input: definition.confirmationInput?.(parsed.data) ?? parsed.data,
+                    riskLevel: safetyDecision?.riskLevel ?? definition.riskLevel
+                  });
+              if (!envelope.ok) {
+                result = centralFailure({
+                  definition: definition as AgentHostToolDefinition<unknown, TData>,
+                  code: "confirmation_rejected",
+                  message: envelope.reason,
+                  ...(safetyDecision === undefined ? {} : { safetyDecision })
+                });
+              } else {
+                result = await definition.handler(parsed.data, context, { isDryRun, safetyDecision });
+              }
+            } else {
+              result = await definition.handler(parsed.data, context, { isDryRun, safetyDecision });
+            }
+
+            if (safetyDecision !== undefined && result.grantDecision === undefined) {
+              result = { ...result, grantDecision: safetyDecision.grantDecision };
+            }
           }
         }
-      } else {
-        result = await definition.handler(parsed.data, context, {
-          isDryRun
-        });
       }
     } catch (error) {
       result = toolFailure<TData>({

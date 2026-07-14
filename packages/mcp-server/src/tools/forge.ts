@@ -4376,6 +4376,7 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
       actionType: "file_write",
       getInput: () => ({})
     },
+    allowLegacyPreflightWithoutConfirmation: true,
     preview: {
       isDryRun: (input) => input.dryRun === true
     },
@@ -4681,6 +4682,10 @@ export function createForgeTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     mcpInputSchema: dispatchGeneratedToolMcpInputSchema,
     inputSummary: "Dispatch inert generated Forge tool without logging input or token",
     auditInputSummary: (input) => `Dispatch inert Forge tool ${input.registrationId ?? input.manifestId ?? "unknown"}/${input.toolName}`,
+    safety: { actionType: "file_write", getInput: () => ({}) },
+    confirmationTool: () => "forge.run_sandboxed_tool",
+    confirmationInput: (input) => ({ registrationId: input.registrationId, toolName: input.toolName, input: input.input, mode: "subprocess" }),
+    allowLegacyPreflightWithoutConfirmation: true,
     preview: { isDryRun: (input) => input.dryRun === true },
     async handler(input, context, runtime) {
       try {
