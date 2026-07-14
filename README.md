@@ -1,139 +1,128 @@
 # AgentHost
 
-AgentHost is a universal local MCP server that gives Codex-style agents a safe, permissioned body on a real computer.
+AgentHost is a universal adaptive local MCP runtime: a safe, permissioned body and visual copilot for Codex and other agents. It exposes workstation capabilities through layered strategies—adapter/API, official API, CLI/script, browser DOM, accessibility, local OCR/vision, pointer GUI fallback, and guide mode—while keeping policy, grants, dry-runs, confirmations, receipts, checkpoints, redaction, and audit logging local.
 
-This repository currently implements Phase 0 + Phase 1 only:
+Provider and application names are examples only. AgentHost is not a Gmail, WhatsApp, Blender, or single-app automation product.
 
-- TypeScript npm-workspaces monorepo
-- MCP stdio server skeleton
-- `system.get_info`
-- `system.list_capabilities`
-- app-agnostic core types
-- capability registry
-- config loader
-- JSONL audit logger
-- basic policy profile structure
+## Current status
 
-The implementation deliberately does not include Blender, GUI clicking/typing, browser automation, email sending, Windows/macOS support, skill recording, or autonomous background operation.
+The Linux-first runtime currently provides:
 
-## Repository Layout
+- policy-gated app, file, shell, window, accessibility, desktop, pointer, and browser operations;
+- paired Firefox/Chromium DOM inspection and guarded element actions;
+- local screenshot OCR, vision grounding, and screenshot-to-click dry-run handoff;
+- Tool Forge review, bounded JSON runtime dispatch, capability grants, and optional OS sandboxing;
+- redacted workflow traces, skills, checkpoint templates, receipts, and one-step replay governance;
+- visual-only GTK3/X11/headless overlays and bounded assistance sessions;
+- review-only scheduler jobs, activation, preflight, acknowledgement, manual-run, approval, expiry, and staleness governance.
+
+State-changing tools remain policy/grant/dry-run/confirmation gated. Overlay and assistance tools are visual-only. Workflow replay and scheduler records are metadata-only and non-executable. Generated Forge tools are not independent live MCP tools. Blender is experimental, optional, and disabled by default.
+
+Unsupported by design: autonomous background operation, arbitrary generated code, silent send/submit/upload/delete/archive/pay/buy, credential or secret extraction, CAPTCHA/MFA/login/payment bypass, public browser access, sudo, package installation, and remote endpoints.
+
+## Platform
+
+Linux/X11 is the primary implementation. Wayland reports honest backend limitations and uses safe unavailable/headless behavior where global coordinates, layer-shell, or click-through cannot be guaranteed. Windows and macOS are future platform work.
+
+## Repository layout
 
 ```text
-packages/
-  core/        App-agnostic contracts, config, logging, policies, and registry.
-  os-linux/    Linux system-info boundary for the first supported platform.
-  mcp-server/  AgentHost stdio MCP server and system tools.
-scripts/
-  smoke-mcp.mjs
-implimentation_documents/
-  Product, architecture, security, tool, and roadmap docs.
+packages/core/          App-agnostic contracts, policy, grants, metadata, redaction
+packages/mcp-server/    MCP tools, runner, receipts, Forge, workflows, scheduler, overlay
+packages/os-linux/      Linux system, desktop, accessibility, OCR, sandbox probes
+packages/app-browser/   Firefox/Chromium extension and loopback bridge
+packages/app-overlay/   Headless and GTK3/X11 overlay renderers
+packages/app-blender/   Optional experimental reference adapter
+scripts/                Browser preparation and opt-in overlay demo
+docs/                   Canonical product, architecture, tools, security, roadmap, browser docs
 ```
 
-## Setup
+## Setup and verification
 
 ```bash
 npm install
 npm run build
+npm test
+npm run lint
+npm run smoke:mcp
 ```
 
-## Run The MCP Server
-
-```bash
-npm run start:mcp
-```
-
-The server uses stdio transport and must not write normal diagnostics to stdout. Audit logs default to:
+The MCP server uses stdio and keeps normal diagnostics off stdout. Audit logs default to:
 
 ```text
 ~/.agenthost/logs/agenthost.jsonl
 ```
 
-For local development, set `AGENTHOST_HOME` to redirect logs:
+For local development, set `AGENTHOST_HOME` to an isolated directory:
 
 ```bash
 AGENTHOST_HOME=.agenthost npm run start:mcp
 ```
 
-## Test
+## Browser bridge setup
 
-## Browser bridge (Phase 25)
-
-Browser tools are disabled by default. Enable the local bridge in `~/.agenthost/config.json`:
-
-```json
-{
-  "browserBridge": { "enabled": true, "port": 43117 }
-}
-```
-
-One-time local setup. This explicitly creates/updates local bridge config, prepares stable bundles, and prints pairing token. It never installs extension automatically.
+The bridge is disabled by default and binds only to `127.0.0.1`.
 
 ```bash
 npm run browser:setup
 ```
 
-Restart AgentHost MCP server. Then load Firefox/Chromium bundle and paste displayed token into popup.
+This prepares explicit unpacked bundles, enables local bridge configuration, and prints a pairing token once. It does not install an extension silently. Restart AgentHost, then load the prepared bundle:
 
-Prepare only, without config/token change:
+- Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → `~/AgentHost/browser-extension/firefox/manifest.json`.
+- Chromium: `chrome://extensions` → Developer mode → **Load unpacked** → `~/AgentHost/browser-extension/chromium`.
 
-```bash
-npm run browser:extension:firefox
-# or
-npm run browser:extension:chromium
-```
+Paste the token into the extension popup, keep the configured port, pair, and verify with `browser.verify_pairing`. Use `browser.setup_status` and `browser.diagnose_bridge` for recovery. Pairing/session tokens are never logged. Token files are text data; read them with a safe tool or `cat`, never execute them and never use `sudo` on them.
 
-Firefox: open `about:debugging#/runtime/this-firefox`, select **Load Temporary Add-on…**, then select `~/AgentHost/browser-extension/firefox/manifest.json`. Temporary Firefox add-ons disappear after browser restart; reload same manifest.
+Full state checks, restart recovery, blocked-action tests, and explicit fallback routing are in [Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md).
 
-Chromium: open `chrome://extensions`, enable Developer mode, select **Load unpacked**, then select `~/AgentHost/browser-extension/chromium`.
+If the extension is unavailable, AgentHost may recommend accessibility, local OCR/vision, pointer fallback, or guide mode. It never executes a fallback silently.
 
-Use `browser.setup_status` and `browser.diagnose_bridge` for safe setup state. Generate token through `browser.generate_pairing_token` with dry-run/confirmation, paste returned token into popup, click **Pair / Re-pair**, then call `browser.verify_pairing`. `browser.reset_pairing` revokes current pairing without returning token. Tokens never enter audit logs. Bridge binds only to `127.0.0.1`; it never exposes cookies, saved passwords, storage, browser debugging, or arbitrary JavaScript.
+## Overlay setup
 
-Full state checklist, restart recovery, manual smoke, blocked-action, and explicit fallback validation: [Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md).
-
-Forge bounded runtime defaults to `forgeRuntimeSandboxMode: "auto"`. It uses Bubblewrap only when `bwrap` and unprivileged user namespaces are available; otherwise it keeps existing fixed child runner and records fallback warning. Set `forgeRuntimeSandboxMode` in `~/.agenthost/config.json`, or `AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE` to `auto`, `none`, `bubblewrap`, `firejail`, or `unshare`. Explicit `firejail`/`unshare` currently fail closed: no reviewed allow-only filesystem profile exists.
-
-Run unit tests:
+The default overlay mode is safe headless state. For an opt-in local visual demo in a supported GTK3/X11 session:
 
 ```bash
-npm test
+npm run build
+npm run demo:overlay
 ```
 
-Run a smoke test that imports the compiled packages, calls both Phase 0/1 tools, and confirms JSONL logging:
+Use `overlay.renderer_status`, `overlay.renderer_diagnose`, and `overlay.renderer_setup_instructions` for diagnostics. AgentHost does not install GTK/PyGObject dependencies or request privilege escalation. Wayland limitations are reported honestly; headless fallback remains available.
 
-```bash
-npm run smoke:mcp
-```
+## Forge runtime
 
-The smoke test sets `AGENTHOST_HOME=.agenthost/smoke` so it writes only inside the ignored local workspace folder.
+Forge executes only bounded `runtime/handler.json` JSON operations through a fixed child runner. Generated JavaScript/Python is never imported. Default sandbox mode is `auto`: Bubblewrap is used only when safely available; otherwise the fixed runner remains active with a limitation warning. `firejail` and `unshare` are currently detection-only and fail closed when explicitly requested.
 
-## Workflow traces and skills (Phase 27)
+Configuration accepts `forgeRuntimeSandboxMode` values `auto`, `none`, `bubblewrap`, `firejail`, or `unshare`. No install, sudo, network, GUI/DBus, secrets, broad filesystem, or shell capability is delegated.
 
-Start tracing explicitly with `workflow.trace_start`, then use normal AgentHost tools. While active, AgentHost stores only bounded redacted summaries under:
+## Workflows, replay, and scheduler governance
 
-```text
-~/.agenthost/workflows/traces/
-~/.agenthost/workflows/skills/
-```
+Workflow traces and skills store bounded redacted summaries. Checkpoint templates use declared parameters and literal `{{parameter}}` interpolation only. Replay dry-runs and sessions prepare one step at a time; the caller must invoke the original tool and provide a trusted receipt. No autonomous replay exists.
 
-Stop a trace with `workflow.trace_stop`, save its safe generic plan using `workflow.skill_save_from_trace`, and inspect it with `workflow.skill_run_dryrun`. Skills are draft, preview-only metadata in this phase: they cannot execute tools, create confirmation tokens, send, submit, upload, or bypass safety/grants.
+Scheduler records are review-only metadata. Jobs, activation, manual-run contracts, acknowledgements, approvals, and expiry diagnostics create no timers, workers, run sessions, replay sessions, notifications, messages, files, or execution permission.
 
-## Local OCR grounding (Phase 28)
+## Optional adapters
 
-`vision.analyze_image`, `vision.find_text`, and `vision.find_target` inspect approved local AgentHost screenshot/output images. They use installed local `tesseract` when available, return bounded redacted OCR bounds and image-relative candidate coordinates, and never click, type, upload, cache image bytes, or call cloud services. Missing Tesseract returns `ocr_backend_unavailable`; AgentHost never installs it.
+Optional adapters are disabled by default and must declare the generic execution policy. Blender is the current experimental reference adapter. When explicitly enabled, it runs only reviewed Python through a bounded shell-free subprocess with output-root validation, static safety review, dry-run, exact confirmation, filtered environment, and redacted audit output. It is not core product direction.
 
-`vision.prepare_pointer_action` accepts only fresh in-session screenshot and target evidence, then returns a `desktop.click` payload with `dryRun:true`. It never calls pointer tools or creates confirmation tokens.
+## Safety model
 
-## Semantic checkpoints (Phase 30)
+The central runner validates execution metadata, schema, policy, grants, protected contexts, dry-run requirements, and the non-consuming confirmation envelope. Domain handlers revalidate exact targets and consume confirmation once. Receipts provide provenance only. Checkpoints observe semantic state only. Logs omit secrets, tokens, private content, screenshots, raw OCR, and hidden environment values.
 
-`checkpoint.evaluate` checks bounded read-only browser, accessibility, desktop, file, or manual conditions once. `checkpoint.wait_for` polls those same conditions for at most 30 seconds. Both return redacted summaries only and never click, type, retry an action, create confirmation tokens, or run background loops.
+## Roadmap v2
 
-For a raw stdio protocol check, pipe JSON-RPC messages into the built server:
+Future work uses milestones, not new numbered phases:
 
-```bash
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"manual","version":"0.0.0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"system.get_info","arguments":{}}}\n' | AGENTHOST_HOME=.agenthost/manual AGENTHOST_PROFILE=dev AGENTHOST_STDIO_EXIT_ON_STDIN_END=1 node packages/mcp-server/dist/index.js
-```
+- Milestone A — Visual Copilot Productization
+- Milestone B — Adaptive Capability System
+- Milestone C — Safe Execution Runtime
+- Milestone D — Visible Scheduling
+- Milestone E — Product Surface and Packaging
+- Milestone F — Ecosystem and Platforms
 
-## Codex MCP Config Example
+See [Implementation Roadmap v2](docs/05_IMPLEMENTATION_ROADMAP_AND_CODEX_PROMPTS.md) and the other [canonical documents](docs/01_PRODUCT_SPEC.md).
+
+## MCP configuration example
 
 After building, point Codex at the compiled server:
 
@@ -143,14 +132,8 @@ After building, point Codex at the compiled server:
     "agenthost": {
       "command": "node",
       "args": ["/absolute/path/to/agenthost/packages/mcp-server/dist/index.js"],
-      "env": {
-        "AGENTHOST_HOME": "/absolute/path/to/.agenthost"
-      }
+      "env": { "AGENTHOST_HOME": "/absolute/path/to/.agenthost" }
     }
   }
 }
 ```
-
-## Phase 2 Next
-
-Phase 2 should add the universal safety engine: risk classification, app sensitivity classification, protected path checks, approval requirement modeling, and redaction utilities. It should still remain app-agnostic and should not add GUI/browser/email automation yet.
