@@ -34,7 +34,16 @@ npm run lint
 npm run smoke:mcp
 ```
 
-Supported visible mode: Linux X11 with GTK3/PyGObject. Wayland or missing dependencies receives honest fallback guidance.
+Supported visible mode: Linux X11 with GTK3/PyGObject, PyCairo, and `xdotool`. Wayland or missing dependencies receives honest fallback guidance.
+
+Before visible demo, verify dependencies in same desktop session:
+
+```text
+echo "$XDG_SESSION_TYPE"
+test -n "$DISPLAY"
+command -v xdotool
+python3 -c "import cairo; import gi; gi.require_version('Gtk','3.0'); gi.require_version('Gdk','3.0'); from gi.repository import Gdk, Gtk; print('gtk3-cairo-ok')"
+```
 
 ## Demo
 
@@ -48,7 +57,7 @@ Diagnostics only:
 npm run demo:visual-copilot -- --diagnose
 ```
 
-Safe headless path:
+Headless capability check (no visible flow, safe for CI):
 
 ```bash
 npm run demo:visual-copilot -- --headless
@@ -60,7 +69,16 @@ Require visible renderer:
 npm run demo:visual-copilot -- --require-gui
 ```
 
-Launcher uses isolated demo metadata, public fixture text, explicit prompts, bounded retries, and cleanup. It never installs dependencies or requests sudo.
+Launcher uses isolated demo metadata, public fixture text, explicit prompts, bounded retries, truthful terminal completion checks, renderer-health checks, signal cleanup, and cleanup. It never installs dependencies or requests sudo. `--diagnose` reports capability state; `--headless` does not simulate visible rendering.
+
+Manual GUI verification:
+
+1. Build from repository root and run dependency checks above in same X11 session.
+2. Run `npm run demo:visual-copilot -- --diagnose`; confirm GTK3/X11 is available.
+3. Run `npm run demo:visual-copilot -- --require-gui`; press Enter through every prompt.
+4. Confirm control surface progress updates after each step, stale-target warning appears, explicit refresh restores pointer/highlight, and final status is `completed`.
+5. Confirm target application and real pointer remain unchanged.
+6. Press Ctrl-C during a prompt; confirm owned overlays disappear and process exits without an orphan renderer.
 
 ## Safety model
 

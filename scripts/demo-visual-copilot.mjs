@@ -33,6 +33,17 @@ async function main() {
   const config = await loadAgentHostConfig({ env, homeDir: os.homedir() });
   const runtime = await createAgentHostMcpServer({ config });
   const { context } = runtime;
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await closeContext(context);
+  };
+  const onSignal = () => {
+    void shutdown().finally(() => { process.exitCode = 130; });
+  };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
   try {
     const diagnostics = await context.overlay?.diagnostics();
     if (diagnoseOnly) {
@@ -68,10 +79,22 @@ async function main() {
     const targetResolver = createOverlayTargetResolver(context);
     const center = { x: Math.round(geometry.bounds.x + geometry.bounds.width / 2), y: Math.round(geometry.bounds.y + geometry.bounds.height / 2) };
     const ask = async (message) => { const rl = readline.createInterface({ input, output }); try { await rl.question(`${message}\n`); } finally { rl.close(); } };
+    const requireVisibleRenderer = async (phase) => {
+      const current = await context.overlay?.diagnostics();
+      if (current?.rendererStatus !== "available" || current.childState !== "running" || current.handshake !== "passed") throw new Error(`visual_renderer_unavailable:${phase}`);
+      return current;
+    };
     console.log(safeStatus({ ok: true, phase: "draft_created", sessionId, renderer: diagnostics?.rendererStatus, actionsExecuted: false, confirmationTokensCreated: false }));
     await ask("Press Enter to explicitly start visual assistance.");
     await assistance.start(sessionId);
     const shownSurface = await surface.show(sessionId);
+    await requireVisibleRenderer("control_surface_visible");
+    const controlSurfaceId = String(shownSurface.controlSurfaceId);
+    const updateSurface = async () => {
+      const updated = await surface.update(sessionId, controlSurfaceId);
+      await requireVisibleRenderer("control_surface_update");
+      return updated;
+    };
     console.log(safeStatus({ phase: "control_surface_visible", status: shownSurface.status, progress: shownSurface.progress, rendererHealth: shownSurface.rendererHealth }));
     const advanceCurrent = async () => {
       const state = await assistance.get(sessionId);
@@ -82,31 +105,44 @@ async function main() {
       await assistance.advance(sessionId);
     };
     await assistance.showCurrent(sessionId, targetResolver);
+    await updateSurface();
     console.log(safeStatus({ phase: "waiting_for_operator", explanation: await assistance.explain(sessionId, diagnostics) }));
     await ask("Press Enter to continue first visual step.");
     await advanceCurrent();
+    await updateSurface();
     console.log(safeStatus({ phase: "target_missing", explanation: await assistance.explain(sessionId, diagnostics) }));
     await ask("Press Enter to bind safe local screen target and render pointer.");
     await assistance.refreshTarget(sessionId, "point", { kind: "screen_point", point: center, trusted: true, expiresAt: new Date(Date.now() + 1_500).toISOString() }, targetResolver);
     await assistance.showCurrent(sessionId, targetResolver);
+    await updateSurface();
     console.log(safeStatus({ phase: "pointer_rendered", explanation: await assistance.explain(sessionId, diagnostics) }));
     await ask("Press Enter to test bounded stale-target recovery.");
     await new Promise((resolve) => setTimeout(resolve, 1_700));
+    await updateSurface();
     console.log(safeStatus({ phase: "target_stale", explanation: await assistance.explain(sessionId, diagnostics) }));
     await ask("Press Enter to refresh target explicitly and retry rendering.");
     await assistance.refreshTarget(sessionId, "point", { kind: "screen_point", point: center, trusted: true, expiresAt: new Date(Date.now() + 4_000).toISOString() }, targetResolver);
     await assistance.showCurrent(sessionId, targetResolver);
+    await updateSurface();
     await ask("Press Enter to continue after target recovery.");
     await advanceCurrent();
+    await updateSurface();
     await assistance.refreshTarget(sessionId, "highlight", { kind: "screen_point", point: center, trusted: true, expiresAt: new Date(Date.now() + 4_000).toISOString() }, targetResolver);
     await assistance.showCurrent(sessionId, targetResolver);
+    await updateSurface();
     await ask("Press Enter to accept final visual target.");
     await advanceCurrent();
     await assistance.showCurrent(sessionId, targetResolver);
+    await updateSurface();
     await assistance.advance(sessionId);
-    console.log(safeStatus({ phase: "completed", session: await assistance.get(sessionId), actionsExecuted: false, confirmationTokensCreated: false }));
+    await updateSurface();
+    const completed = await assistance.get(sessionId);
+    if (completed.status !== "completed" || completed.currentStepIndex !== completed.stepCount) throw new Error("visual_demo_completion_failed");
+    console.log(safeStatus({ phase: "completed", session: completed, actionsExecuted: false, confirmationTokensCreated: false }));
   } finally {
-    await closeContext(context);
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    await shutdown();
   }
 }
 

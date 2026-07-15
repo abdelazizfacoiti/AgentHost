@@ -81,7 +81,7 @@ GTK3/X11 supports transparent/topmost/click-through overlays and bounded widgets
 
 `overlay.assistance_target_refresh` is visual-only recovery boundary. It accepts no owner identity, validates only current step through existing target resolver, enforces TTL/bounds/sensitivity, and permits at most two explicit refreshes per step. Target-bound steps opt into required-target blocking; static unbound primitives retain existing behavior. Missing or stale required targets fail before renderer invocation. Renderer epoch changes invalidate overlay IDs; operator must explicitly re-show/retry. Recovery state derives from preview/explanation metadata.
 
-`npm run demo:visual-copilot` runs production assistance/control-surface stores against public fixture in isolated demo home. Prompts gate start, target binding, events, retry, and completion. It performs no target-app operation and uses headless fallback when graphical support is absent.
+`npm run demo:visual-copilot` runs production assistance/control-surface stores against public fixture in isolated demo home. Prompts gate start, target binding, events, retry, and completion. It performs no target-app operation. Visible mode requires GTK3/X11, PyCairo, and `xdotool`; renderer or geometry limitations are reported and the launcher exits safely. `--headless` is a capability check, not a simulated visible flow.
 
 ## Forge runtime boundary
 

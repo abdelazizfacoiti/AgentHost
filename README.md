@@ -102,7 +102,7 @@ npm run build
 npm run demo:visual-copilot
 ```
 
-Demo uses public fixture data, explicit operator prompts, safe local screen-point grounding, bounded stale-target recovery, and terminal completion. It never controls target applications. `--diagnose` prints renderer/session guidance; `--headless` is safe for CI; `--require-gui` fails clearly when GTK3/X11 is unavailable. `overlay.assistance_target_refresh` revalidates only current visual target, with two explicit refreshes maximum per step. No automatic retry exists.
+Demo uses public fixture data, explicit operator prompts, safe local screen-point grounding, bounded stale-target recovery, and terminal completion. It never controls target applications. Visible mode requires GTK3/X11, PyCairo, and `xdotool`, and fails honestly if renderer health degrades. `--diagnose` prints renderer capability guidance; `--headless` is a safe capability check for CI; `--require-gui` fails clearly when visible support is unavailable. `overlay.assistance_target_refresh` revalidates only current visual target, with two explicit refreshes maximum per step. No automatic retry exists.
 
 Build Week walkthrough, setup, limitations, and video outline: [BUILD_WEEK.md](BUILD_WEEK.md).
 
