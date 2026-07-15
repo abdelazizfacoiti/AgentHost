@@ -87,6 +87,8 @@ import { createSchedulerManualRunApprovalDiagnosticsTools } from "./tools/schedu
 import { createOverlayTools } from "./tools/overlay.js";
 import { createOverlayDiagnosticsTools } from "./tools/overlay-diagnostics.js";
 import { createOverlayAssistanceTools } from "./tools/overlay-assistance.js";
+import { createOverlayAssistanceInspectionTools } from "./tools/overlay-assistance-inspection.js";
+import { createOverlayAssistanceTemplateTools } from "./tools/overlay-assistance-templates.js";
 import { createOverlayControlSurfaceTools } from "./tools/overlay-control-surface.js";
 import { SchedulerStore } from "./scheduler-store.js";
 import { WorkflowStore } from "./workflow-store.js";
@@ -94,6 +96,7 @@ import { WorkflowReplayStore } from "./workflow-replay-store.js";
 import { ToolReceiptManager } from "./tool-receipts.js";
 import { VisionEvidenceStore } from "./vision-evidence.js";
 import { OverlayAssistanceStore } from "./overlay-assistance-store.js";
+import { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
 import { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
 import { materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
 
@@ -181,6 +184,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const overlay = new OverlayManager(createOverlayRenderer(config.overlayRendererMode ?? "headless", { sessionId }), { sessionId });
   const overlayAssistance = new OverlayAssistanceStore(config.agentHostDir, overlay, sessionId);
   await overlayAssistance.ensureStructure();
+  const overlayAssistanceTemplates = new OverlayAssistanceTemplateStore(config.agentHostDir, sessionId, overlayAssistance);
+  await overlayAssistanceTemplates.ensureStructure();
   const overlayControlSurface = new OverlayControlSurfaceStore(config.agentHostDir, overlay, overlayAssistance, sessionId);
   await overlayControlSurface.ensureStructure();
   const grants = new GrantStore({
@@ -246,6 +251,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     visionEvidence,
     overlay,
     overlayAssistance,
+    overlayAssistanceTemplates,
     overlayControlSurface,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux
@@ -267,6 +273,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createOverlayTools(),
     ...createOverlayDiagnosticsTools(),
     ...createOverlayAssistanceTools(),
+    ...createOverlayAssistanceInspectionTools(),
+    ...createOverlayAssistanceTemplateTools(),
     ...createOverlayControlSurfaceTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),

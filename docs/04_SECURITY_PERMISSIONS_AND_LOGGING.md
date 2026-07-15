@@ -85,6 +85,12 @@ Control surfaces derive ownership from trusted MCP server context; MCP input can
 
 `overlay.emergency_hide` hides AgentHost-owned overlays and clears owned visual state. It is not a global AgentHost process circuit breaker, does not kill target apps, and does not undo prior external actions.
 
+### Assistance previews and visual-template safety
+
+Assistance step previews and session explanations are read-only projections. They use trusted owner context, bounded status codes, renderer health, progress, target freshness, and grant IDs only. They do not render, advance, resolve targets, invoke browser/desktop/accessibility/file/shell/Forge/workflow/scheduler tools, create grants, or create confirmation tokens.
+
+Visual-flow templates are owner-scoped local metadata. Only existing visual primitives/widgets, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders are accepted. Expressions, callbacks, shell/code, environment or glob expansion, dynamic tool names, retries, autonomy, secret values, raw private values, stale live IDs, and executable fields are rejected. Private bindings require existing grants and are redacted; secrets never persist. Template preview writes nothing. Save/archive/instantiate are metadata-only, and instantiation creates a draft session without starting or rendering it.
+
 ## Scheduler governance safety
 
 Jobs, activation, manual-run contracts, preflights, acknowledgements, requests, reviews, expiry, and staleness records are metadata-only. They cannot create timers, workers, run sessions, replay sessions, files, notifications, messages, or confirmation tokens. Approval records do not authorize execution. Any future worker must revalidate policy, grants, readiness, dry-run, confirmation, receipts, checkpoints, cancellation, and stop-on-failure at run time.

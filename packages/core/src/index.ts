@@ -28,3 +28,4 @@ export * from "./vision.js";
 export * from "./checkpoint.js";
 export * from "./overlay.js";
 export * from "./overlay-assistance.js";
+export * from "./overlay-assistance-templates.js";

@@ -22,7 +22,7 @@ Shared contracts and validators: policy profiles, grants, risk and sensitivity, 
 
 ### `packages/mcp-server`
 
-MCP server and context, `tool-runner.ts`, `tool-metadata.ts`, confirmation manager, receipt manager, audit integration, policy/grant wiring, Forge stores/tools and runtime sandbox modules, browser/desktop/accessibility/vision/checkpoint/workflow/replay/scheduler/overlay tools, workflow stores, scheduler stores, and overlay assistance store.
+MCP server and context, `tool-runner.ts`, `tool-metadata.ts`, confirmation manager, receipt manager, audit integration, policy/grant wiring, Forge stores/tools and runtime sandbox modules, browser/desktop/accessibility/vision/checkpoint/workflow/replay/scheduler/overlay tools, workflow stores, scheduler stores, overlay assistance store, assistance projections, and the owner-scoped visual-template store.
 
 ### `packages/os-linux`
 
@@ -73,6 +73,12 @@ The Node renderer client starts the GTK3/X11 child lazily. It sends bounded JSON
 
 GTK3/X11 supports transparent/topmost/click-through overlays and bounded widgets where the display and PyGObject probe succeed. Wayland does not claim global coordinates, layer-shell, or guaranteed click-through; it reports limited/unavailable support.
 
+## Assistance UX and visual-template boundary
+
+`overlay.assistance_step_preview` and `overlay.assistance_session_explain` read only owner-bound in-memory session state. They do not render, advance, allocate overlay IDs, resolve targets, invoke tools, or create grants/tokens. Restarted sessions without ephemeral step material fail closed.
+
+`overlay.assistance_template_*` uses `overlays/assistance-templates/`. Templates contain only allowlisted visual step metadata, declared scalar parameters, literal `{{parameterName}}` placeholders, and typed target placeholders. Save/archive/instantiate change local metadata only. Instantiation validates bindings and creates a draft assistance session; it never starts, renders, or executes it. Records are atomic, owner-isolated, bounded, and redacted.
+
 ## Forge runtime boundary
 
 Forge artifacts remain inert until review, validation, registration, runtime eligibility, and grants pass. Runtime execution is only the fixed `runtime/handler.json` JSON contract in a child process. Generated JavaScript/Python is not imported.
@@ -109,6 +115,7 @@ Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, 
   workflows/
     traces/ skills/ checkpoint-template-reviews/ replay-sessions/
   overlays/assistance-sessions/
+  overlays/assistance-templates/
   overlays/control-surfaces/
   overlays/control-surface-event-ledger/
   scheduler/

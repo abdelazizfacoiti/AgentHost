@@ -40,7 +40,7 @@ describe("overlay control surface tools", () => {
     const value = context();
     const sessionId = await createActiveSession(value);
     const shown = await call(value, "overlay.control_surface_show", { assistanceSessionId: sessionId });
-    expect(shown).toMatchObject({ ok: true, data: { status: "visible", bindingState: "bound", overlayId: expect.any(String), recommendedActions: expect.arrayContaining(["continue", "pause", "cancel"]) } });
+    expect(shown).toMatchObject({ ok: true, data: { status: "visible", bindingState: "bound", overlayId: expect.any(String), recommendedActions: expect.arrayContaining(["continue", "pause", "cancel"]), stepPreview: { targetFreshness: "missing" }, sessionExplanation: { status: "active" } } });
     const surfaceId = (shown.data as { controlSurfaceId: string }).controlSurfaceId;
     const overlayId = (shown.data as { overlayId: string }).overlayId;
     expect(await call(value, "overlay.control_surface_get", { assistanceSessionId: sessionId })).toMatchObject({ ok: true, data: { controlSurfaceId: surfaceId, status: "visible" } });
