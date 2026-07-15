@@ -32,5 +32,13 @@ describe("registered tool execution metadata", () => {
     expect(capabilities.some((tool) => tool.name === "system.get_info")).toBe(true);
     expect(capabilities.every((tool) => tool.execution !== undefined)).toBe(true);
     expect(capabilities.some((tool) => tool.name === "blender.run_python")).toBe(false);
+    expect(capabilities.filter((tool) => tool.name.startsWith("overlay.control_surface_")).map((tool) => tool.name)).toEqual([
+      "overlay.control_surface_show",
+      "overlay.control_surface_get",
+      "overlay.control_surface_update",
+      "overlay.control_surface_hide",
+      "overlay.control_surface_apply_event"
+    ]);
+    expect(capabilities.filter((tool) => tool.name.startsWith("overlay.control_surface_")).every((tool) => tool.execution?.executionClass === "visual_only" && tool.execution.externalEffect === false)).toBe(true);
   });
 });

@@ -23,6 +23,7 @@ Build on `packages/app-overlay`, renderer diagnostics/setup, target grounding, b
 ### Deliverables
 
 - operator-facing control surface;
+- `overlay.control_surface_show`, `overlay.control_surface_get`, `overlay.control_surface_update`, `overlay.control_surface_hide`, and `overlay.control_surface_apply_event`;
 - assistance-session UX;
 - renderer/setup diagnostics;
 - reviewable visual flow templates;
@@ -30,7 +31,7 @@ Build on `packages/app-overlay`, renderer diagnostics/setup, target grounding, b
 
 ### Exclusions and risk
 
-Overlay events must not trigger target-app actions, create confirmation tokens, or start replay. Main risks are stale target evidence, private content leakage, and confusing renderer state.
+Overlay events and control-surface actions must not trigger target-app actions, create confirmation tokens, grant permissions, or start replay. Main risks are stale renderer bindings, private content leakage, replayed operator events, and confusing renderer state.
 
 ### Done
 

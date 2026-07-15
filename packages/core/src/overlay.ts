@@ -7,7 +7,8 @@ export type OverlaySensitivity = "public" | "private" | "secret";
 export type OverlayTheme = "system" | "light" | "dark";
 export type OverlayDensity = "compact" | "normal";
 export type OverlayAnimationKind = "fade" | "slide" | "scale" | "pulse" | "glow" | "pointer_move" | "progress";
-export type OverlayEventName = "accepted" | "rejected" | "dismissed" | "cancelled" | "next" | "back" | "acknowledgement_checked" | "emergency_stop_requested";
+export type OverlayControlSurfaceAction = "continue" | "pause" | "resume" | "cancel" | "retry_visual_render" | "inspect_diagnostics" | "emergency_hide" | "close_control_surface";
+export type OverlayEventName = "accepted" | "rejected" | "dismissed" | "cancelled" | "next" | "back" | "acknowledgement_checked" | "emergency_stop_requested" | OverlayControlSurfaceAction;
 
 export interface OverlayBounds { x: number; y: number; width: number; height: number; }
 export interface OverlayPoint { x: number; y: number; }
@@ -105,7 +106,7 @@ export function validateOverlayInteractionPolicy(policy?: OverlayInteractionPoli
   if (policy === undefined) return [];
   if (typeof policy !== "object" || policy === null) return ["overlay_interaction_invalid"];
   const errors: string[] = [];
-  const events: OverlayEventName[] = ["accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested"];
+  const events: OverlayEventName[] = ["accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested", "continue", "pause", "resume", "cancel", "retry_visual_render", "inspect_diagnostics", "emergency_hide", "close_control_surface"];
   if (typeof policy.interactive !== "boolean" || typeof policy.dismissible !== "boolean" || !["never", "when_required"].includes(policy.focus)) errors.push("overlay_interaction_invalid");
   if (!Array.isArray(policy.allowedEvents) || policy.allowedEvents.length > 8 || policy.allowedEvents.some((event) => !events.includes(event))) errors.push("overlay_event_invalid");
   return [...new Set(errors)];

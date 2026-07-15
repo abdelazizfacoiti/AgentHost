@@ -49,6 +49,7 @@ import type { ToolReceiptManager } from "./tool-receipts.js";
 import type { VisionEvidenceStore } from "./vision-evidence.js";
 import type { SchedulerStore } from "./scheduler-store.js";
 import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
+import type { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -159,5 +160,6 @@ export interface AgentHostMcpContext {
   browserBridge?: BrowserBridgeServer;
   overlay?: OverlayManager;
   overlayAssistance?: OverlayAssistanceStore;
+  overlayControlSurface?: OverlayControlSurfaceStore;
   linux: LinuxAutomation;
 }
