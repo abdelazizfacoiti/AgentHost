@@ -51,6 +51,7 @@ export class OverlayAssistanceStore {
   readonly #ownerSessionId: string;
   readonly #sessions = new Map<string, OverlayAssistanceSession>();
   readonly #overlayIds = new Map<string, string>();
+  readonly #targetRefreshQueue = new Map<string, Promise<unknown>>();
   constructor(agentHostDir: string, manager: OverlayManager, ownerSessionId: string) { this.#dir = path.join(agentHostDir, "overlays", "assistance-sessions"); this.#manager = manager; this.#ownerSessionId = ownerSessionId; }
   async ensureStructure(): Promise<void> { await mkdir(this.#dir, { recursive: true, mode: 0o700 }); }
   async create(input: { name: string; steps: OverlayAssistanceStep[]; ttlMs?: number; allowPrivate: boolean }): Promise<Record<string, unknown>> {
@@ -153,6 +154,12 @@ export class OverlayAssistanceStore {
     if ("overlay" in result && result.overlay?.overlayId !== undefined) { this.#overlayIds.set(session.sessionId, result.overlay.overlayId); session.currentOverlayId = result.overlay.overlayId; } else { delete session.currentOverlayId; } if (step.requiresEvent || step.type === "wait_for_event") session.status = "waiting_for_operator"; session.updatedAt = now(); await this.#persist(session); return summary(session); }
   async applyEvent(input: OverlayAssistanceEvent): Promise<Record<string, unknown>> { const session = this.#active(input.sessionId); if (session.status !== "waiting_for_operator") throw new Error("assistance_session_not_waiting"); const step = session.steps[session.currentStepIndex]; const expectedOverlayId = this.#overlayIds.get(session.sessionId); if (step === undefined || step.stepId !== input.stepId || input.ownerSessionId !== session.ownerSessionId || (expectedOverlayId === undefined ? input.overlayId !== undefined : input.overlayId !== expectedOverlayId)) throw new Error("assistance_event_mismatch"); if (session.lastEvent?.eventId === input.eventId) throw new Error("assistance_event_reused"); const errors = validateOverlayAssistanceEvent(input); if (errors.length > 0) throw new Error(errors[0]); if (step.expectedEvent !== undefined && step.expectedEvent !== input.event) throw new Error("assistance_event_unexpected"); session.lastEvent = input; session.updatedAt = now(); await this.#persist(session); return summary(session); }
   async refreshTarget(sessionId: string, stepId: string, target: OverlayTargetBinding, resolver: OverlayTargetResolver): Promise<Record<string, unknown>> {
+    const previous = this.#targetRefreshQueue.get(sessionId) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(() => this.#refreshTargetUnsafe(sessionId, stepId, target, resolver));
+    this.#targetRefreshQueue.set(sessionId, operation);
+    try { return await operation; } finally { if (this.#targetRefreshQueue.get(sessionId) === operation) this.#targetRefreshQueue.delete(sessionId); }
+  }
+  async #refreshTargetUnsafe(sessionId: string, stepId: string, target: OverlayTargetBinding, resolver: OverlayTargetResolver): Promise<Record<string, unknown>> {
     const session = this.#sessions.get(sessionId);
     if (session === undefined || session.ownerSessionId !== this.#ownerSessionId) throw new Error("assistance_session_not_found");
     this.#expire(session);

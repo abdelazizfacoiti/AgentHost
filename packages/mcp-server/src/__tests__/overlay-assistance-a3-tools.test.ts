@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createAdapterRegistry, createBaseCapabilityRegistry, getPolicyProfile, type AgentHostConfig, type AuditLogEntry, type AuditLogger } from "@agenthost/core";
+import { createAdapterRegistry, createBaseCapabilityRegistry, getPolicyProfile, type AgentHostConfig, type AuditLogEntry, type AuditLogger, type OverlayTargetBinding } from "@agenthost/core";
 import { HeadlessOverlayRenderer, OverlayManager } from "@agenthost/app-overlay";
 import { describe, expect, it } from "vitest";
 import { ConfirmationManager } from "../confirmation.js";
@@ -64,7 +64,7 @@ async function createSession(value: AgentHostMcpContext): Promise<string> {
   return sessionId;
 }
 
-const target = (expiresAt = new Date(Date.now() + 10_000).toISOString()) => ({ kind: "screen_point", point: { x: 500, y: 400 }, trusted: true, expiresAt });
+const target = (expiresAt = new Date(Date.now() + 10_000).toISOString()): OverlayTargetBinding => ({ kind: "screen_point", point: { x: 500, y: 400 }, trusted: true, expiresAt });
 
 describe("A3 visual assistance recovery", () => {
   it("blocks missing and stale targets before rendering, then allows explicit refresh", async () => {
@@ -86,10 +86,49 @@ describe("A3 visual assistance recovery", () => {
     expect(createOverlayAssistanceTools().find((item) => item.name === "overlay.assistance_target_refresh")?.execution).toMatchObject({ executionClass: "visual_only", externalEffect: false, requiresConfirmationToken: false });
   });
 
+  it("serializes concurrent target refreshes before applying the bounded limit", async () => {
+    const value = context();
+    const sessionId = await createSession(value);
+    const resolver = async (binding: OverlayTargetBinding) => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { ok: true as const, summary: { kind: binding.kind, targetId: "concurrent", sensitivity: "public" as const, validatedAt: new Date().toISOString(), expiresAt: binding.expiresAt } };
+    };
+    const attempts = await Promise.allSettled([
+      value.overlayAssistance!.refreshTarget(sessionId, "target", target(), resolver),
+      value.overlayAssistance!.refreshTarget(sessionId, "target", target(), resolver),
+      value.overlayAssistance!.refreshTarget(sessionId, "target", target(), resolver)
+    ]);
+    expect(attempts.filter((item) => item.status === "fulfilled")).toHaveLength(2);
+    expect(attempts.filter((item) => item.status === "rejected").map((item) => item.reason?.message)).toContain("assistance_target_refresh_limit");
+    expect((await value.overlayAssistance!.get(sessionId)).targetRefreshCount).toBe(2);
+  });
+
+  it("requires the explicit terminal finish advance for completion", async () => {
+    const value = context();
+    await value.overlayAssistance?.ensureStructure();
+    const created = await call(value, "overlay.assistance_session_create", { name: "finish flow", steps: [
+      { stepId: "intro", index: 0, type: "instruction", primitive: { type: "instruction_card", label: "Ready", sensitivity: "public" }, requiresEvent: true, expectedEvent: "accepted" },
+      { stepId: "finish", index: 1, type: "finish" }
+    ] });
+    const sessionId = (created.data as { sessionId: string }).sessionId;
+    await call(value, "overlay.assistance_session_start", { sessionId });
+    const shown = await call(value, "overlay.assistance_step_show", { sessionId });
+    await call(value, "overlay.assistance_step_apply_event", { sessionId, stepId: "intro", overlayId: (shown.data as { currentOverlayId: string }).currentOverlayId, eventId: "finish-event", event: "accepted", createdAt: new Date().toISOString() });
+    expect(await call(value, "overlay.assistance_step_advance", { sessionId })).toMatchObject({ ok: true, data: { status: "active", currentStepIndex: 1 } });
+    await call(value, "overlay.assistance_step_show", { sessionId });
+    expect(await call(value, "overlay.assistance_step_advance", { sessionId })).toMatchObject({ ok: true, data: { status: "completed", currentStepIndex: 2 } });
+  });
+
   it("rejects wrong step and expired bindings", async () => {
     const value = context();
     const sessionId = await createSession(value);
     expect(await call(value, "overlay.assistance_target_refresh", { sessionId, stepId: "intro", target: target() })).toMatchObject({ ok: false, error: { code: "assistance_current_step_mismatch" } });
     expect(await call(value, "overlay.assistance_target_refresh", { sessionId, stepId: "target", target: target(new Date(Date.now() - 1).toISOString()) })).toMatchObject({ ok: false, error: { code: "overlay_target_expired" } });
+  });
+
+  it("advertises the same discriminated target shapes accepted by validation", () => {
+    const tool = createOverlayAssistanceTools().find((item) => item.name === "overlay.assistance_target_refresh");
+    const schema = tool?.mcpInputSchema as { properties?: { target?: { oneOf?: unknown[] } } } | undefined;
+    expect(schema?.properties?.target?.oneOf).toHaveLength(6);
   });
 });

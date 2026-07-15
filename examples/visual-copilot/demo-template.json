@@ -3,6 +3,14 @@
   "name": "Local visual target walkthrough",
   "description": "A bounded visual-only local demonstration.",
   "parameters": [],
+  "targetPlaceholders": [
+    {
+      "placeholderId": "demo_screen_point",
+      "bindingType": "screen_point",
+      "required": false,
+      "sensitivity": "public"
+    }
+  ],
   "steps": [
     {
       "stepId": "intro",
@@ -18,6 +26,7 @@
       "stepId": "point",
       "index": 1,
       "type": "pointer",
+      "targetPlaceholderId": "demo_screen_point",
       "requiresTarget": true,
       "primitiveType": "pointer",
       "label": "Safe local demo target",
@@ -29,6 +38,7 @@
       "stepId": "highlight",
       "index": 2,
       "type": "highlight",
+      "targetPlaceholderId": "demo_screen_point",
       "requiresTarget": true,
       "primitiveType": "highlight",
       "label": "Target revalidated by explicit operator request",
