@@ -10,6 +10,8 @@ const KNOWN_TOOL_PREFIXES = ["system.", "forge.", "browser.", "workflow.", "sche
 
 function classify(definition: AnyAgentHostToolDefinition): ToolExecutionClass {
   const name = definition.name;
+  if (name === "overlay.assistance_step_preview" || name === "overlay.assistance_session_explain" || name === "overlay.assistance_template_validate" || name === "overlay.assistance_template_preview" || name === "overlay.assistance_template_get" || name === "overlay.assistance_template_list") return "read_only";
+  if (name === "overlay.assistance_template_save" || name === "overlay.assistance_template_archive" || name === "overlay.assistance_template_instantiate") return "metadata_only";
   if (name.startsWith("overlay.")) return "visual_only";
   if (name.startsWith("workflow.") || name.startsWith("scheduler.")) return "metadata_only";
   if (name === "forge.check_sandbox_support") return "diagnostic";

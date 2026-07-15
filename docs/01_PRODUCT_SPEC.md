@@ -28,13 +28,13 @@ The browser extension is preferred for structured DOM work, but is not required.
 
 ## Current implementation status
 
-The default loaded registry currently contains 196 tools with validated execution metadata:
+The default loaded registry currently contains 210 tools with validated execution metadata:
 
-- 40 `read_only`
+- 46 `read_only`
 - 3 `diagnostic`
-- 104 `metadata_only`
+- 107 `metadata_only`
 - 25 `state_changing`
-- 24 `visual_only`
+- 29 `visual_only`
 
 The execution model also defines `inert`, but no currently loaded tool materializes with that class. Review-only and generated metadata are currently represented as `metadata_only`; `inert` remains available for future explicit definitions.
 
@@ -53,6 +53,8 @@ All state-changing execution remains subject to schema validation, execution met
 ### Visual-only
 
 Overlay primitives, the GTK/X11 renderer, bounded widgets, visual-assistance sessions, operator control surfaces, overlay events, and `overlay.emergency_hide` are visual/session state only. They never click, type, navigate, or invoke another AgentHost tool. Control surfaces are one-per-owned-assistance-session, expose strict local operator intents, and report current step/progress, blockers, warnings, and renderer health. Emergency hide affects AgentHost-owned overlays only; it is not a global circuit breaker.
+
+Read-only assistance projections (`overlay.assistance_step_preview` and `overlay.assistance_session_explain`) expose current-step, waiting, renderer, target-freshness, progress, and blocker summaries without rendering or mutating sessions. Visual-flow templates are constrained metadata records: existing visual primitives/widgets only, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders. Template preview is read-only; save/archive/instantiate are metadata-only; instantiation creates draft assistance metadata and never starts or renders a session.
 
 ### Metadata-only, inert, or review-only
 

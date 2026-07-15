@@ -25,6 +25,8 @@ Build on `packages/app-overlay`, renderer diagnostics/setup, target grounding, b
 - operator-facing control surface;
 - `overlay.control_surface_show`, `overlay.control_surface_get`, `overlay.control_surface_update`, `overlay.control_surface_hide`, and `overlay.control_surface_apply_event`;
 - assistance-session UX;
+- read-only step preview and session explanation;
+- constrained visual-flow template validate/preview/save/get/list/archive/instantiate lifecycle;
 - renderer/setup diagnostics;
 - reviewable visual flow templates;
 - explicit fallback and Wayland guidance.
@@ -35,7 +37,7 @@ Overlay events and control-surface actions must not trigger target-app actions, 
 
 ### Done
 
-An operator can inspect renderer/session health and follow bounded visual guidance with no hidden target-app execution.
+An operator can inspect renderer/session health, preview the next safe visual step, explain session state, and create draft visual-assistance sessions from bounded templates with no hidden target-app execution. Milestone A Workstreams A1 and A2 are complete. A3 remains pending.
 
 ## Milestone B — Adaptive Capability System
 

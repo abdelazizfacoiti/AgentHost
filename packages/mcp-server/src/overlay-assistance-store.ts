@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { redactOverlayText, validateOverlayAnimation, validateOverlayAssistanceEvent, validateOverlayAssistanceSteps, validateOverlayInteractionPolicy, validateOverlayTargetBinding, validateOverlayWidget, type OverlayAssistanceEvent, type OverlayAssistanceSession, type OverlayAssistanceStep, type OverlayAssistanceSessionStatus, type OverlayTargetBinding, type OverlayWidget, type OverlayPrimitive } from "@agenthost/core";
+import { redactOverlayText, validateOverlayAnimation, validateOverlayAssistanceEvent, validateOverlayAssistanceSteps, validateOverlayInteractionPolicy, validateOverlayTargetBinding, validateOverlayWidget, type OverlayAssistanceEvent, type OverlayAssistanceSession, type OverlayAssistanceStep, type OverlayAssistanceSessionStatus, type OverlayTargetBinding, type OverlayWidget, type OverlayPrimitive, type OverlayAssistanceStepPreview, type OverlayAssistanceSessionExplanation } from "@agenthost/core";
 import type { OverlayManager, OverlayTargetResolver } from "@agenthost/app-overlay";
 
 const now = () => new Date().toISOString();
@@ -64,6 +64,69 @@ export class OverlayAssistanceStore {
     this.#sessions.set(session.sessionId, session); await this.#persist(session); return summary(session);
   }
   async get(sessionId: string): Promise<Record<string, unknown>> { const session = this.#sessions.get(sessionId); if (session !== undefined) { if (session.ownerSessionId !== this.#ownerSessionId) throw new Error("assistance_session_not_found"); this.#expire(session); return summary(session); } try { const stored = JSON.parse(await readFile(this.#file(sessionId), "utf8")) as Record<string, unknown>; if (stored.ownerSessionId !== this.#ownerSessionId) throw new Error("assistance_session_not_found"); const { currentOverlayId: _ephemeralOverlayId, ...persisted } = stored; return { ...persisted, status: stored.status === "completed" || stored.status === "cancelled" || stored.status === "expired" ? stored.status : "blocked", ephemeralMaterialAvailable: false, blockers: [...(Array.isArray(stored.blockers) ? stored.blockers : []), "ephemeral_input_unavailable"] }; } catch (error) { if (error instanceof Error && error.message === "assistance_session_not_found") throw error; throw new Error("assistance_session_not_found"); } }
+  async preview(sessionId: string): Promise<OverlayAssistanceStepPreview> {
+    const session = this.#sessions.get(sessionId);
+    if (session === undefined) {
+      try { const persisted = await this.get(sessionId); if (persisted.ephemeralMaterialAvailable === false) throw new Error("assistance_session_ephemeral_input_unavailable"); } catch (error) { throw error instanceof Error && error.message === "assistance_session_ephemeral_input_unavailable" ? error : new Error("assistance_session_not_found"); }
+    }
+    if (session === undefined || session.ownerSessionId !== this.#ownerSessionId) throw new Error("assistance_session_not_found");
+    this.#expire(session);
+    const step = session.steps[session.currentStepIndex];
+    const terminal = ["completed", "cancelled", "expired", "blocked"].includes(session.status) || step === undefined;
+    const target = step?.target ?? step?.primitive?.target ?? step?.widget?.target;
+    const targetRequired = step !== undefined && ["pointer", "highlight", "tooltip"].includes(step.type) && target === undefined;
+    const targetExpiresAt = target === undefined ? NaN : Date.parse(target.expiresAt);
+    const targetFreshness = step === undefined || ["clear", "wait_for_event", "finish"].includes(step.type) ? "not_required" : target === undefined ? (targetRequired ? "missing" : "not_required") : !Number.isFinite(targetExpiresAt) ? "unknown" : targetExpiresAt > Date.now() ? "fresh" : "stale";
+    const blockers = [...session.blockers];
+    if (!session.ephemeralMaterialAvailable) blockers.push("ephemeral_input_unavailable");
+    if (targetFreshness === "missing" || targetFreshness === "stale") blockers.push(`assistance_target_${targetFreshness}`);
+    const sensitivity = step?.primitive?.sensitivity ?? step?.widget?.sensitivity ?? "public";
+    const safeLabel = step === undefined ? undefined : sensitivity === "private" ? "[redacted-private]" : safeText(step.primitive?.label ?? step.primitive?.text ?? step.widget?.title ?? step.type, sensitivity);
+    const canRender = !terminal && blockers.length === 0 && (targetFreshness === "fresh" || targetFreshness === "not_required");
+    return {
+      sessionId,
+      status: session.status,
+      currentStepIndex: session.currentStepIndex,
+      ...(step === undefined ? {} : { stepId: step.stepId, stepType: step.type, ...(safeLabel === undefined ? {} : { safeLabel }), ...(step.progressGroup === undefined ? {} : { progressGroup: step.progressGroup }) }),
+      warningCodes: (step?.warningCodes ?? []).slice(0, 10),
+      progress: session.progress,
+      canRender,
+      targetRequired,
+      targetFreshness,
+      ...(step?.expectedEvent === undefined ? {} : { expectedEvent: step.expectedEvent }),
+      blockers: [...new Set(blockers)].slice(0, 20),
+      warnings: session.warnings.slice(0, 20),
+      recommendedAction: terminal ? "no_action_terminal" : blockers.length > 0 ? "review_blockers" : session.status === "ready" ? "start_assistance_session" : session.status === "active" ? "show_current_step" : session.status === "waiting_for_operator" ? "apply_expected_visual_event" : session.status === "paused" ? "resume_assistance_session" : "review_blockers",
+      terminal
+    };
+  }
+  async explain(sessionId: string, renderer: { rendererStatus?: string; effectiveBackend?: string; sessionType?: string; fallbackReason?: string } = {}): Promise<OverlayAssistanceSessionExplanation> {
+    const session = this.#sessions.get(sessionId);
+    if (session === undefined) {
+      try { const persisted = await this.get(sessionId); if (persisted.ephemeralMaterialAvailable === false) throw new Error("assistance_session_ephemeral_input_unavailable"); } catch (error) { throw error instanceof Error && error.message === "assistance_session_ephemeral_input_unavailable" ? error : new Error("assistance_session_not_found"); }
+    }
+    if (session === undefined || session.ownerSessionId !== this.#ownerSessionId) throw new Error("assistance_session_not_found");
+    const preview = await this.preview(sessionId);
+    const step = session.steps[session.currentStepIndex];
+    const terminalExplanation = session.status === "completed" ? "assistance_session_completed" : session.status === "cancelled" ? "assistance_session_cancelled" : session.status === "expired" ? "assistance_session_expired" : session.status === "blocked" ? "assistance_session_blocked" : undefined;
+    return {
+      sessionId,
+      status: session.status,
+      currentStepIndex: session.currentStepIndex,
+      remainingSteps: Math.max(0, session.steps.length - session.currentStepIndex),
+      progress: session.progress,
+      ...(step === undefined ? {} : { currentStep: { stepId: step.stepId, type: step.type, ...(preview.safeLabel === undefined ? {} : { label: preview.safeLabel }) } }),
+      ...(session.status === "waiting_for_operator" ? { waitingReason: step?.expectedEvent === undefined ? "operator_event_required" : `expected_event_${step.expectedEvent}` } : {}),
+      ...(session.lastEvent === undefined ? {} : { lastEvent: { event: session.lastEvent.event, stepId: session.lastEvent.stepId, createdAt: session.lastEvent.createdAt } }),
+      renderer: { status: renderer.rendererStatus ?? "unknown", backend: renderer.effectiveBackend ?? "unknown", sessionType: renderer.sessionType ?? "unknown", healthy: renderer.rendererStatus === "available" || renderer.rendererStatus === "degraded", ...(renderer.fallbackReason === undefined ? {} : { reason: renderer.fallbackReason }) },
+      targetFreshness: preview.targetFreshness,
+      blockers: preview.blockers,
+      warnings: preview.warnings,
+      requiredGrantIds: session.checkpointSummaries.flatMap((checkpoint) => checkpoint.requiredGrantIds ?? []).slice(0, 20),
+      recommendedAction: preview.recommendedAction,
+      ...(terminalExplanation === undefined ? {} : { terminalExplanation })
+    };
+  }
   async list(): Promise<Record<string, unknown>[]> { const entries = await readdir(this.#dir, { withFileTypes: true }).catch(() => []); const values = new Map<string, Record<string, unknown>>(); for (const entry of entries.filter((item) => item.isFile() && item.name.endsWith(".json"))) { try { const value = JSON.parse(await readFile(path.join(this.#dir, entry.name), "utf8")) as Record<string, unknown>; if (value.ownerSessionId === this.#ownerSessionId && typeof value.sessionId === "string") { delete value.currentOverlayId; values.set(value.sessionId, value); } } catch { /* ignore invalid records */ } } for (const session of this.#sessions.values()) { if (session.ownerSessionId !== this.#ownerSessionId) continue; this.#expire(session); values.set(session.sessionId, summary(session)); } return [...values.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))); }
   async start(sessionId: string): Promise<Record<string, unknown>> { const session = this.#active(sessionId); if (session.status !== "ready" && session.status !== "paused") throw new Error("assistance_session_not_startable"); session.status = "active"; session.updatedAt = now(); await this.#persist(session); return summary(session); }
   async showCurrent(sessionId: string, resolver: OverlayTargetResolver): Promise<Record<string, unknown>> { const session = this.#active(sessionId); if (session.status !== "active") throw new Error("assistance_session_not_active"); const step = session.steps[session.currentStepIndex]; if (step === undefined) throw new Error("assistance_current_step_missing"); await this.#clearSessionOverlay(session.sessionId); const result = step.primitive !== undefined ? await this.#manager.showPrimitive({ ...step.primitive, ...(step.target === undefined ? {} : { target: step.target }) }, resolver) : step.widget !== undefined ? await this.#manager.showWidget({ ...step.widget, ...(step.target === undefined ? {} : { target: step.target }) }, resolver) : step.type === "clear" ? { ok: true, reason: "assistance_overlay_cleared" } : { ok: true, reason: "assistance_step_visual_state" };

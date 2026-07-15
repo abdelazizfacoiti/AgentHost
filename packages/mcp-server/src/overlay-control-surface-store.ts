@@ -209,6 +209,7 @@ export class OverlayControlSurfaceStore {
   }
 
   async #render(surface: SurfaceRecord, assistance: Record<string, unknown>, overlayId?: string): Promise<void> {
+    await this.#refresh(surface, assistance);
     const result = await this.#manager.showWidget(this.#widget(surface, assistance, overlayId));
     if (!result.ok || result.overlay === undefined) {
       surface.status = "stale";
@@ -241,6 +242,8 @@ export class OverlayControlSurfaceStore {
         { type: "status_badge" as const, status: status === "blocked" ? "danger" as const : status === "paused" ? "warning" as const : "info" as const, text: status },
         { type: "progress" as const, value: progress.percent / 100, label: `${progress.completed}/${progress.total}` },
         { type: "key_value" as const, key: "Current step", value: String(assistance.currentStepIndex ?? 0) },
+        ...(surface.stepPreview?.safeLabel === undefined ? [] : [{ type: "key_value" as const, key: "Step", value: surface.stepPreview.safeLabel }]),
+        ...(surface.sessionExplanation?.waitingReason === undefined ? [] : [{ type: "key_value" as const, key: "Waiting", value: surface.sessionExplanation.waitingReason }]),
         ...actions.map((action) => ({ type: "button" as const, label: action.replaceAll("_", " "), event: action }))
       ]
     };
@@ -255,6 +258,14 @@ export class OverlayControlSurfaceStore {
     surface.warnings = this.#codes(assistance.warnings);
     surface.recommendedActions = this.#recommended(surface.assistanceStatus);
     surface.rendererHealth = await this.#health();
+    try {
+      surface.stepPreview = await this.#assistance.preview(surface.assistanceSessionId);
+      surface.sessionExplanation = await this.#assistance.explain(surface.assistanceSessionId, surface.rendererHealth);
+    } catch (error) {
+      delete surface.stepPreview;
+      delete surface.sessionExplanation;
+      surface.warnings = [...new Set([...surface.warnings, error instanceof Error ? error.message : "assistance_projection_unavailable"])].slice(0, 20);
+    }
     if (surface.overlayId !== undefined && (!this.#manager.isOverlayLive(surface.overlayId) || surface.rendererEpoch !== this.#manager.rendererEpoch())) {
       delete surface.overlayId;
       delete surface.rendererEpoch;
@@ -296,7 +307,7 @@ export class OverlayControlSurfaceStore {
   #progress(value: Record<string, unknown>): { completed: number; total: number; percent: number } { const progress = value.progress; if (progress !== null && typeof progress === "object") { const p = progress as Record<string, unknown>; return { completed: Number(p.completed ?? 0), total: Number(p.total ?? 0), percent: Number(p.percent ?? 0) }; } return { completed: 0, total: 0, percent: 0 }; }
   #codes(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 20) : []; }
   #recommended(status: OverlayAssistanceSessionStatus): OverlayControlSurfaceAction[] { if (status === "paused") return ["resume", "cancel", "inspect_diagnostics", "emergency_hide", "close_control_surface"]; if (status === "active" || status === "waiting_for_operator") return ["continue", "pause", "cancel", "retry_visual_render", "inspect_diagnostics", "emergency_hide", "close_control_surface"]; return ["resume", "inspect_diagnostics", "emergency_hide", "close_control_surface"]; }
-  #safeSummary(surface: SurfaceRecord): Record<string, unknown> { return { controlSurfaceId: surface.controlSurfaceId, assistanceSessionId: surface.assistanceSessionId, status: surface.status, createdAt: surface.createdAt, updatedAt: surface.updatedAt, expiresAt: surface.expiresAt, assistanceStatus: surface.assistanceStatus, currentStepIndex: surface.currentStepIndex, progress: surface.progress, rendererHealth: surface.rendererHealth, blockers: surface.blockers, warnings: surface.warnings, recommendedActions: surface.recommendedActions, recentEvents: surface.recentEvents.slice(-MAX_EVENTS), bindingState: surface.bindingState, ...(surface.overlayId !== undefined && surface.bindingState === "bound" ? { overlayId: surface.overlayId } : {}) }; }
+  #safeSummary(surface: SurfaceRecord): Record<string, unknown> { return { controlSurfaceId: surface.controlSurfaceId, assistanceSessionId: surface.assistanceSessionId, status: surface.status, createdAt: surface.createdAt, updatedAt: surface.updatedAt, expiresAt: surface.expiresAt, assistanceStatus: surface.assistanceStatus, currentStepIndex: surface.currentStepIndex, progress: surface.progress, rendererHealth: surface.rendererHealth, blockers: surface.blockers, warnings: surface.warnings, recommendedActions: surface.recommendedActions, recentEvents: surface.recentEvents.slice(-MAX_EVENTS), bindingState: surface.bindingState, ...(surface.stepPreview === undefined ? {} : { stepPreview: surface.stepPreview }), ...(surface.sessionExplanation === undefined ? {} : { sessionExplanation: surface.sessionExplanation }), ...(surface.overlayId !== undefined && surface.bindingState === "bound" ? { overlayId: surface.overlayId } : {}) }; }
   #cleanupLedger(): void { const nowMs = Date.now(); for (const [eventId, entry] of this.#ledger) if (Date.parse(entry.expiresAt) <= nowMs) this.#ledger.delete(eventId); while (this.#ledger.size > MAX_LEDGER_ENTRIES) this.#ledger.delete(this.#ledger.keys().next().value as string); }
   async #loadLedger(): Promise<void> { if (this.#ledger.size > 0) return; const entries = await readdir(this.#ledgerDir, { withFileTypes: true }).catch(() => []); for (const entry of entries.filter((item) => item.isFile() && item.name.endsWith(".json"))) { try { const value = JSON.parse(await readFile(path.join(this.#ledgerDir, entry.name), "utf8")) as LedgerEntry; if (value.ownerSessionId === this.#ownerSessionId) this.#ledger.set(value.eventId, value); } catch { /* ignore malformed replay records */ } } this.#cleanupLedger(); }
   async #persistLedger(value: LedgerEntry): Promise<void> { await mkdir(this.#ledgerDir, { recursive: true, mode: 0o700 }); const file = path.join(this.#ledgerDir, `${safeId(value.eventId)}.json`); const temp = `${file}.${randomUUID()}.tmp`; await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); await chmod(temp, 0o600); await rename(temp, file); }

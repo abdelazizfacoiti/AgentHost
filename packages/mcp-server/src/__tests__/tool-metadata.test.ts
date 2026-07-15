@@ -40,5 +40,7 @@ describe("registered tool execution metadata", () => {
       "overlay.control_surface_apply_event"
     ]);
     expect(capabilities.filter((tool) => tool.name.startsWith("overlay.control_surface_")).every((tool) => tool.execution?.executionClass === "visual_only" && tool.execution.externalEffect === false)).toBe(true);
+    expect(capabilities.some((tool) => tool.name === "overlay.assistance_step_preview" && tool.execution?.executionClass === "read_only")).toBe(true);
+    expect(capabilities.some((tool) => tool.name === "overlay.assistance_template_instantiate" && tool.execution?.executionClass === "metadata_only")).toBe(true);
   });
 });

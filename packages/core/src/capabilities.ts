@@ -8,6 +8,8 @@ import {
 } from "./types.js";
 
 function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
+  if (name === "overlay.assistance_step_preview" || name === "overlay.assistance_session_explain" || name === "overlay.assistance_template_validate" || name === "overlay.assistance_template_preview" || name === "overlay.assistance_template_get" || name === "overlay.assistance_template_list") return { executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
+  if (name === "overlay.assistance_template_save" || name === "overlay.assistance_template_archive" || name === "overlay.assistance_template_instantiate") return { executionClass: "metadata_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
   const visual = name.startsWith("overlay.");
   let metadata: ToolExecutionMetadata["executionClass"] = "read_only";
   if (name === "forge.check_sandbox_support" || name === "system.check_dependency") metadata = "diagnostic";
@@ -136,6 +138,15 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "overlay.assistance_session_pause", riskLevel: "low" as const, description: "Pauses visual assistance and clears owned overlays." },
     { name: "overlay.assistance_session_cancel", riskLevel: "low" as const, description: "Cancels visual assistance and clears owned overlays." },
     { name: "overlay.assistance_session_complete", riskLevel: "low" as const, description: "Completes fully advanced visual assistance session." },
+    { name: "overlay.assistance_step_preview", riskLevel: "observe" as const, description: "Previews current visual assistance step without rendering or advancing." },
+    { name: "overlay.assistance_session_explain", riskLevel: "observe" as const, description: "Explains redacted visual assistance session state." },
+    { name: "overlay.assistance_template_validate", riskLevel: "observe" as const, description: "Validates constrained visual assistance template metadata." },
+    { name: "overlay.assistance_template_preview", riskLevel: "observe" as const, description: "Previews literal-bound visual assistance template metadata." },
+    { name: "overlay.assistance_template_save", riskLevel: "low" as const, description: "Saves visual assistance template as draft metadata." },
+    { name: "overlay.assistance_template_get", riskLevel: "observe" as const, description: "Gets redacted visual assistance template metadata." },
+    { name: "overlay.assistance_template_list", riskLevel: "observe" as const, description: "Lists redacted visual assistance templates." },
+    { name: "overlay.assistance_template_archive", riskLevel: "low" as const, description: "Archives visual assistance template metadata." },
+    { name: "overlay.assistance_template_instantiate", riskLevel: "low" as const, description: "Creates draft visual assistance session from safe template metadata." },
     { name: "overlay.control_surface_show", riskLevel: "low" as const, description: "Shows one bounded visual assistance control surface." },
     { name: "overlay.control_surface_get", riskLevel: "observe" as const, description: "Gets redacted visual control surface state." },
     { name: "overlay.control_surface_update", riskLevel: "low" as const, description: "Refreshes visual control surface state." },

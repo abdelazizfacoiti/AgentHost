@@ -4,7 +4,7 @@ All callable tools return `ToolResult`. MCP transport is stdio. The browser brid
 
 ## Inventory and execution classes
 
-The server materializes one validated `ToolDefinition[]`. MCP `tools/list` and `system.list_capabilities` are projections of that same loaded set. The default set currently has 196 tools: 40 `read_only`, 3 `diagnostic`, 104 `metadata_only`, 25 `state_changing`, and 24 `visual_only`. No loaded tool currently uses the available `inert` class; inert/review-only records are materialized as `metadata_only` today.
+The server materializes one validated `ToolDefinition[]`. MCP `tools/list` and `system.list_capabilities` are projections of that same loaded set. The default set currently has 210 tools: 46 `read_only`, 3 `diagnostic`, 107 `metadata_only`, 25 `state_changing`, and 29 `visual_only`. No loaded tool currently uses the available `inert` class; inert/review-only records are materialized as `metadata_only` today.
 
 Each loaded definition has:
 
@@ -80,6 +80,12 @@ Manifest/review/artifact/registration/validation tools (`forge.validate_manifest
 `workflow.trace_*`, `workflow.skill_*`, checkpoint-template lifecycle tools, `workflow.skill_replay_dryrun`, and replay session/step tools are metadata-only or read-only governance. They store redacted records, prepare at most one current step, and never replay actions autonomously.
 
 Receipts are attached by the normal runner rather than exposed as a standalone action tool. They contain signed fingerprints and safe status metadata only. Replay apply requires a valid, fresh, unconsumed receipt and replay binding; checkpoints still determine semantic success.
+
+### Assistance previews and visual-flow templates
+
+`overlay.assistance_step_preview` and `overlay.assistance_session_explain` are `read_only`. They return bounded current-step, progress, waiting, renderer, target-freshness, blocker, and recommendation metadata. They never render, advance, allocate overlay IDs, resolve targets, or call another tool.
+
+`overlay.assistance_template_validate`, `overlay.assistance_template_preview`, `overlay.assistance_template_get`, and `overlay.assistance_template_list` are `read_only`. `overlay.assistance_template_save`, `overlay.assistance_template_archive`, and `overlay.assistance_template_instantiate` are `metadata_only`. Templates use existing visual step/primitive types, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders only. Unknown fields, executable text, expressions, shell/env/glob expansion, dynamic tool names, secret values, stale live IDs, and unsupported steps are rejected. Instantiation creates a draft assistance session only; it does not start, render, execute, grant permissions, or create confirmation tokens.
 
 ### Scheduler and manual-run governance
 
