@@ -87,6 +87,8 @@ Receipts are attached by the normal runner rather than exposed as a standalone a
 
 `overlay.assistance_template_validate`, `overlay.assistance_template_preview`, `overlay.assistance_template_get`, and `overlay.assistance_template_list` are `read_only`. `overlay.assistance_template_save`, `overlay.assistance_template_archive`, and `overlay.assistance_template_instantiate` are `metadata_only`. Templates use existing visual step/primitive types, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders only. Unknown fields, executable text, expressions, shell/env/glob expansion, dynamic tool names, secret values, stale live IDs, and unsupported steps are rejected. Instantiation creates a draft assistance session only; it does not start, render, execute, grant permissions, or create confirmation tokens.
 
+`overlay.assistance_target_refresh` is `visual_only`. It accepts `sessionId`, current `stepId`, and one typed target binding. Server context supplies ownership. Resolver validation checks target kind, bounds, sensitivity, and freshness. It changes visual session metadata only, never renders automatically, and is limited to two explicit refreshes per step. Target-bound steps declare `requiresTarget`; missing/stale required targets block `overlay.assistance_step_show` until refreshed. Static unbound primitives retain existing behavior.
+
 ### Scheduler and manual-run governance
 
 `scheduler.job_*`, activation tools, readiness/activation previews, manual-run contract tools, preflight tools, acknowledgement/request tools, request review/revocation tools, and approval validity/explanation tools are metadata-only. They may create local review records, but never create timers, workers, run sessions, replay sessions, notifications, files, or execution permission. Scheduler approval remains non-executable.
@@ -94,6 +96,8 @@ Receipts are attached by the normal runner rather than exposed as a standalone a
 ### Overlay renderer and visual-assistance sessions
 
 `overlay.get_capabilities`, renderer diagnostics/restart, primitives (`show_pointer`, `highlight_target`, `show_tooltip`, `show_widget`, `update`, `dismiss`, `clear`, `emergency_hide`), assistance-session tools, and `overlay.control_surface_show/get/update/hide/apply_event` are `visual_only` with no target-app external effect. Control surfaces bind one generic operator view to one trusted assistance session and expose only `continue`, `pause`, `resume`, `cancel`, `retry_visual_render`, `inspect_diagnostics`, `emergency_hide`, and `close_control_surface`. No `back` action exists. Events never invoke another tool. Renderer IDs are short-lived and invalid after restart; duplicate event IDs are rejected by a separate TTL replay ledger. GTK3/X11 is optional; headless fallback is safe; Wayland limitations are explicit.
+
+`npm run demo:visual-copilot` is explicit local demonstration command, not MCP capability. It uses same stores and renderer boundary, prompts for every operator decision, prints redacted diagnostics, and exits safely when GUI dependencies are unavailable.
 
 ## Optional adapters
 

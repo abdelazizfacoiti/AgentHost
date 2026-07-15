@@ -30,6 +30,9 @@ Build on `packages/app-overlay`, renderer diagnostics/setup, target grounding, b
 - renderer/setup diagnostics;
 - reviewable visual flow templates;
 - explicit fallback and Wayland guidance.
+- deterministic Build Week demo launcher and public visual fixture;
+- bounded current-step target refresh and stale-target recovery;
+- human-readable visual state/recovery projections.
 
 ### Exclusions and risk
 
@@ -37,7 +40,7 @@ Overlay events and control-surface actions must not trigger target-app actions, 
 
 ### Done
 
-An operator can inspect renderer/session health, preview the next safe visual step, explain session state, and create draft visual-assistance sessions from bounded templates with no hidden target-app execution. Milestone A Workstreams A1 and A2 are complete. A3 remains pending.
+An operator can inspect renderer/session health, preview the next safe visual step, explain session state, create draft visual-assistance sessions from bounded templates, and run deterministic local Visual Copilot demo with no hidden target-app execution. Milestone A Workstreams A1, A2, and A3 are complete.
 
 ## Milestone B — Adaptive Capability System
 

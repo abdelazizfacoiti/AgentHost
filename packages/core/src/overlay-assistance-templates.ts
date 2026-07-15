@@ -5,7 +5,7 @@ import {
   type OverlaySensitivity,
   type OverlayTargetBinding
 } from "./overlay.js";
-import type { OverlayAssistanceEventName, OverlayAssistanceSessionStatus, OverlayAssistanceStep, OverlayAssistanceStepType } from "./overlay-assistance.js";
+import type { OverlayAssistanceEventName, OverlayAssistanceRecoverySummary, OverlayAssistanceSessionStatus, OverlayAssistanceStep, OverlayAssistanceStepType } from "./overlay-assistance.js";
 
 export type OverlayAssistanceTemplateStatus = "draft" | "active" | "archived";
 export type OverlayAssistanceTemplateParameterType = "string" | "number" | "boolean";
@@ -40,6 +40,7 @@ export interface OverlayAssistanceTemplateStep {
   widgetTitle?: string;
   widgetButtons?: OverlayAssistanceTemplateWidgetButton[];
   targetPlaceholderId?: string;
+  requiresTarget?: boolean;
   expectedEvent?: Exclude<OverlayAssistanceEventName, "back">;
   requiresEvent?: boolean;
   progressGroup?: string;
@@ -82,6 +83,7 @@ export interface OverlayAssistanceStepPreview {
   expectedEvent?: OverlayAssistanceEventName;
   blockers: string[];
   warnings: string[];
+  recovery: OverlayAssistanceRecoverySummary;
   recommendedAction: string;
   terminal: boolean;
 }
@@ -100,6 +102,7 @@ export interface OverlayAssistanceSessionExplanation {
   blockers: string[];
   warnings: string[];
   requiredGrantIds: string[];
+  recovery: OverlayAssistanceRecoverySummary;
   recommendedAction: string;
   terminalExplanation?: string;
 }
@@ -185,7 +188,7 @@ export function validateOverlayAssistanceTemplate(template: unknown, now = Date.
     const step = steps[index];
     if (step === null || typeof step !== "object") { errors.push("overlay_template_step_invalid"); continue; }
     const item = step as Record<string, unknown>;
-    errors.push(...unknownKeys(item, ["stepId", "index", "type", "sensitivity", "primitiveType", "label", "description", "widgetTitle", "widgetButtons", "targetPlaceholderId", "expectedEvent", "requiresEvent", "progressGroup", "warningCodes", "durationMs", "animation"]).map(() => "overlay_template_unknown_field"));
+    errors.push(...unknownKeys(item, ["stepId", "index", "type", "sensitivity", "primitiveType", "label", "description", "widgetTitle", "widgetButtons", "targetPlaceholderId", "requiresTarget", "expectedEvent", "requiresEvent", "progressGroup", "warningCodes", "durationMs", "animation"]).map(() => "overlay_template_unknown_field"));
     if (typeof item.stepId !== "string" || !identifier.test(item.stepId) || stepIds.has(item.stepId)) errors.push("overlay_template_step_id_invalid");
     if (typeof item.stepId === "string") stepIds.add(item.stepId);
     if (item.index !== index || !stepTypes.has(item.type as OverlayAssistanceStepType)) errors.push("overlay_template_step_type_invalid");
@@ -204,6 +207,7 @@ export function validateOverlayAssistanceTemplate(template: unknown, now = Date.
       }
     }
     if (item.targetPlaceholderId !== undefined && (typeof item.targetPlaceholderId !== "string" || !placeholderIds.has(item.targetPlaceholderId))) errors.push("overlay_template_target_placeholder_invalid");
+    if (item.requiresTarget !== undefined && typeof item.requiresTarget !== "boolean") errors.push("overlay_template_requires_target_invalid");
     if (item.expectedEvent !== undefined && !eventNames.has(item.expectedEvent as OverlayAssistanceEventName)) errors.push("overlay_template_expected_event_invalid");
     if (item.requiresEvent !== undefined && typeof item.requiresEvent !== "boolean") errors.push("overlay_template_requires_event_invalid");
     if (item.progressGroup !== undefined && (typeof item.progressGroup !== "string" || item.progressGroup.length > 100)) errors.push("overlay_template_progress_group_invalid");
@@ -264,7 +268,7 @@ export function bindOverlayAssistanceTemplate(template: OverlayAssistanceTemplat
     const target = step.targetPlaceholderId === undefined ? undefined : targetBindings[step.targetPlaceholderId];
     const primitive = step.primitiveType === undefined ? undefined : { type: step.primitiveType, sensitivity, ...(label === undefined ? {} : { label, text: interpolate(step.description, bound) }), ...(target === undefined ? {} : { target }), ...(step.durationMs === undefined ? {} : { ttlMs: step.durationMs }), ...(step.animation === undefined ? {} : { animation: step.animation }) };
     const widget = step.type === "widget" ? { title: interpolate(step.widgetTitle, bound) ?? label ?? "Visual assistance", sensitivity, components: (step.widgetButtons ?? []).map((button) => ({ type: "button" as const, label: interpolate(button.label, bound) ?? "Continue", event: button.event })), ...(target === undefined ? {} : { target }), ...(step.durationMs === undefined ? {} : { ttlMs: step.durationMs }), ...(step.animation === undefined ? {} : { animation: step.animation }) } : undefined;
-    return { stepId: step.stepId, index: step.index, type: step.type, ...(primitive === undefined ? {} : { primitive }), ...(widget === undefined ? {} : { widget }), ...(target === undefined ? {} : { target }), ...(step.requiresEvent === undefined ? {} : { requiresEvent: step.requiresEvent }), ...(step.expectedEvent === undefined ? {} : { expectedEvent: step.expectedEvent }), ...(step.progressGroup === undefined ? {} : { progressGroup: step.progressGroup }), ...(step.warningCodes === undefined ? {} : { warningCodes: step.warningCodes.slice(0, 10) }), ...(step.durationMs === undefined ? {} : { durationMs: step.durationMs }), ...(step.animation === undefined ? {} : { animation: step.animation }) } as OverlayAssistanceStep;
+    return { stepId: step.stepId, index: step.index, type: step.type, ...(primitive === undefined ? {} : { primitive }), ...(widget === undefined ? {} : { widget }), ...(target === undefined ? {} : { target }), ...(step.requiresTarget === undefined ? {} : { requiresTarget: step.requiresTarget }), ...(step.requiresEvent === undefined ? {} : { requiresEvent: step.requiresEvent }), ...(step.expectedEvent === undefined ? {} : { expectedEvent: step.expectedEvent }), ...(step.progressGroup === undefined ? {} : { progressGroup: step.progressGroup }), ...(step.warningCodes === undefined ? {} : { warningCodes: step.warningCodes.slice(0, 10) }), ...(step.durationMs === undefined ? {} : { durationMs: step.durationMs }), ...(step.animation === undefined ? {} : { animation: step.animation }) } as OverlayAssistanceStep;
   });
   return { errors: [...new Set(errors)], steps, redactionCounts };
 }

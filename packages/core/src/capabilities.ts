@@ -138,6 +138,7 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "overlay.assistance_session_pause", riskLevel: "low" as const, description: "Pauses visual assistance and clears owned overlays." },
     { name: "overlay.assistance_session_cancel", riskLevel: "low" as const, description: "Cancels visual assistance and clears owned overlays." },
     { name: "overlay.assistance_session_complete", riskLevel: "low" as const, description: "Completes fully advanced visual assistance session." },
+    { name: "overlay.assistance_target_refresh", riskLevel: "low" as const, description: "Revalidates one current visual assistance target without rendering or target-app execution." },
     { name: "overlay.assistance_step_preview", riskLevel: "observe" as const, description: "Previews current visual assistance step without rendering or advancing." },
     { name: "overlay.assistance_session_explain", riskLevel: "observe" as const, description: "Explains redacted visual assistance session state." },
     { name: "overlay.assistance_template_validate", riskLevel: "observe" as const, description: "Validates constrained visual assistance template metadata." },
