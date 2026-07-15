@@ -56,6 +56,8 @@ Overlay primitives, the GTK/X11 renderer, bounded widgets, visual-assistance ses
 
 Read-only assistance projections (`overlay.assistance_step_preview` and `overlay.assistance_session_explain`) expose current-step, waiting, renderer, target-freshness, progress, and blocker summaries without rendering or mutating sessions. Visual-flow templates are constrained metadata records: existing visual primitives/widgets only, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders. Template preview is read-only; save/archive/instantiate are metadata-only; instantiation creates draft assistance metadata and never starts or renders a session.
 
+Milestone A3 supplies one demo-ready local Visual Copilot flow. It uses public fixture text, explicit operator prompts, a safe display-local target, bounded stale-target recovery, and visible completion. `overlay.assistance_target_refresh` revalidates only current-step visual binding; it never invokes browser, desktop, accessibility, file, shell, Forge, workflow, or scheduler tools. Demo launcher falls back to headless state when GTK3/X11 is unavailable and never installs dependencies.
+
 ### Metadata-only, inert, or review-only
 
 Workflow traces and skills, checkpoint-template lifecycle, replay planning/session governance, scheduler jobs and activation/manual-run records, receipts, and Forge manifest/artifact/registration metadata are records and reviews. They do not create autonomous execution. Generated capabilities remain absent from the live MCP tool array.

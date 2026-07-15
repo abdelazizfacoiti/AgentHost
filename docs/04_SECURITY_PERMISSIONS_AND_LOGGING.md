@@ -91,6 +91,10 @@ Assistance step previews and session explanations are read-only projections. The
 
 Visual-flow templates are owner-scoped local metadata. Only existing visual primitives/widgets, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders are accepted. Expressions, callbacks, shell/code, environment or glob expansion, dynamic tool names, retries, autonomy, secret values, raw private values, stale live IDs, and executable fields are rejected. Private bindings require existing grants and are redacted; secrets never persist. Template preview writes nothing. Save/archive/instantiate are metadata-only, and instantiation creates a draft session without starting or rendering it.
 
+### Demo and target-recovery safety
+
+The A3 demo uses public fixture text and validated local screen point only. Operator prompts gate start, target binding, continue, retry, and completion. No target-app tool, grant, confirmation token, or autonomous loop is reachable from launcher. `overlay.assistance_target_refresh` validates current-step ownership, kind, bounds, sensitivity, and TTL; two explicit refreshes maximum. Stale target or renderer epoch invalidates trust and requires explicit recovery. Headless/Wayland fallback reports limitation instead of claiming unsupported coordinates. Demo diagnostics omit private content, screenshots, fingerprints, tokens, and unrelated paths.
+
 ## Scheduler governance safety
 
 Jobs, activation, manual-run contracts, preflights, acknowledgements, requests, reviews, expiry, and staleness records are metadata-only. They cannot create timers, workers, run sessions, replay sessions, files, notifications, messages, or confirmation tokens. Approval records do not authorize execution. Any future worker must revalidate policy, grants, readiness, dry-run, confirmation, receipts, checkpoints, cancellation, and stop-on-failure at run time.

@@ -70,6 +70,7 @@ describe("CapabilityRegistry", () => {
       "overlay.assistance_session_pause",
       "overlay.assistance_session_cancel",
       "overlay.assistance_session_complete",
+      "overlay.assistance_target_refresh",
       "overlay.assistance_step_preview",
       "overlay.assistance_session_explain",
       "overlay.assistance_template_validate",

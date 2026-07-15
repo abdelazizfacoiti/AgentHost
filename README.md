@@ -95,6 +95,17 @@ Visual assistance control surface tools (`overlay.control_surface_show/get/updat
 
 A2 assistance tools (`overlay.assistance_step_preview`, `overlay.assistance_session_explain`, and `overlay.assistance_template_*`) expose bounded read-only projections and draft-only visual template metadata. Templates allow existing visual primitives, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders. Preview never renders or advances. Instantiation creates a ready/draft assistance session only; it never starts, renders, invokes target tools, creates grants, or creates confirmation tokens.
 
+Milestone A3 adds deterministic local Visual Copilot demo:
+
+```bash
+npm run build
+npm run demo:visual-copilot
+```
+
+Demo uses public fixture data, explicit operator prompts, safe local screen-point grounding, bounded stale-target recovery, and terminal completion. It never controls target applications. `--diagnose` prints renderer/session guidance; `--headless` is safe for CI; `--require-gui` fails clearly when GTK3/X11 is unavailable. `overlay.assistance_target_refresh` revalidates only current visual target, with two explicit refreshes maximum per step. No automatic retry exists.
+
+Build Week walkthrough, setup, limitations, and video outline: [BUILD_WEEK.md](BUILD_WEEK.md).
+
 ## Forge runtime
 
 Forge executes only bounded `runtime/handler.json` JSON operations through a fixed child runner. Generated JavaScript/Python is never imported. Default sandbox mode is `auto`: Bubblewrap is used only when safely available; otherwise the fixed runner remains active with a limitation warning. `firejail` and `unshare` are currently detection-only and fail closed when explicitly requested.

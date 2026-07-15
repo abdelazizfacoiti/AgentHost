@@ -79,6 +79,10 @@ GTK3/X11 supports transparent/topmost/click-through overlays and bounded widgets
 
 `overlay.assistance_template_*` uses `overlays/assistance-templates/`. Templates contain only allowlisted visual step metadata, declared scalar parameters, literal `{{parameterName}}` placeholders, and typed target placeholders. Save/archive/instantiate change local metadata only. Instantiation validates bindings and creates a draft assistance session; it never starts, renders, or executes it. Records are atomic, owner-isolated, bounded, and redacted.
 
+`overlay.assistance_target_refresh` is visual-only recovery boundary. It accepts no owner identity, validates only current step through existing target resolver, enforces TTL/bounds/sensitivity, and permits at most two explicit refreshes per step. Target-bound steps opt into required-target blocking; static unbound primitives retain existing behavior. Missing or stale required targets fail before renderer invocation. Renderer epoch changes invalidate overlay IDs; operator must explicitly re-show/retry. Recovery state derives from preview/explanation metadata.
+
+`npm run demo:visual-copilot` runs production assistance/control-surface stores against public fixture in isolated demo home. Prompts gate start, target binding, events, retry, and completion. It performs no target-app operation and uses headless fallback when graphical support is absent.
+
 ## Forge runtime boundary
 
 Forge artifacts remain inert until review, validation, registration, runtime eligibility, and grants pass. Runtime execution is only the fixed `runtime/handler.json` JSON contract in a child process. Generated JavaScript/Python is not imported.
