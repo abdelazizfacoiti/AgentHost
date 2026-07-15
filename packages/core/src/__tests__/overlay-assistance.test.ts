@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateOverlayAssistanceEvent, validateOverlayAssistanceSteps, type OverlayAssistanceStep } from "../index.js";
+import { validateOverlayAssistanceEvent, validateOverlayAssistanceSteps, validateOverlayControlSurfaceEvent, type OverlayAssistanceStep } from "../index.js";
 
 const expiresAt = new Date(Date.now() + 20_000).toISOString();
 const pointer: OverlayAssistanceStep = { stepId: "step-1", index: 0, type: "pointer", primitive: { type: "pointer", sensitivity: "public" } };
@@ -18,5 +18,11 @@ describe("overlay assistance validation", () => {
   it("rejects stale, unknown, or unbound events", () => {
     expect(validateOverlayAssistanceEvent({ eventId: "event-1", sessionId: "assist-1", stepId: "step-1", event: "next", createdAt: new Date(Date.now() - 120_000).toISOString(), ownerSessionId: "owner" })).toContain("assistance_event_stale");
     expect(validateOverlayAssistanceEvent({ eventId: "event-1", sessionId: "assist-1", stepId: "step-1", event: "bad" as never, createdAt: expiresAt, ownerSessionId: "owner" })).toContain("assistance_event_not_allowed");
+  });
+
+  it("allows only strict control-surface actions", () => {
+    const base = { eventId: "event-1", controlSurfaceId: "surface-1", assistanceSessionId: "assist-1", overlayId: "overlay-1", createdAt: new Date().toISOString(), ownerSessionId: "owner" };
+    expect(validateOverlayControlSurfaceEvent({ ...base, action: "pause" })).toEqual([]);
+    expect(validateOverlayControlSurfaceEvent({ ...base, action: "back" as never })).toContain("control_surface_action_not_allowed");
   });
 });

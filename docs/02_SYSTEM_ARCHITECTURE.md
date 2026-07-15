@@ -34,7 +34,7 @@ Firefox/Chromium unpacked extension and fixed localhost bridge. It exposes sanit
 
 ### `packages/app-overlay`
 
-Headless renderer plus optional GTK3/X11 renderer child. Renderer commands use bounded authenticated JSONL IPC. Overlay state, targets, widgets, animation, interaction events, health, restart, fallback, and emergency-hide are handled here.
+Headless renderer plus optional GTK3/X11 renderer child. Renderer commands use bounded authenticated JSONL IPC. Overlay state, targets, widgets, animation, interaction events, health, restart, fallback, emergency-hide, and generic operator control surfaces are handled here. Control-surface state is kept in `packages/mcp-server` and binds only to trusted server session ownership.
 
 ### Optional adapters
 
@@ -109,6 +109,8 @@ Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, 
   workflows/
     traces/ skills/ checkpoint-template-reviews/ replay-sessions/
   overlays/assistance-sessions/
+  overlays/control-surfaces/
+  overlays/control-surface-event-ledger/
   scheduler/
     jobs/ reviews/ activations/ activation-reviews/
     manual-run-contracts/ manual-run-reviews/ manual-run-preflights/

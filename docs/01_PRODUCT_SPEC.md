@@ -52,7 +52,7 @@ All state-changing execution remains subject to schema validation, execution met
 
 ### Visual-only
 
-Overlay primitives, the GTK/X11 renderer, bounded widgets, visual-assistance sessions, overlay events, and `overlay.emergency_hide` are visual/session state only. They never click, type, navigate, or invoke another AgentHost tool. Emergency hide affects AgentHost-owned overlays only; it is not a global circuit breaker.
+Overlay primitives, the GTK/X11 renderer, bounded widgets, visual-assistance sessions, operator control surfaces, overlay events, and `overlay.emergency_hide` are visual/session state only. They never click, type, navigate, or invoke another AgentHost tool. Control surfaces are one-per-owned-assistance-session, expose strict local operator intents, and report current step/progress, blockers, warnings, and renderer health. Emergency hide affects AgentHost-owned overlays only; it is not a global circuit breaker.
 
 ### Metadata-only, inert, or review-only
 

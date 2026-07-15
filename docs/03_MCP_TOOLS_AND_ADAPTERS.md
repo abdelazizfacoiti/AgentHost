@@ -87,7 +87,7 @@ Receipts are attached by the normal runner rather than exposed as a standalone a
 
 ### Overlay renderer and visual-assistance sessions
 
-`overlay.get_capabilities`, renderer diagnostics/restart, primitives (`show_pointer`, `highlight_target`, `show_tooltip`, `show_widget`, `update`, `dismiss`, `clear`, `emergency_hide`), and assistance-session tools are `visual_only` with no target-app external effect. They may render AgentHost-owned visuals and record bounded operator intent. Events never invoke another tool. GTK3/X11 is optional; headless fallback is safe; Wayland limitations are explicit.
+`overlay.get_capabilities`, renderer diagnostics/restart, primitives (`show_pointer`, `highlight_target`, `show_tooltip`, `show_widget`, `update`, `dismiss`, `clear`, `emergency_hide`), assistance-session tools, and `overlay.control_surface_show/get/update/hide/apply_event` are `visual_only` with no target-app external effect. Control surfaces bind one generic operator view to one trusted assistance session and expose only `continue`, `pause`, `resume`, `cancel`, `retry_visual_render`, `inspect_diagnostics`, `emergency_hide`, and `close_control_surface`. No `back` action exists. Events never invoke another tool. Renderer IDs are short-lived and invalid after restart; duplicate event IDs are rejected by a separate TTL replay ledger. GTK3/X11 is optional; headless fallback is safe; Wayland limitations are explicit.
 
 ## Optional adapters
 

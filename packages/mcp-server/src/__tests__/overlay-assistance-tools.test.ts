@@ -29,7 +29,7 @@ describe("overlay assistance tools", () => {
     const shown = await call(value, "overlay.assistance_step_show", { sessionId });
     expect(shown).toMatchObject({ ok: true, data: { status: "waiting_for_operator" } });
     const overlayId = (shown.data as { currentOverlayId: string }).currentOverlayId;
-    expect(await call(value, "overlay.assistance_step_apply_event", { sessionId, stepId: "step-2", overlayId, eventId: "event-1", event: "accepted", createdAt: new Date().toISOString(), ownerSessionId: "assistance-test" })).toMatchObject({ ok: true });
+    expect(await call(value, "overlay.assistance_step_apply_event", { sessionId, stepId: "step-2", overlayId, eventId: "event-1", event: "accepted", createdAt: new Date().toISOString() })).toMatchObject({ ok: true });
     expect(await call(value, "overlay.assistance_step_advance", { sessionId })).toMatchObject({ ok: true, data: { status: "completed" } });
     expect(await call(value, "overlay.assistance_session_get", { sessionId })).toMatchObject({ ok: true, data: { status: "completed", ephemeralMaterialAvailable: true } });
   });
@@ -38,7 +38,7 @@ describe("overlay assistance tools", () => {
     const value = context(); await value.overlayAssistance?.ensureStructure();
     const created = await call(value, "overlay.assistance_session_create", { name: "event flow", steps: [{ stepId: "step-1", index: 0, type: "wait_for_event", requiresEvent: true, widget: { title: "Ack", sensitivity: "public", interaction: { interactive: true, focus: "never", dismissible: true, allowedEvents: ["accepted"] }, components: [{ type: "button", label: "Ack", event: "accepted" }] } }] });
     const sessionId = (created.data as { sessionId: string }).sessionId; await call(value, "overlay.assistance_session_start", { sessionId }); await call(value, "overlay.assistance_step_show", { sessionId });
-    expect(await call(value, "overlay.assistance_step_apply_event", { sessionId, stepId: "wrong", eventId: "event-1", event: "accepted", createdAt: new Date().toISOString(), ownerSessionId: "assistance-test" })).toMatchObject({ ok: false, error: { code: "assistance_event_mismatch" } });
+    expect(await call(value, "overlay.assistance_step_apply_event", { sessionId, stepId: "wrong", eventId: "event-1", event: "accepted", createdAt: new Date().toISOString() })).toMatchObject({ ok: false, error: { code: "assistance_event_mismatch" } });
     expect(await call(value, "overlay.assistance_session_cancel", { sessionId })).toMatchObject({ ok: true, data: { status: "cancelled" } });
     expect((await value.overlay?.state())?.overlays).toHaveLength(0);
     expect(await call(value, "overlay.assistance_step_show", { sessionId })).toMatchObject({ ok: false, error: { code: "assistance_session_cancelled" } });

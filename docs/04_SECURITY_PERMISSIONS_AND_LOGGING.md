@@ -81,6 +81,8 @@ Blender is the reference optional adapter, not a core feature. When explicitly e
 
 Overlay targets are fresh, owner/session-bound, sensitivity-checked, and TTL-limited. Widgets accept only allowlisted intent events. Events update overlay/session state only and never invoke another tool. The GTK child uses authenticated bounded JSONL IPC, filtered environment, handshake validation, crash detection, bounded restart, and headless fallback.
 
+Control surfaces derive ownership from trusted MCP server context; MCP input cannot supply `ownerSessionId`. One surface exists per valid assistance session. Event IDs use a separate TTL-bound replay ledger, and event routing validates session, surface, overlay binding, renderer epoch, action enum, and freshness. Persisted records contain only redacted status, progress, diagnostics, IDs, and safe reason codes. Live overlay IDs never survive renderer restart.
+
 `overlay.emergency_hide` hides AgentHost-owned overlays and clears owned visual state. It is not a global AgentHost process circuit breaker, does not kill target apps, and does not undo prior external actions.
 
 ## Scheduler governance safety

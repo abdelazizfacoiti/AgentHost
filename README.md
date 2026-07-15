@@ -14,6 +14,7 @@ The Linux-first runtime currently provides:
 - Tool Forge review, bounded JSON runtime dispatch, capability grants, and optional OS sandboxing;
 - redacted workflow traces, skills, checkpoint templates, receipts, and one-step replay governance;
 - visual-only GTK3/X11/headless overlays and bounded assistance sessions;
+- operator-facing visual control surfaces with trusted ownership, bounded events, replay protection, and renderer-health summaries;
 - review-only scheduler jobs, activation, preflight, acknowledgement, manual-run, approval, expiry, and staleness governance.
 
 State-changing tools remain policy/grant/dry-run/confirmation gated. Overlay and assistance tools are visual-only. Workflow replay and scheduler records are metadata-only and non-executable. Generated Forge tools are not independent live MCP tools. Blender is experimental, optional, and disabled by default.
@@ -88,6 +89,8 @@ npm run demo:overlay
 ```
 
 Use `overlay.renderer_status`, `overlay.renderer_diagnose`, and `overlay.renderer_setup_instructions` for diagnostics. AgentHost does not install GTK/PyGObject dependencies or request privilege escalation. Wayland limitations are reported honestly; headless fallback remains available.
+
+Visual assistance control surface tools (`overlay.control_surface_show/get/update/hide/apply_event`) manage one generic operator surface per owned assistance session. They change only AgentHost visual/session state. They never click, type, navigate, move the real pointer, invoke another tool, create confirmation tokens, or grant permissions. Renderer-bound overlay IDs are ephemeral and must be reacquired after restart.
 
 ## Forge runtime
 

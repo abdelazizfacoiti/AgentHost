@@ -1,4 +1,4 @@
-import type { OverlayAnimation, OverlayPrimitive, OverlaySensitivity, OverlayTargetBinding, OverlayWidget } from "./overlay.js";
+import type { OverlayAnimation, OverlayControlSurfaceAction, OverlayPrimitive, OverlaySensitivity, OverlayTargetBinding, OverlayWidget, OverlayRendererStatus } from "./overlay.js";
 
 export type OverlayAssistanceSessionStatus = "draft" | "ready" | "active" | "waiting_for_operator" | "paused" | "completed" | "cancelled" | "blocked" | "expired";
 export type OverlayAssistanceStepType = "pointer" | "highlight" | "tooltip" | "widget" | "instruction" | "warning" | "progress" | "checkpoint_result" | "wait_for_event" | "clear" | "finish";
@@ -10,12 +10,19 @@ export interface OverlayAssistanceStep { stepId: string; index: number; type: Ov
 export interface OverlayAssistanceEvent { eventId: string; sessionId: string; stepId: string; overlayId?: string; event: OverlayAssistanceEventName; createdAt: string; ownerSessionId: string; }
 export interface OverlayAssistanceSession { sessionId: string; ownerSessionId: string; name: string; status: OverlayAssistanceSessionStatus; createdAt: string; updatedAt: string; expiresAt: string; currentStepIndex: number; currentOverlayId?: string; steps: OverlayAssistanceStep[]; transitions: OverlayAssistanceTransition[]; lastEvent?: OverlayAssistanceEvent; checkpointSummaries: OverlayAssistanceCheckpointSummary[]; progress: { completed: number; total: number; percent: number }; blockers: string[]; warnings: string[]; ephemeralMaterialAvailable: boolean; }
 
+export type OverlayControlSurfaceStatus = "visible" | "hidden" | "stale" | "closed";
+export interface OverlayControlSurfaceRendererHealth { rendererStatus: OverlayRendererStatus; effectiveBackend: string; sessionType: "x11" | "wayland" | "unknown"; childState?: string; handshake?: string; activeOverlayCount?: number; fallbackReason?: string; }
+export interface OverlayControlSurfaceEventSummary { eventId: string; action: OverlayControlSurfaceAction; createdAt: string; outcome: "accepted" | "rejected" | "replayed"; reason?: string; }
+export interface OverlayControlSurface { controlSurfaceId: string; assistanceSessionId: string; status: OverlayControlSurfaceStatus; createdAt: string; updatedAt: string; expiresAt: string; assistanceStatus: OverlayAssistanceSessionStatus; currentStepIndex: number; progress: { completed: number; total: number; percent: number }; rendererHealth: OverlayControlSurfaceRendererHealth; blockers: string[]; warnings: string[]; recommendedActions: OverlayControlSurfaceAction[]; recentEvents: OverlayControlSurfaceEventSummary[]; bindingState: "bound" | "unbound" | "stale"; }
+export interface OverlayControlSurfaceEvent { eventId: string; controlSurfaceId: string; assistanceSessionId: string; overlayId: string; action: OverlayControlSurfaceAction; createdAt: string; ownerSessionId: string; }
+
 export const OVERLAY_ASSISTANCE_MAX_STEPS = 50;
 export const OVERLAY_ASSISTANCE_MAX_ACTIVE_OVERLAYS = 10;
 export const OVERLAY_ASSISTANCE_MAX_TTL_MS = 30 * 60 * 1000;
 export const OVERLAY_ASSISTANCE_EVENT_TTL_MS = 60 * 1000;
 
 const events = new Set<OverlayAssistanceEventName>(["accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested"]);
+const controlSurfaceActions = new Set<OverlayControlSurfaceAction>(["continue", "pause", "resume", "cancel", "retry_visual_render", "inspect_diagnostics", "emergency_hide", "close_control_surface"]);
 const stepTypes = new Set<OverlayAssistanceStepType>(["pointer", "highlight", "tooltip", "widget", "instruction", "warning", "progress", "checkpoint_result", "wait_for_event", "clear", "finish"]);
 
 export function validateOverlayAssistanceEvent(event: OverlayAssistanceEvent, now = Date.now()): string[] {
@@ -27,6 +34,18 @@ export function validateOverlayAssistanceEvent(event: OverlayAssistanceEvent, no
   if (!Number.isFinite(created) || created > now + 5_000 || now - created > OVERLAY_ASSISTANCE_EVENT_TTL_MS) errors.push("assistance_event_stale");
   return [...new Set(errors)];
 }
+
+export function validateOverlayControlSurfaceEvent(event: OverlayControlSurfaceEvent, now = Date.now()): string[] {
+  const errors: string[] = [];
+  if (!event || typeof event !== "object") return ["control_surface_event_invalid"];
+  if (!event.eventId || !event.controlSurfaceId || !event.assistanceSessionId || !event.overlayId || !event.ownerSessionId) errors.push("control_surface_event_identity_invalid");
+  if (!controlSurfaceActions.has(event.action)) errors.push("control_surface_action_not_allowed");
+  const created = Date.parse(event.createdAt);
+  if (!Number.isFinite(created) || created > now + 5_000 || now - created > OVERLAY_ASSISTANCE_EVENT_TTL_MS) errors.push("control_surface_event_stale");
+  return [...new Set(errors)];
+}
+
+export function isOverlayControlSurfaceAction(value: string): value is OverlayControlSurfaceAction { return controlSurfaceActions.has(value as OverlayControlSurfaceAction); }
 
 export function validateOverlayAssistanceSteps(steps: OverlayAssistanceStep[], now = Date.now()): string[] {
   const errors: string[] = [];
