@@ -1977,6 +1977,8 @@ export interface ToolForgeSandboxStubOutput {
 
 export interface ToolForgeRuntimeRunRecord {
   runtimeRunId: string;
+  /** Trusted MCP owner context for session-scoped reporting; absent on legacy records. */
+  sessionId?: string;
   registrationId: string;
   artifactId: string;
   manifestId: string;

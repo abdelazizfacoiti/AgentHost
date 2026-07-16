@@ -122,4 +122,4 @@ AGENTHOST_CONTROL_ROOM_ENABLED=1 npm run start:mcp
 
 Open loopback URL printed to stderr. Verify dashboard shows real A1–A3 assistance records, renderer health, safe timeline events, and screenshot metadata with opaque IDs. Verify no raw screenshot/path/private text appears. Control Room is read-only: it cannot invoke tools, approve confirmations, grant permissions, replay, schedule, send, submit, upload, delete, pay, or control target applications.
 
-If listener startup fails, MCP remains usable and UI is unavailable; no fallback fabricates dashboard data. Close MCP and confirm loopback listener exits. `npm run control-room` starts same explicit local mode.
+If listener startup or optional Control Room import fails, MCP remains usable and UI is unavailable; no fallback fabricates dashboard data. Close MCP and confirm loopback listener exits. `npm run control-room` starts same explicit local mode. Session-bound projections remain owner-scoped; scheduler rows are inert metadata only.

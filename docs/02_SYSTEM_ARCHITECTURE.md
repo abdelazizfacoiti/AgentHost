@@ -139,7 +139,7 @@ The unpacked browser bundle is prepared separately under `~/AgentHost/browser-ex
 
 ## Control Room reporting boundary
 
-`packages/app-control-room` serves dependency-free static HTML over a same-process Node loopback listener. `mcp-server` supplies redacted projections from existing workflow, assistance, Forge, scheduler, overlay, browser, screenshot, and tool-activity records. Service is opt-in, binds only to `127.0.0.1`, uses per-process token, rejects non-local origins, caps queries/pagination, and exposes only GET reporting routes. No MCP execution route or target-application control path exists.
+`packages/app-control-room` serves dependency-free static HTML over a same-process Node loopback listener. `mcp-server` supplies redacted projections from existing workflow, assistance, Forge, scheduler metadata, overlay, browser, screenshot, and tool-activity records. Session-bound workflow, assistance, Forge, activity, and screenshot records are scoped to trusted MCP owner context; inert scheduler metadata is local AgentHost governance data. Service is opt-in, binds only to `127.0.0.1`, uses per-process token, rejects non-local origins, validates date/cursor queries, caps responses/pagination, and exposes only GET reporting routes. No MCP execution route or target-application control path exists.
 
 ## Platform and trust limitations
 

@@ -26,6 +26,10 @@ describe("ControlRoomServer", () => {
     expect((await get(43180, "/api/v1/dashboard", { authorization: "Bearer wrong", origin: "http://evil.invalid" })).status).toBe(403);
     expect((await get(43180, "/api/v1/dashboard", { authorization: "Bearer " + token, origin: "http://127.0.0.1:43180" })).status).toBe(200);
     expect((await get(43180, "/api/v1/dashboard", { authorization: "Bearer " + token, origin: "http://evil.invalid" })).status).toBe(403);
+    expect((await get(43180, "/api/v1/tasks?cursor=bad", { authorization: "Bearer " + token })).status).toBe(400);
+    expect((await get(43180, "/api/v1/tasks?from=not-a-date", { authorization: "Bearer " + token })).status).toBe(400);
+    expect((await get(43180, "/api/v1/tasks?limit=10000", { authorization: "Bearer " + token })).status).toBe(200);
     await server.close();
+    await expect(readFile(started.tokenFile, "utf8")).rejects.toThrow();
   });
 });
