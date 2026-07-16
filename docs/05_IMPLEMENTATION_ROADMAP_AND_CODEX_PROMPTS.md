@@ -63,6 +63,10 @@ Use the existing strategy order, app/adapter discovery, browser/accessibility/vi
 
 Persistent capability strategy registry and deterministic selection are complete. Built-in structural strategies, bounded local proposals/reviews, live prerequisite checks, Browser Bridge preference, bounded fallbacks, signed-receipt outcome verification, confidence/degradation, and redacted Control Room projection are implemented. Strategy selection remains advisory; no generic executor or autonomous fallback exists.
 
+### R3 status — complete
+
+Standard local speech is implemented Linux-first. eSpeak NG is preferred; Piper and Speech Dispatcher are optional detected providers. Provider/voice/device/routing discovery, bounded synthesis, opaque expiring artifacts, owned local playback/stop, and two-phase governed transmission are separate tools. No network TTS, installation, model download, recording, transcription, meeting adapter, route creation, or automatic recap exists. Transmission remains grant-, policy-, exact-target-, and confirmation-gated. R4 remains pending and is not started.
+
 ### Exclusions and risk
 
 No automatic generated-tool execution, arbitrary source execution, provider-specific core architecture, or autonomous fallback. Risk is accidental escalation from recommendation to execution.

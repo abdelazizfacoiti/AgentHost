@@ -38,6 +38,12 @@ The default loaded registry currently contains 223 tools with validated executio
 
 R2 adds persistent installation-level capability strategies. `strategy.select` ranks only compatible active records after live capability, profile, grant, adapter, and Browser Bridge health checks. It returns bounded advisory steps and fallbacks; it never executes an underlying tool. Built-in strategies are trusted structural metadata. Local proposals require review plus two independently verified signed-receipt outcomes before activation. Strategy records persist no task content, secrets, screenshots, OCR, transient IDs, shell, code, or dynamic tool names.
 
+## R3 local speech
+
+R3 adds provider-agnostic Linux local speech. Provider and voice discovery are offline/read-only; eSpeak NG is preferred when present, with optional Piper and Speech Dispatcher detection. Synthesis, artifact ownership, playback, stop, device diagnostics, routing diagnostics, and governed transmission are separate primitives. Audio artifacts are bounded, opaque, owner-scoped, expiring local resources. No cloud TTS, automatic installation, model download, microphone recording, transcription, meeting join, route creation, or written recap exists.
+
+Transmission uses two phases: preparation validates an existing route, artifact, target, grants, and limits; execution revalidates exact bindings and requires fresh confirmation. Communication, financial, credential/security, and admin contexts remain protected.
+
 The execution model also defines `inert`, but no currently loaded tool materializes with that class. Review-only and generated metadata are currently represented as `metadata_only`; `inert` remains available for future explicit definitions.
 
 ### Functional and executable when policy permits

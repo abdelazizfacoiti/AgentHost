@@ -62,6 +62,7 @@ export interface ControlRoomSources {
   overlay?: { diagnostics(): Promise<any> };
   browserBridge?: { status(): Record<string, unknown> };
   strategies?: { summary(): Promise<Record<string, unknown>> };
+  speech?: { capabilities?(): Promise<Record<string, unknown>>; projection?(ownerSessionId: string): Promise<Record<string, unknown>> };
 }
 
 export class ControlRoomStore {
@@ -181,7 +182,9 @@ export class ControlRoomStore {
     try { browser = this.#sources.browserBridge?.status(); } catch { browser = { state: "unavailable" }; }
     let strategies: Record<string, unknown> | undefined;
     try { strategies = this.#sources.strategies === undefined ? undefined : await this.#sources.strategies.summary(); } catch { strategies = { redacted: true, status: "unavailable" }; }
-    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(strategies === undefined ? {} : { strategies }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only."] };
+    let speech: Record<string, unknown> | undefined;
+    try { speech = this.#sources.speech === undefined ? undefined : this.#sources.speech.projection === undefined ? await this.#sources.speech.capabilities?.() : await this.#sources.speech.projection(this.#ownerSessionId ?? ""); } catch { speech = { redacted: true, status: "unavailable" }; }
+    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(strategies === undefined ? {} : { strategies }), ...(speech === undefined ? {} : { speech }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only.", "Speech projections contain provider, device, artifact, and routing metadata only."] };
   }
 
   async #buildTasks(from?: string, to?: string): Promise<ControlRoomTaskProjection[]> {

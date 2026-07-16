@@ -72,7 +72,7 @@ function builtin(input: { id: string; name: string; description: string; goal: C
     compatibleAgentHostRange: ">=0.1.0 <1.0.0",
     compatibleAdapterRanges: {},
     requiredCapabilities: input.available === false ? ["future_capability_unavailable"] : [],
-    prerequisiteChecks: input.family === "browser" ? ["browser_bridge_paired", "browser_extension_compatible"] : [],
+    prerequisiteChecks: input.family === "browser" ? ["browser_bridge_paired", "browser_extension_compatible"] : input.family === "speech" ? ["speech_provider_ready", "audio_route_ready"] : [],
     preferredSteps: input.steps,
     fallbackStrategyIds: input.fallbacks ?? [],
     verificationCheckpoints: input.checkpoints,
@@ -110,8 +110,8 @@ function builtins(): CapabilityStrategyDefinition[] {
     builtin({ id: "builtin.browser-bridge-recovery", name: "Browser Bridge recovery", description: "Diagnoses local browser pairing and reports bounded recovery guidance.", goal: "browser_bridge_recovery", family: "browser", steps: [step({ stepId: "diagnose", operation: "inspect_bridge", family: "browser", trustedTool: "browser.diagnose_bridge", result: "bridge_status", verification: "bridge_paired" })], checkpoints: ["bridge_paired"] }),
     builtin({ id: "builtin.meeting-observation", name: "Meeting observation", description: "Reports bounded meeting capability readiness without content extraction.", goal: "meeting_observation", family: "guide", steps: [step({ stepId: "guide", operation: "inspect_meeting_state", family: "guide", trustedTool: "guide.explain_strategy", result: "operator_guidance", verification: "manual_operator_check" })], checkpoints: ["manual_operator_check"] }),
     builtin({ id: "builtin.meeting-recap", name: "Meeting recap boundary", description: "Describes authorized recap prerequisites without storing meeting content.", goal: "meeting_recap", family: "guide", steps: [step({ stepId: "guide", operation: "prepare_recap", family: "guide", trustedTool: "guide.create_steps", result: "operator_guidance", verification: "meeting_source_authorized" })], checkpoints: ["meeting_source_authorized"] }),
-    builtin({ id: "builtin.local-tts", name: "Local TTS", description: "Describes local speech synthesis readiness when a provider is available.", goal: "local_tts", family: "speech_unavailable", steps: [step({ stepId: "tts", operation: "synthesize_local_audio", family: "speech_unavailable", result: "audio_artifact", verification: "audio_ready" })], checkpoints: ["audio_ready"], available: false }),
-    builtin({ id: "builtin.speech-output", name: "Approved speech output", description: "Describes speech output approval boundaries without transmission.", goal: "speech_output", family: "speech_unavailable", steps: [step({ stepId: "speech", operation: "prepare_speech_output", family: "speech_unavailable", result: "operator_guidance", verification: "manual_operator_check" })], checkpoints: ["manual_operator_check"], available: false })
+    builtin({ id: "builtin.local-tts", name: "Local TTS", description: "Selects local offline speech synthesis after provider health checks.", goal: "local_tts", family: "speech", steps: [step({ stepId: "providers", operation: "list_speech_providers", family: "speech", trustedTool: "speech.list_providers", result: "provider_status", verification: "provider_ready" }), step({ stepId: "voices", operation: "list_speech_voices", family: "speech", trustedTool: "speech.list_voices", result: "voice_list" }), step({ stepId: "tts", operation: "synthesize_local_audio", family: "speech", trustedTool: "speech.synthesize", result: "audio_artifact", verification: "audio_ready", stateChanging: true })], checkpoints: ["provider_ready", "audio_ready"] }),
+    builtin({ id: "builtin.speech-output", name: "Governed speech output", description: "Prepares and executes governed local audio transmission only after routing and confirmation checks.", goal: "speech_output", family: "speech", steps: [step({ stepId: "route", operation: "diagnose_audio_routing", family: "speech", trustedTool: "speech.routing_diagnose", result: "routing_status", verification: "routing_ready" }), step({ stepId: "prepare", operation: "prepare_audio_transmission", family: "speech", trustedTool: "speech.transmission_prepare", result: "transmission_preparation", verification: "transmission_prepared" }), step({ stepId: "execute", operation: "execute_audio_transmission", family: "speech", trustedTool: "speech.transmission_execute", result: "operator_guidance", stateChanging: true })], checkpoints: ["routing_ready", "transmission_prepared"] })
   ];
 }
 
@@ -131,7 +131,17 @@ export class CapabilityStrategyStore {
   async ensureStructure(): Promise<void> {
     await Promise.all([this.#definitions, this.#reviews, this.#outcomes, this.#selections].map((item) => mkdir(item, { recursive: true, mode: 0o700 })));
     for (const strategy of builtins()) {
-      if (await this.#exists(this.#definitionPath(strategy.strategyId))) continue;
+      const existingPath = this.#definitionPath(strategy.strategyId);
+      if (await this.#exists(existingPath)) {
+        try {
+          const existing = await readJson<CapabilityStrategyDefinition>(existingPath);
+          const legacySpeech = (existing.strategyId === "builtin.local-tts" || existing.strategyId === "builtin.speech-output") && existing.source === "built_in" && existing.preferredSteps.every((step) => step.capabilityFamily === "speech_unavailable");
+          if (!legacySpeech) continue;
+          validateCapabilityStrategy(strategy);
+          await saveJson(existingPath, strategy);
+        } catch { /* Leave corrupt or user-owned records untouched. */ }
+        continue;
+      }
       validateCapabilityStrategy(strategy);
       await saveJson(this.#definitionPath(strategy.strategyId), strategy);
     }

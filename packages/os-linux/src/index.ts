@@ -7,3 +7,4 @@ export * from "./shell.js";
 export * from "./sandbox-support.js";
 export * from "./system-info.js";
 export * from "./vision.js";
+export * from "./speech.js";

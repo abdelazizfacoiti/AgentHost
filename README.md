@@ -174,6 +174,12 @@ After building, point Codex at the compiled server:
 
 Control Room is optional, local, read-only runtime reporting. It shows redacted task projections, source-backed timelines, genuine screenshot metadata, and subsystem health. It cannot call MCP tools, approve confirmations, grant permissions, replay skills, run scheduler jobs, or control target applications.
 
+## Local speech (R3)
+
+AgentHost supports local/offline speech primitives. `speech.list_providers`, `speech.list_voices`, `speech.list_languages`, `speech.devices_list`, and `speech.routing_diagnose` perform read-only discovery. `speech.artifact_get`, `speech.playback_state`, and `speech.transmission_get` return owner-scoped metadata only. eSpeak NG is preferred when installed; Piper and Speech Dispatcher are detected only when already installed/configured. AgentHost never installs providers, downloads models, or uses cloud TTS.
+
+`speech.synthesize` creates a bounded owner-scoped local artifact after dry-run and confirmation. `speech.play` and `speech.stop` control only AgentHost-owned playback. `speech.transmission_prepare` validates an existing local default output route without transmitting; `speech.transmission_execute` requires fresh grants, exact preparation/artifact/route/target binding, policy approval, and one-time confirmation. Arbitrary device routing and route creation are unsupported. No meeting adapter, recording, transcription, automatic recap, or message sending is included.
+
 Enable explicitly:
 
 ```bash

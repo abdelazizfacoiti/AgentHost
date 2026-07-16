@@ -103,6 +103,9 @@ import { ControlRoomStore } from "./control-room-store.js";
 import { CapabilityStrategyStore } from "./capability-strategy-store.js";
 import { CapabilityStrategyService } from "./capability-strategy-service.js";
 import { createCapabilityStrategyTools } from "./tools/capability-strategy.js";
+import { SpeechStore } from "./speech-store.js";
+import { SpeechService } from "./speech-service.js";
+import { createSpeechTools } from "./tools/speech.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -184,6 +187,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const strategyStore = new CapabilityStrategyStore(config.agentHostDir);
   await strategyStore.ensureStructure();
   const strategyService = new CapabilityStrategyService(strategyStore);
+  const speechStore = new SpeechStore(config.agentHostDir);
+  await speechStore.ensureStructure();
   const scheduler = new SchedulerStore(config.agentHostDir);
   await scheduler.ensureStructure();
   const receipts = new ToolReceiptManager();
@@ -204,7 +209,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     : undefined;
   if (browserBridge !== undefined) await browserBridge.start();
   const browser = options.browser ?? createBrowserAdapter(browserBridge!);
-  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
+  let speechService: SpeechService | undefined;
+  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, speech: { capabilities: async () => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.capabilities() as unknown as Record<string, unknown>, projection: async (ownerSessionId) => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.projection(ownerSessionId) }, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
   await controlRoomStore.ensureStructure();
   const linux: LinuxAutomation =
     options.linux ?? {
@@ -243,6 +249,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       focusAccessibilityElement: (input) =>
         focusLinuxAccessibilityElement(input, { agentHostDir: config.agentHostDir })
     };
+  speechService = new SpeechService(config, speechStore, linux);
+  const speech = speechService;
   const context: AgentHostMcpContext = {
     sessionId,
     config,
@@ -265,6 +273,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     controlRoom: controlRoomStore,
     strategyStore,
     strategyService,
+    speech,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux
   };
@@ -291,6 +300,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createOverlayControlSurfaceTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),
+    ...createSpeechTools(),
     ...createAdapterTools(),
     ...(blenderEnabled ? createBlenderTools() : []),
     ...createAppTools(),

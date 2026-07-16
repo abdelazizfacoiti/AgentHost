@@ -54,6 +54,7 @@ import type { OverlayControlSurfaceStore } from "./overlay-control-surface-store
 import type { ControlRoomStore } from "./control-room-store.js";
 import type { CapabilityStrategyStore } from "./capability-strategy-store.js";
 import type { CapabilityStrategyService } from "./capability-strategy-service.js";
+import type { SpeechService } from "./speech-service.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -169,5 +170,6 @@ export interface AgentHostMcpContext {
   controlRoom?: ControlRoomStore;
   strategyStore?: CapabilityStrategyStore;
   strategyService?: CapabilityStrategyService;
+  speech?: SpeechService;
   linux: LinuxAutomation;
 }

@@ -21,6 +21,7 @@ describe("loadAgentHostConfig", () => {
       pairingStateFile: path.join(homeDir, ".agenthost", "browser", "paired-devices.json")
     }));
     expect(config.controlRoom).toEqual(expect.objectContaining({ enabled: false, port: 43118 }));
+    expect(config.speech).toEqual(expect.objectContaining({ enabled: true, providerPreference: ["espeak-ng", "piper", "speech-dispatcher"] }));
   });
 
   it("loads explicit browser pairing state path without broad defaults", async () => {
@@ -76,6 +77,18 @@ describe("loadAgentHostConfig", () => {
     expect(config.profile).toBe("dev");
     expect(config.forgeRuntimeSandboxMode).toBe("none");
     expect(config.logFile).toBe(path.join(homeDir, "agenthost-test-log.jsonl"));
+  });
+
+  it("round-trips bounded speech configuration without enabling providers implicitly", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-speech-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    await writeFile(configPath, JSON.stringify({ speech: { enabled: false, providerPreference: ["piper", "espeak-ng"], defaultProvider: "piper", artifactTtlMs: 60000, maxTextChars: 1000, maxDurationMs: 10000, maxArtifactBytes: 1000000, synthesisTimeoutMs: 5000, playbackTimeoutMs: 20000 } }), "utf8");
+    const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
+    expect(config.speech).toMatchObject({ enabled: false, providerPreference: ["piper", "espeak-ng"], defaultProvider: "piper", artifactTtlMs: 60000, maxTextChars: 1000 });
+    await writeFile(configPath, JSON.stringify({ speech: { defaultProvider: "cloud" } }), "utf8");
+    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
   });
 
   it("loads persistent grants from config and applies richer profile names", async () => {
