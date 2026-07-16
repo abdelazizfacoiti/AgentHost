@@ -11,6 +11,9 @@
       "path": "./packages/app-overlay"
     },
     {
+      "path": "./packages/app-control-room"
+    },
+    {
       "path": "./packages/core"
     },
     {

@@ -99,6 +99,7 @@ import { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 import { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
 import { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
 import { materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
+import { ControlRoomStore } from "./control-room-store.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -197,6 +198,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     : undefined;
   if (browserBridge !== undefined) await browserBridge.start();
   const browser = options.browser ?? createBrowserAdapter(browserBridge!);
+  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, ...(browserBridge === undefined ? {} : { browserBridge }) });
+  await controlRoomStore.ensureStructure();
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -253,6 +256,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     overlayAssistance,
     overlayAssistanceTemplates,
     overlayControlSurface,
+    controlRoom: controlRoomStore,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux
   };
@@ -292,6 +296,20 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
 
   const loadedTools = materializeToolDefinitions(tools);
   registry.syncTools(toolCapabilities(loadedTools));
+
+  let controlRoomServer: { start(): Promise<{ url: string }>; close(): Promise<void> } | undefined;
+  if (config.controlRoom?.enabled === true) {
+    const controlRoomModule = await import("../../app-control-room/dist/index.js") as { ControlRoomServer: new (config: NonNullable<AgentHostConfig["controlRoom"]>, provider: ReturnType<ControlRoomStore["provider"]>) => { start(): Promise<{ url: string }>; close(): Promise<void> } };
+    controlRoomServer = new controlRoomModule.ControlRoomServer(config.controlRoom, controlRoomStore.provider());
+  }
+  if (controlRoomServer !== undefined) {
+    try {
+      const started = await controlRoomServer.start();
+      console.error(`AgentHost Control Room: ${started.url}`);
+    } catch (error) {
+      console.error(`AgentHost Control Room unavailable: ${error instanceof Error ? error.message : "startup_failed"}`);
+    }
+  }
 
   const server = new Server(
     {
@@ -356,7 +374,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     return toMcpToolResult(result);
   });
 
-  server.onclose = () => { void browserBridge?.close(); void overlayControlSurface.close(); void overlayAssistance.close(); void overlay.close(); };
+  server.onclose = () => { void controlRoomServer?.close(); void browserBridge?.close(); void overlayControlSurface.close(); void overlayAssistance.close(); void overlay.close(); };
   return {
     server,
     context

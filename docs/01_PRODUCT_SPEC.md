@@ -111,3 +111,9 @@ Linux is first. X11 supports the GTK3 overlay and pointer/window backends when d
 - no public bridge, stealth control, hidden persistence, background autonomy, sudo, dependency installation, or unsafe network access;
 - optional adapters never become core features by implication;
 - policy, grants, dry-run, confirmation, exact-target checks, receipts, checkpoints, and redacted audit logging remain in force.
+
+## Control Room MVP (Milestone A4)
+
+Control Room is local workstation reporting surface for AgentHost runtime. It projects real workflow traces, visual-assistance sessions, Forge runtime metadata, direct tool activity, renderer/browser health, and genuine screenshot metadata into bounded redacted views. It does not create tasks or fabricate timeline events.
+
+Control Room is disabled by default, loopback-only, token-protected, and read-only. It cannot execute tools, approve confirmations, grant permissions, start replay, start scheduler jobs, send or submit content, access arbitrary paths, or expose remote endpoints. Screenshot views use opaque IDs and metadata; raw private content remains unavailable.

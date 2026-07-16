@@ -90,6 +90,7 @@ class Renderer:
         self.events = []
         self.emergency_hidden = False
         self.monitor_signature = None
+        self.renderer_epoch = 0
         self.tick_source = GLib.timeout_add(33, self.tick)
 
     def capability(self):
@@ -165,6 +166,34 @@ class Renderer:
         for record in self.records.values():
             if self.is_interactive(record):
                 self.create_interactive(record)
+
+    def visibility_counts(self):
+        for _index in range(8):
+            while Gtk.events_pending():
+                Gtk.main_iteration_do(False)
+        visible = 0
+        for window in self.windows:
+            gdk_window = window.get_window()
+            if gdk_window is not None and (not hasattr(gdk_window, "get_mapped") or gdk_window.get_mapped()):
+                visible += 1
+        interactive = 0
+        for window in self.interactive.values():
+            gdk_window = window.get_window()
+            if gdk_window is not None and (not hasattr(gdk_window, "get_mapped") or gdk_window.get_mapped()):
+                interactive += 1
+        return visible, interactive
+
+    def operation_ack(self, command, acknowledgement, overlay_id=None, reason=None):
+        visible, interactive = self.visibility_counts()
+        return {
+            "command": command,
+            "acknowledgement": acknowledgement,
+            "rendererEpoch": self.renderer_epoch,
+            "visibleWindowCount": visible,
+            "interactiveWindowCount": interactive,
+            **({"overlayId": overlay_id} if overlay_id is not None else {}),
+            **({"reason": reason} if reason is not None else {}),
+        }
 
     def is_interactive(self, record):
         payload = record.get("payload") if isinstance(record, dict) else {}
@@ -354,12 +383,21 @@ class Renderer:
         self.records[record["overlayId"]] = record
         self.emergency_hidden = False
         self.rebuild()
-        return {"ok": True, "reason": "gtk3_overlay_shown"}
+        visible, _interactive = self.visibility_counts()
+        if visible <= 0:
+            self.records.pop(record["overlayId"], None)
+            self.rebuild()
+            return {"ok": False, "reason": "overlay_live_registration_missing"}
+        return {"ok": True, **self.operation_ack("show", "visible", record["overlayId"], "gtk3_overlay_shown")}
 
     def update(self, record):
         if not isinstance(record, dict) or record.get("overlayId") not in self.records:
             return {"ok": False, "reason": "overlay_not_found"}
-        return self.show(record)
+        result = self.show(record)
+        if result.get("ok"):
+            result["command"] = "update"
+            result["acknowledgement"] = "updated"
+        return result
 
     def dismiss(self, overlay_id):
         self.records.pop(overlay_id, None)
@@ -367,18 +405,18 @@ class Renderer:
         if window is not None:
             window.destroy()
         self.rebuild()
-        return {"ok": True, "reason": "gtk3_overlay_dismissed"}
+        return {"ok": True, **self.operation_ack("dismiss", "dismissed", overlay_id, "gtk3_overlay_dismissed")}
 
     def clear(self):
         self.records.clear()
         self.rebuild()
-        return {"ok": True, "reason": "gtk3_overlays_cleared"}
+        return {"ok": True, **self.operation_ack("clear", "cleared", reason="gtk3_overlays_cleared")}
 
     def emergency_hide(self):
         self.records.clear()
         self.emergency_hidden = True
         self.rebuild()
-        return {"ok": True, "reason": "gtk3_emergency_hide_complete"}
+        return {"ok": True, **self.operation_ack("emergency_hide", "emergency_hidden", reason="gtk3_emergency_hide_complete")}
 
     def state(self):
         return {"renderer": self.capability(), "overlays": [{"overlayId": key, "ownerSessionId": self.session_id, "type": value.get("type", "widget"), "sensitivity": (value.get("payload") or {}).get("sensitivity", "public"), "interactive": self.is_interactive(value), "visible": True, "createdAt": now_iso(), "updatedAt": now_iso(), "expiresAt": now_iso()} for key, value in self.records.items()], "pendingEvents": list(self.events), "emergencyHidden": self.emergency_hidden}
@@ -390,7 +428,7 @@ class Renderer:
         Gtk.main_quit()
 
 
-renderer = Renderer()
+renderer = None
 
 
 def reply(request_id, ok, data=None, error=None):
@@ -431,19 +469,29 @@ def handle(line):
     payload = request.get("payload")
     try:
         if command == "hello":
-            reply(request["id"], True, {"protocolVersion": VERSION, "capabilities": renderer.capability()})
+            hello_payload = payload if isinstance(payload, dict) else {}
+            if not isinstance(hello_payload.get("rendererEpoch"), int) or hello_payload.get("rendererEpoch") < 1:
+                reply(request["id"], False, error="renderer_epoch_required")
+                return
+            renderer.renderer_epoch = hello_payload["rendererEpoch"]
+            reply(request["id"], True, {"protocolVersion": VERSION, "rendererEpoch": renderer.renderer_epoch, "capabilities": renderer.capability()})
         elif command == "capabilities":
             reply(request["id"], True, renderer.capability())
         elif command == "show":
-            reply(request["id"], True, renderer.show(payload))
+            result = renderer.show(payload)
+            reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "update":
-            reply(request["id"], True, renderer.update(payload))
+            result = renderer.update(payload)
+            reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "dismiss":
-            reply(request["id"], True, renderer.dismiss((payload or {}).get("overlayId")))
+            result = renderer.dismiss((payload or {}).get("overlayId"))
+            reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "clear":
-            reply(request["id"], True, renderer.clear())
+            result = renderer.clear()
+            reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "emergency_hide":
-            reply(request["id"], True, renderer.emergency_hide())
+            result = renderer.emergency_hide()
+            reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "state":
             reply(request["id"], True, renderer.state())
         elif command == "close":
@@ -469,5 +517,6 @@ if __name__ == "__main__":
     ok, _argv = Gtk.init_check([])
     if not ok:
         raise SystemExit(78)
+    renderer = Renderer()
     GLib.io_add_watch(sys.stdin, GLib.IO_IN | GLib.IO_HUP, stdin_watch)
     Gtk.main()

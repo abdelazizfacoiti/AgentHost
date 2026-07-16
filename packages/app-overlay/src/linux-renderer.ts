@@ -5,12 +5,14 @@ import { fileURLToPath } from "node:url";
 import type { OverlayCapabilityReport, OverlayRendererMode, OverlayStateSnapshot, OverlayWidgetEvent } from "@agenthost/core";
 import { HeadlessOverlayRenderer } from "./headless-renderer.js";
 import { probeGtk3, probeLinuxOverlay, type OverlayEnvironment } from "./linux-probe.js";
-import { OVERLAY_IPC_MAX_BYTES, OVERLAY_IPC_MAX_IN_FLIGHT, OVERLAY_IPC_VERSION, serializeRendererMessage, validateRendererHandshake, validateRendererReply, type OverlayRendererCommand, type OverlayRendererReply, type OverlayRendererRequest } from "./linux-renderer-protocol.js";
+import { OVERLAY_IPC_MAX_BYTES, OVERLAY_IPC_MAX_IN_FLIGHT, OVERLAY_IPC_VERSION, serializeRendererMessage, validateRendererHandshake, validateRendererOperationData, validateRendererReply, type OverlayRendererCommand, type OverlayRendererReply, type OverlayRendererRequest } from "./linux-renderer-protocol.js";
 import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer, OverlayRendererDiagnostics, OverlayRendererRestartResult } from "./renderer.js";
 
-export interface LinuxOverlayRendererOptions { environment?: OverlayEnvironment; mode?: OverlayRendererMode; sessionId?: string; pythonCommand?: string; scriptPath?: string; commandTimeoutMs?: number; startupTimeoutMs?: number; maxRestarts?: number; probe?: () => Promise<OverlayCapabilityReport> | OverlayCapabilityReport; }
+export type LinuxOverlaySpawn = (command: string, args: string[], options: { stdio: ["pipe", "pipe", "pipe"]; env: NodeJS.ProcessEnv }) => ChildProcessWithoutNullStreams;
+export interface LinuxOverlayRendererOptions { environment?: OverlayEnvironment; mode?: OverlayRendererMode; sessionId?: string; pythonCommand?: string; scriptPath?: string; commandTimeoutMs?: number; startupTimeoutMs?: number; renderAckTimeoutMs?: number; maxRestarts?: number; probe?: () => Promise<OverlayCapabilityReport> | OverlayCapabilityReport; spawnProcess?: LinuxOverlaySpawn; }
 
-const fallbackReport = (report: OverlayCapabilityReport, reason: string): OverlayCapabilityReport => ({ ...report, supported: false, rendererStatus: "degraded", fallbackRenderer: "headless", reason, limitations: [...report.limitations, "Headless renderer fallback is active."] });
+const fallbackReport = (report: OverlayCapabilityReport, reason: string): OverlayCapabilityReport => ({ ...report, supported: false, rendererStatus: "degraded", fallbackRenderer: "headless", reason, limitations: [...new Set([...report.limitations, "Headless renderer fallback is active."])] });
+const failure = (reason: string): OverlayOperationResult => ({ ok: false, reason, acknowledged: false });
 
 export class LinuxOverlayRenderer implements OverlayRenderer {
   readonly #fallback = new HeadlessOverlayRenderer();
@@ -21,10 +23,12 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   readonly #scriptPath: string;
   readonly #commandTimeoutMs: number;
   readonly #startupTimeoutMs: number;
+  readonly #renderAckTimeoutMs: number;
   readonly #maxRestarts: number;
   readonly #probeOverride: (() => Promise<OverlayCapabilityReport> | OverlayCapabilityReport) | undefined;
+  readonly #spawnProcess: LinuxOverlaySpawn;
   readonly #token = randomBytes(32).toString("hex");
-  readonly #pending = new Map<string, { resolve: (reply: OverlayRendererReply) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  readonly #pending = new Map<string, { command: OverlayRendererCommand; resolve: (reply: OverlayRendererReply) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   #child: ChildProcessWithoutNullStreams | undefined;
   #buffer = "";
   #report: OverlayCapabilityReport = probeLinuxOverlay({});
@@ -32,8 +36,17 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   #starting: Promise<boolean> | undefined;
   #closed = false;
   #restarts = 0;
+  #startAttempts = 0;
   #childState: "stopped" | "starting" | "running" | "failed" | "closed" = "stopped";
   #handshake: "not_attempted" | "pending" | "passed" | "failed" = "not_attempted";
+  #runtimeState: "stopped" | "starting" | "handshaking" | "ready" | "rendering" | "degraded" | "closed" = "stopped";
+  #rendererEpoch = 0;
+  #lastCommand: string | undefined;
+  #lastRequestId: string | undefined;
+  #lastAckAt: string | undefined;
+  #lastExitCode: number | null | undefined;
+  #lastExitSignal: NodeJS.Signals | null | undefined;
+  #lastStderrSummary: string | undefined;
   #gtk3Available: boolean | undefined;
   #lastFailure: string | undefined;
 
@@ -45,8 +58,10 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     this.#scriptPath = options.scriptPath ?? fileURLToPath(new URL("../runtime/gtk3-renderer.py", import.meta.url));
     this.#commandTimeoutMs = Math.min(5_000, Math.max(250, options.commandTimeoutMs ?? 2_000));
     this.#startupTimeoutMs = Math.min(10_000, Math.max(500, options.startupTimeoutMs ?? 3_000));
+    this.#renderAckTimeoutMs = Math.min(10_000, Math.max(250, options.renderAckTimeoutMs ?? this.#commandTimeoutMs));
     this.#maxRestarts = Math.min(1, Math.max(0, options.maxRestarts ?? 1));
     this.#probeOverride = options.probe;
+    this.#spawnProcess = options.spawnProcess ?? ((command, args, spawnOptions) => spawn(command, args, spawnOptions));
   }
 
   async capabilities(): Promise<OverlayCapabilityReport> {
@@ -57,14 +72,16 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
 
   async diagnostics(): Promise<OverlayRendererDiagnostics> {
     const capabilities = await this.capabilities();
-    return { requestedMode: this.#mode, effectiveBackend: capabilities.renderer, rendererStatus: capabilities.rendererStatus, sessionType: capabilities.sessionType, displayPresent: this.#environment.DISPLAY !== undefined, waylandDisplayPresent: this.#environment.WAYLAND_DISPLAY !== undefined, pythonExecutable: this.#pythonCommand, ...(this.#gtk3Available === undefined ? {} : { gtk3Available: this.#gtk3Available }), rendererScriptPresent: existsSync(this.#scriptPath), childState: this.#childState, handshake: this.#handshake, capabilities, activeOverlayCount: 0, restartCount: this.#restarts, restartAllowed: this.#childState === "failed" || capabilities.fallbackRenderer === "headless", ...(capabilities.fallbackRenderer === "headless" ? { fallbackReason: capabilities.reason } : {}), ...(this.#lastFailure === undefined ? {} : { lastFailure: this.#lastFailure }), recommendedAction: capabilities.supported ? "Renderer healthy." : "Use headless mode or inspect setup instructions." };
+    return { requestedMode: this.#mode, effectiveBackend: capabilities.renderer, rendererStatus: capabilities.rendererStatus, sessionType: capabilities.sessionType, displayPresent: this.#environment.DISPLAY !== undefined, waylandDisplayPresent: this.#environment.WAYLAND_DISPLAY !== undefined, pythonExecutable: this.#pythonCommand, ...(this.#gtk3Available === undefined ? {} : { gtk3Available: this.#gtk3Available }), rendererScriptPresent: existsSync(this.#scriptPath), childState: this.#childState, handshake: this.#handshake, runtimeState: this.#runtimeState, rendererEpoch: this.#rendererEpoch, ...(this.#lastCommand === undefined ? {} : { lastCommand: this.#lastCommand }), ...(this.#lastRequestId === undefined ? {} : { lastRequestId: this.#lastRequestId }), ...(this.#lastAckAt === undefined ? {} : { lastAckAt: this.#lastAckAt }), ...(this.#lastExitCode === undefined ? {} : { lastExitCode: this.#lastExitCode }), ...(this.#lastExitSignal === undefined ? {} : { lastExitSignal: this.#lastExitSignal }), ...(this.#lastStderrSummary === undefined ? {} : { lastStderrSummary: this.#lastStderrSummary }), capabilities, activeOverlayCount: 0, restartCount: this.#restarts, restartAllowed: this.#childState === "failed" || capabilities.fallbackRenderer === "headless", ...(capabilities.fallbackRenderer === "headless" ? { fallbackReason: capabilities.reason } : {}), ...(this.#lastFailure === undefined ? {} : { lastFailure: this.#lastFailure }), recommendedAction: capabilities.supported && this.#runtimeState === "ready" ? "Renderer healthy." : capabilities.supported ? "Renderer requires startup or inspection." : "Use headless mode or inspect setup instructions." };
   }
 
   async restart(): Promise<OverlayRendererRestartResult> {
     if (this.#closed) return { ok: false, reason: "overlay_renderer_closed", diagnostics: await this.diagnostics() };
-    if (this.#child !== undefined) { this.#child.kill("SIGTERM"); this.#child = undefined; }
+    const old = this.#child;
+    this.#child = undefined;
     this.#rejectPending(new Error("overlay_renderer_restarting"));
-    this.#buffer = ""; this.#restarts = 0; this.#lastFailure = undefined; this.#childState = "stopped"; this.#handshake = "not_attempted"; this.#report = probeLinuxOverlay({}); this.#probePromise = undefined;
+    if (old !== undefined && !old.killed) old.kill("SIGTERM");
+    this.#buffer = ""; this.#restarts = 0; this.#startAttempts = 0; this.#lastFailure = undefined; this.#lastExitCode = undefined; this.#lastExitSignal = undefined; this.#lastStderrSummary = undefined; this.#childState = "stopped"; this.#runtimeState = "stopped"; this.#handshake = "not_attempted"; this.#report = probeLinuxOverlay({}); this.#probePromise = undefined;
     const started = await this.#ensureStarted();
     return { ok: started, reason: started ? "overlay_renderer_restarted" : "overlay_renderer_restart_failed", diagnostics: await this.diagnostics() };
   }
@@ -75,23 +92,15 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   async clear(): Promise<OverlayOperationResult> { return await this.#operation("clear", {}, () => this.#fallback.clear()); }
   async emergencyHide(): Promise<OverlayOperationResult> { const result = await this.#operation("emergency_hide", {}, () => this.#fallback.emergencyHide()); await this.#fallback.emergencyHide(); return result; }
   async state(): Promise<OverlayStateSnapshot> { if (await this.#ensureStarted()) { const reply = await this.#request("state", {}).catch(() => undefined); if (reply?.ok && reply.data !== undefined) return reply.data as OverlayStateSnapshot; } const fallback = await this.#fallback.state(); return { ...fallback, renderer: this.#report }; }
-  async events(): Promise<OverlayWidgetEvent[]> {
-    if (await this.#ensureStarted()) {
-      const reply = await this.#request("state", {}).catch(() => undefined);
-      const data = reply?.ok === true && reply.data !== undefined ? reply.data as Partial<OverlayStateSnapshot> : undefined;
-      if (Array.isArray(data?.pendingEvents)) return data.pendingEvents;
-    }
-    return await this.#fallback.events();
-  }
+  async events(): Promise<OverlayWidgetEvent[]> { if (await this.#ensureStarted()) { const reply = await this.#request("state", {}).catch(() => undefined); const data = reply?.ok === true && reply.data !== undefined ? reply.data as Partial<OverlayStateSnapshot> : undefined; if (Array.isArray(data?.pendingEvents)) return data.pendingEvents; } return await this.#fallback.events(); }
 
   async close(): Promise<void> {
     this.#closed = true;
+    this.#runtimeState = "closed";
     this.#childState = "closed";
-    if (this.#child !== undefined) {
-      await this.#request("close", {}).catch(() => undefined);
-      this.#child.kill("SIGTERM");
-      this.#child = undefined;
-    }
+    const child = this.#child;
+    this.#child = undefined;
+    if (child !== undefined && !child.killed) { await this.#request("close", {}).catch(() => undefined); child.kill("SIGTERM"); }
     this.#rejectPending(new Error("overlay_renderer_closed"));
     await this.#fallback.clear();
   }
@@ -107,64 +116,67 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   }
 
   async #operation(command: Exclude<OverlayRendererCommand, "hello" | "capabilities" | "state" | "close">, payload: unknown, fallback: () => Promise<OverlayOperationResult> | OverlayOperationResult): Promise<OverlayOperationResult> {
-    if (!(await this.#ensureStarted())) return await fallback();
-    const reply = await this.#request(command, payload).catch(() => undefined);
-    if (reply?.ok === true) return { ok: true, reason: typeof reply.data === "object" && reply.data !== null && typeof (reply.data as { reason?: unknown }).reason === "string" ? (reply.data as { reason: string }).reason : "gtk3_overlay_complete" };
-    return await fallback();
+    if (!(await this.#ensureStarted())) return this.#mode === "gtk3-x11" ? failure(this.#lastFailure ?? "renderer_start_timeout") : await fallback();
+    this.#runtimeState = "rendering";
+    const reply = await this.#request(command, payload, this.#renderAckTimeoutMs).catch((error: unknown) => { this.#fail(error instanceof Error ? error.message : "renderer_protocol_error"); return undefined; });
+    if (reply?.ok === true && validateRendererOperationData(reply.data, command)) {
+      if (reply.data.rendererEpoch !== this.#rendererEpoch) { this.#fail("renderer_epoch_mismatch"); return failure("renderer_epoch_mismatch"); }
+      this.#runtimeState = "ready"; this.#lastAckAt = new Date().toISOString();
+      return { ok: true, reason: reply.data.reason ?? "gtk3_overlay_complete", acknowledged: true, rendererEpoch: reply.data.rendererEpoch, visibleWindowCount: reply.data.visibleWindowCount, interactiveWindowCount: reply.data.interactiveWindowCount };
+    }
+    const reason = reply?.ok === false && typeof reply.error === "string" ? reply.error : "overlay_render_not_acknowledged";
+    this.#fail(reason);
+    return this.#mode === "gtk3-x11" ? failure(reason) : await fallback();
   }
 
   async #ensureStarted(): Promise<boolean> {
     if (this.#closed) return false;
-    if (this.#child !== undefined) return true;
     if (this.#starting !== undefined) return await this.#starting;
+    if (this.#child !== undefined && this.#handshake === "passed" && this.#runtimeState === "ready") return true;
+    if (this.#child !== undefined) this.#fail("renderer_protocol_error");
     this.#starting = this.#start();
     try { return await this.#starting; } finally { this.#starting = undefined; }
   }
 
   async #start(): Promise<boolean> {
     const report = await this.capabilities();
-    if (!report.supported || this.#restarts > this.#maxRestarts) return false;
-    const child = spawn(this.#pythonCommand, [this.#scriptPath, "--protocol"], { stdio: ["pipe", "pipe", "pipe"], env: this.#safeEnvironment() });
-    this.#childState = "starting"; this.#handshake = "pending";
-    this.#child = child;
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => this.#read(chunk));
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => { if (chunk.length > 8_192) child.stderr.pause(); });
-    child.once("error", () => this.#childFailed("overlay_renderer_process_error"));
-    child.once("exit", () => { if (!this.#closed) this.#childFailed("overlay_renderer_process_crashed"); });
-    const hello = await this.#request("hello", { sessionId: this.#sessionId }, this.#startupTimeoutMs).catch(() => undefined);
-    if (hello?.ok !== true || !validateRendererHandshake(hello.data)) { this.#handshake = "failed"; this.#childFailed("overlay_renderer_handshake_failed"); return false; }
-    this.#handshake = "passed"; this.#childState = "running";
+    if (!report.supported || this.#startAttempts > this.#maxRestarts) { if (this.#lastFailure === undefined) this.#lastFailure = report.supported ? "renderer_start_timeout" : "renderer_start_unavailable"; return false; }
+    this.#startAttempts += 1;
+    let child: ChildProcessWithoutNullStreams;
+    try { child = this.#spawnProcess(this.#pythonCommand, [this.#scriptPath, "--protocol"], { stdio: ["pipe", "pipe", "pipe"], env: this.#safeEnvironment() }); } catch { this.#fail("renderer_process_exited"); return false; }
+    this.#childState = "starting"; this.#runtimeState = "handshaking"; this.#handshake = "pending"; this.#child = child; this.#buffer = "";
+    child.stdout.setEncoding("utf8"); child.stdout.on("data", (chunk: string) => this.#read(chunk));
+    child.stderr.setEncoding("utf8"); child.stderr.on("data", (chunk: string) => this.#captureStderr(chunk));
+    child.once("error", (error) => { const message = error instanceof Error ? error.message : "renderer_spawn_error"; this.#lastStderrSummary = message.replace(/[A-Za-z0-9+/=_-]{32,}/g, "[redacted]").replace(/\s+/g, " ").slice(0, 512); this.#childFailed(child, "renderer_process_exited"); });
+    child.once("exit", (code, signal) => this.#childFailed(child, "renderer_process_exited", code, signal));
+    const candidateEpoch = this.#rendererEpoch + 1;
+    const hello = await this.#request("hello", { sessionId: this.#sessionId, rendererEpoch: candidateEpoch }, this.#startupTimeoutMs).catch((error: unknown) => { this.#fail(error instanceof Error ? error.message : "renderer_handshake_timeout"); return undefined; });
+    if (hello?.ok !== true) { this.#fail(typeof hello?.error === "string" ? hello.error : this.#lastFailure ?? "renderer_protocol_error"); return false; }
+    if (!validateRendererHandshake(hello.data)) { this.#fail("renderer_protocol_error"); return false; }
+    if (hello.data.rendererEpoch !== candidateEpoch) { this.#fail("renderer_epoch_mismatch"); return false; }
+    this.#rendererEpoch = candidateEpoch; this.#handshake = "passed"; this.#childState = "running"; this.#runtimeState = "ready"; this.#report = { ...this.#report, rendererStatus: "available", supported: true, fallbackRenderer: undefined };
     return true;
   }
 
+  #captureStderr(chunk: string): void { const safe = chunk.slice(-2_048).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[A-Za-z0-9+/=_-]{32,}/g, "[redacted]").replace(/\s+/g, " ").trim(); if (!safe) return; this.#lastStderrSummary = `${this.#lastStderrSummary ?? ""} ${safe}`.trim().slice(-512); }
   #safeEnvironment(): NodeJS.ProcessEnv { return { PATH: this.#environment.PATH ?? process.env.PATH ?? "/usr/bin:/bin", PYTHONUNBUFFERED: "1", ...(this.#environment.DISPLAY === undefined ? {} : { DISPLAY: this.#environment.DISPLAY }), ...(this.#environment.XAUTHORITY === undefined ? {} : { XAUTHORITY: this.#environment.XAUTHORITY }), ...(this.#environment.XDG_SESSION_TYPE === undefined ? {} : { XDG_SESSION_TYPE: this.#environment.XDG_SESSION_TYPE }) }; }
 
-  #request(command: OverlayRendererCommand, payload: unknown, timeoutMs = this.#commandTimeoutMs): Promise<OverlayRendererReply | undefined> {
-    if (this.#child === undefined || this.#child.stdin.destroyed || this.#pending.size >= OVERLAY_IPC_MAX_IN_FLIGHT) return Promise.resolve(undefined);
-    const id = `overlay_ipc_${randomUUID()}`;
-    const request: OverlayRendererRequest = { version: OVERLAY_IPC_VERSION, id, token: this.#token, command, ...(payload === undefined ? {} : { payload }) };
-    const encoded = serializeRendererMessage(request);
-    if (encoded === undefined) return Promise.resolve(undefined);
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.#pending.delete(id); reject(new Error("overlay_renderer_timeout")); }, timeoutMs);
-      this.#pending.set(id, { resolve, reject, timer });
-      this.#child?.stdin.write(`${encoded}\n`, (error) => { if (error !== undefined) { clearTimeout(timer); this.#pending.delete(id); reject(error); } });
-    });
+  #request(command: OverlayRendererCommand, payload: unknown, timeoutMs = this.#commandTimeoutMs): Promise<OverlayRendererReply> {
+    if (this.#child === undefined || this.#child.stdin.destroyed) return Promise.reject(new Error("renderer_process_exited"));
+    if (this.#pending.size >= OVERLAY_IPC_MAX_IN_FLIGHT) return Promise.reject(new Error("renderer_protocol_error"));
+    const id = `overlay_ipc_${randomUUID()}`; const request: OverlayRendererRequest = { version: OVERLAY_IPC_VERSION, id, token: this.#token, command, ...(payload === undefined ? {} : { payload }) }; const encoded = serializeRendererMessage(request); if (encoded === undefined) return Promise.reject(new Error("renderer_protocol_error"));
+    this.#lastCommand = command; this.#lastRequestId = id;
+    return new Promise((resolve, reject) => { const timeoutReason = command === "hello" ? "renderer_handshake_timeout" : ["show", "update", "dismiss", "clear", "emergency_hide"].includes(command) ? "overlay_render_not_acknowledged" : "renderer_protocol_error"; const timer = setTimeout(() => { this.#pending.delete(id); reject(new Error(timeoutReason)); }, timeoutMs); this.#pending.set(id, { command, resolve, reject, timer }); this.#child?.stdin.write(`${encoded}\n`, (error) => { if (error !== undefined && error !== null) { this.#lastStderrSummary = error instanceof Error ? error.message.replace(/\s+/g, " ").slice(0, 512) : "renderer_stdin_write_failed"; clearTimeout(timer); this.#pending.delete(id); reject(new Error("renderer_process_exited")); } }); });
   }
 
   #read(chunk: string): void {
     this.#buffer += chunk;
-    if (Buffer.byteLength(this.#buffer, "utf8") > OVERLAY_IPC_MAX_BYTES * 2) { this.#childFailed("overlay_renderer_output_oversized"); return; }
+    if (Buffer.byteLength(this.#buffer, "utf8") > OVERLAY_IPC_MAX_BYTES * 2) { this.#fail("renderer_protocol_error"); return; }
     let newline = this.#buffer.indexOf("\n");
-    while (newline >= 0) {
-      const line = this.#buffer.slice(0, newline).trim(); this.#buffer = this.#buffer.slice(newline + 1); newline = this.#buffer.indexOf("\n");
-      if (line.length === 0 || Buffer.byteLength(line, "utf8") > OVERLAY_IPC_MAX_BYTES) { this.#childFailed("overlay_renderer_message_invalid"); return; }
-      try { const reply: unknown = JSON.parse(line); if (!validateRendererReply(reply)) { this.#childFailed("overlay_renderer_reply_invalid"); return; } const pending = this.#pending.get(reply.id); if (pending === undefined) continue; clearTimeout(pending.timer); this.#pending.delete(reply.id); pending.resolve(reply); } catch { this.#childFailed("overlay_renderer_reply_invalid"); return; }
-    }
+    while (newline >= 0) { const line = this.#buffer.slice(0, newline).trim(); this.#buffer = this.#buffer.slice(newline + 1); newline = this.#buffer.indexOf("\n"); if (line.length === 0 || Buffer.byteLength(line, "utf8") > OVERLAY_IPC_MAX_BYTES) { this.#fail("renderer_protocol_error"); return; } try { const reply: unknown = JSON.parse(line); if (!validateRendererReply(reply)) { this.#fail("renderer_protocol_error"); return; } const pending = this.#pending.get(reply.id); if (pending === undefined) { this.#fail("renderer_protocol_error"); return; } clearTimeout(pending.timer); this.#pending.delete(reply.id); pending.resolve(reply); } catch { this.#fail("renderer_protocol_error"); return; } }
   }
 
-  #childFailed(reason: string): void { const child = this.#child; this.#child = undefined; if (child !== undefined && !child.killed) child.kill("SIGKILL"); this.#rejectPending(new Error(reason)); this.#report = fallbackReport(this.#report, reason); this.#lastFailure = reason; this.#childState = this.#closed ? "closed" : "failed"; this.#handshake = this.#handshake === "passed" ? this.#handshake : "failed"; if (!this.#closed) this.#restarts += 1; }
+  #childFailed(child: ChildProcessWithoutNullStreams, reason: string, code?: number | null, signal?: NodeJS.Signals | null): void { if (this.#child !== child) return; this.#lastExitCode = code ?? null; this.#lastExitSignal = signal ?? null; this.#fail(reason, child); }
+  #fail(reason: string, expectedChild?: ChildProcessWithoutNullStreams): void { if (expectedChild !== undefined && this.#child !== expectedChild) return; const child = this.#child; this.#child = undefined; this.#rejectPending(new Error(reason)); if (child !== undefined && !child.killed) child.kill("SIGKILL"); this.#report = fallbackReport(this.#report, reason); this.#lastFailure = reason; this.#childState = this.#closed ? "closed" : "failed"; this.#runtimeState = this.#closed ? "closed" : "degraded"; this.#handshake = this.#handshake === "passed" ? this.#handshake : "failed"; if (!this.#closed) this.#restarts = Math.min(this.#maxRestarts + 1, this.#restarts + 1); }
   #rejectPending(error: Error): void { for (const [id, pending] of this.#pending) { clearTimeout(pending.timer); pending.reject(error); this.#pending.delete(id); } }
 }

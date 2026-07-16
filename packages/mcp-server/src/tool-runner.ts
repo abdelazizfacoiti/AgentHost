@@ -47,6 +47,7 @@ export interface ToolExecutionContext {
     releaseReservation(receiptId: string, reservationId: string): void;
   };
   workflowTrace?: { capture(event: { sessionId: string; step: WorkflowTraceStep }): Promise<void> };
+  controlRoom?: { recordToolActivity(input: { sessionId: string; timestamp: string; tool: string; strategy?: string; riskLevel: RiskLevel; preview: boolean; ok: boolean; errorCode?: string; durationMs: number; confirmation: boolean; receiptId?: string }): Promise<void> | void };
 }
 
 export interface ToolExecutionRuntime {
@@ -368,6 +369,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
     : definition.inputSummary;
   const outputSummary = definition.auditOutputSummary?.(result);
   await context.logger.log(createAuditLogEntry(result, context, inputSummary, durationMs, outputSummary));
+  try { await context.controlRoom?.recordToolActivity({ sessionId: context.sessionId, timestamp: new Date().toISOString(), tool: definition.name, ...(result.strategy === undefined ? {} : { strategy: result.strategy }), riskLevel: result.riskLevel, preview: result.preview === true, ok: result.ok, ...(result.error === null ? {} : { errorCode: result.error.code }), durationMs, confirmation: result.confirmation !== undefined, ...(result.receipt === undefined ? {} : { receiptId: result.receipt.receiptId }) }); } catch { /* Reporting never changes tool result. */ }
   if (context.workflowTrace !== undefined && !definition.name.startsWith("workflow.")) {
     const grants = result.grantDecision;
     const safeOutput = outputSummary === undefined

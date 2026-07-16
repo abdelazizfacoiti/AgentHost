@@ -18,6 +18,9 @@
     },
     {
       "path": "../app-overlay"
+    },
+    {
+      "path": "../app-control-room"
     }
   ]
 }

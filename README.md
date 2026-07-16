@@ -154,3 +154,16 @@ After building, point Codex at the compiled server:
   }
 }
 ```
+
+## Control Room MVP (Milestone A4)
+
+Control Room is optional, local, read-only runtime reporting. It shows redacted task projections, source-backed timelines, genuine screenshot metadata, and subsystem health. It cannot call MCP tools, approve confirmations, grant permissions, replay skills, run scheduler jobs, or control target applications.
+
+Enable explicitly:
+
+```bash
+npm run build
+AGENTHOST_CONTROL_ROOM_ENABLED=1 npm run start:mcp
+```
+
+AgentHost prints loopback URL with one session token to stderr. Control Room binds only to `127.0.0.1` (default port `43118`), stores token with restrictive permissions, and exposes no public or remote endpoint. Disable by omitting flag/config. `npm run control-room` is local helper that enables same mode.

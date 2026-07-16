@@ -110,3 +110,16 @@ Implementation used Codex with GPT-5.6-style code planning, repository inspectio
 ## Limitations
 
 This milestone is visual-only. It does not control target applications, support remote endpoints, provide Windows/macOS rendering, run scheduler jobs, replay skills, or provide autonomous operation.
+
+## Control Room MVP (A4)
+
+Optional local reporting surface:
+
+```bash
+npm run build
+AGENTHOST_CONTROL_ROOM_ENABLED=1 npm run start:mcp
+```
+
+Open loopback URL printed to stderr. Verify dashboard shows real A1–A3 assistance records, renderer health, safe timeline events, and screenshot metadata with opaque IDs. Verify no raw screenshot/path/private text appears. Control Room is read-only: it cannot invoke tools, approve confirmations, grant permissions, replay, schedule, send, submit, upload, delete, pay, or control target applications.
+
+If listener startup fails, MCP remains usable and UI is unavailable; no fallback fabricates dashboard data. Close MCP and confirm loopback listener exits. `npm run control-room` starts same explicit local mode.

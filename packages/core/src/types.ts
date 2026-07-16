@@ -566,6 +566,83 @@ export interface ScheduledJobManualRunApprovalRecoveryAction { code: string; sum
 export interface ScheduledJobManualRunApprovalValidity { manualRunRequestId: string; reviewId?: string; approvalStatus: ScheduledJobManualRunApprovalStatus; validityStatus: ScheduledJobManualRunApprovalValidityStatus; evaluatedAt: string; approvedAt?: string; expiresAt?: string; remainingSeconds?: number; freshnessValid: boolean; hashesValid: boolean; grantsValid: boolean; readinessValid: boolean; activationValid: boolean; contractValid: boolean; preflightValid: boolean; acknowledgementValid: boolean; jobValid: boolean; stale: boolean; revoked: boolean; blockers: string[]; warnings: string[]; staleDependencies: ScheduledJobManualRunApprovalStaleDependency[]; recoveryActions: ScheduledJobManualRunApprovalRecoveryAction[]; recommendedNextAction: string; executionAuthorized: false; executable: false; actionsExecuted: false; confirmationTokensCreated: false; }
 export interface ScheduledJobManualRunApprovalAuditExplanation { manualRunRequestId: string; validity: ScheduledJobManualRunApprovalValidity; lifecycle: Array<{ id: string; kind: string; status: string; timestamp?: string | undefined }>; dependencySummary: Array<{ name: string; matches: boolean; reasonCode?: string | undefined }>; recoveryActions: ScheduledJobManualRunApprovalRecoveryAction[]; redacted: true; }
 
+export interface ControlRoomConfig {
+  enabled: boolean;
+  port: number;
+  accessTokenFile: string;
+}
+
+export type ControlRoomTaskStatus = "active" | "recent" | "completed" | "failed" | "cancelled" | "blocked";
+export type ControlRoomTaskSource = "workflow_trace" | "assistance_session" | "forge_runtime" | "direct_activity" | "scheduler_metadata";
+export type ControlRoomTimelineKind = "task_received" | "planning_review" | "tool_prepared" | "policy_decision" | "confirmation_requested" | "confirmation_resolved" | "tool_started" | "screenshot_captured" | "target_grounded" | "tool_completed" | "verification" | "retry_recovery" | "completed" | "failed" | "cancelled" | "blocked" | "metadata";
+
+export interface ControlRoomTaskProjection {
+  taskId: string;
+  source: ControlRoomTaskSource;
+  sourceRecordId: string;
+  sessionId?: string;
+  status: ControlRoomTaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  category: string;
+  riskLevel: RiskLevel;
+  toolCount: number;
+  screenshotCount: number;
+  confirmationCount: number;
+  durationMs?: number;
+  executable: boolean;
+  actionsExecuted: boolean;
+  redacted: true;
+}
+
+export interface ControlRoomTimelineEvent {
+  eventId: string;
+  taskId: string;
+  source: ControlRoomTaskSource;
+  sourceRecordId: string;
+  timestamp: string;
+  kind: ControlRoomTimelineKind;
+  tool?: string;
+  strategy?: AutomationStrategy;
+  riskLevel?: RiskLevel;
+  preview?: boolean;
+  ok?: boolean;
+  errorCode?: string;
+  summary: string;
+  opaqueIds?: string[];
+}
+
+export interface ControlRoomScreenshotProjection {
+  screenshotId: string;
+  taskId?: string;
+  sessionId?: string;
+  capturedAt: string;
+  captureKind: "full_screen" | "active_window";
+  imageWidth: number;
+  imageHeight: number;
+  redacted: true;
+  sensitivity: "public" | "private" | "secret";
+  thumbnailAvailable: boolean;
+  retention: "available" | "expired" | "unavailable";
+}
+
+export interface ControlRoomHealthProjection {
+  service: "available" | "unavailable";
+  renderer?: Record<string, unknown>;
+  browser?: Record<string, unknown>;
+  stores: { activity: "available" | "unavailable"; workflows: "available" | "unavailable"; forge: "available" | "unavailable"; scheduler: "available" | "unavailable" };
+  limitations: string[];
+}
+
+export interface ControlRoomDashboardProjection {
+  generatedAt: string;
+  range: { from: string; to: string };
+  counts: { active: number; recent: number; completed: number; failed: number; cancelled: number; blocked: number; toolExecutions: number; screenshotCaptures: number; confirmationRequests: number };
+  averageDurationMs?: number;
+  recentActivity: ControlRoomTimelineEvent[];
+  health: ControlRoomHealthProjection;
+}
+
 export interface AgentHostConfig {
   agentHostDir: string;
   configPath: string;
@@ -575,6 +652,7 @@ export interface AgentHostConfig {
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
   overlayRendererMode?: import("./overlay.js").OverlayRendererMode;
   browserBridge?: BrowserBridgeConfig;
+  controlRoom?: ControlRoomConfig;
   optionalAdapters?: Record<string, { enabled: boolean }>;
   policy: PolicyProfile;
 }

@@ -104,3 +104,9 @@ Jobs, activation, manual-run contracts, preflights, acknowledgements, requests, 
 Default writable roots are `~/.agenthost/` and approved AgentHost output roots. Protected paths include system roots, home-wide private data, SSH/GnuPG/keyrings, browser profiles, credentials, and secrets.
 
 JSONL audit entries contain tool, risk, profile, policy/grant decision, safe IDs, sanitized origin/app, counts, sizes, truncation, backend, receipt ID, and error code. They never contain pairing/session/confirmation tokens, receipt signatures, passwords, secrets, raw OCR/page text, screenshots, private messages, hidden environment values, or full sensitive paths.
+
+## Control Room security
+
+Control Room binds only to `127.0.0.1`, uses separate default port `43118`, requires cryptographically random per-process bearer token, and rejects non-local origins. Token file mode is `0600`; raw token never enters MCP results, audit logs, or projections. API routes are GET-only, bounded, and expose opaque IDs instead of filesystem paths. No arbitrary path, command, tool dispatch, confirmation approval, permission grant, replay, scheduler execution, upload, send, submit, delete, payment, or remote endpoint exists.
+
+Control Room receives redacted activity summaries and screenshot metadata only. It omits private page/OCR/file content, secrets, cookies, passwords, environment values, raw screenshots, and receipt signatures. Service failure cannot weaken or alter AgentHost tool safety.

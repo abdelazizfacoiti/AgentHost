@@ -51,6 +51,7 @@ import type { SchedulerStore } from "./scheduler-store.js";
 import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 import type { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
 import type { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
+import type { ControlRoomStore } from "./control-room-store.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -163,5 +164,6 @@ export interface AgentHostMcpContext {
   overlayAssistance?: OverlayAssistanceStore;
   overlayAssistanceTemplates?: OverlayAssistanceTemplateStore;
   overlayControlSurface?: OverlayControlSurfaceStore;
+  controlRoom?: ControlRoomStore;
   linux: LinuxAutomation;
 }

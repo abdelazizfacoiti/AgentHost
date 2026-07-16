@@ -106,3 +106,7 @@ Receipts are attached by the normal runner rather than exposed as a standalone a
 ## Confirmation and result model
 
 State-changing tools declare dry-run/confirmation metadata. The central runner validates schema, policy, grants, protected contexts, and the non-consuming confirmation envelope. Domain handlers revalidate exact targets and consume the token exactly once. `ToolResult` remains backward-compatible and may include a safe receipt. No receipt grants permission, and no confirmation token is returned by workflow/scheduler/overlay governance tools.
+
+## Control Room
+
+Control Room is HTTP reporting surface, not MCP capability. It is disabled by default and starts only when explicitly enabled. It displays bounded dashboard, task, timeline, screenshot-metadata, and health projections from real local records. It never invokes MCP tools, creates confirmations, grants access, starts replay, starts jobs, or controls browser/desktop targets.
