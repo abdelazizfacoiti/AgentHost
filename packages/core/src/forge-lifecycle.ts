@@ -347,6 +347,7 @@ export function summarizeToolForgeRegistration(
 }
 
 export function createToolForgeRuntimeRunRecord(input: {
+  sessionId?: string;
   registration: ToolForgeRegistrationRecord;
   artifact: ToolForgeArtifactRecord;
   toolName: string;
@@ -367,6 +368,7 @@ export function createToolForgeRuntimeRunRecord(input: {
       toolName: input.toolName,
       now
     }),
+    ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
     registrationId: input.registration.registrationId,
     artifactId: input.artifact.artifactId,
     manifestId: input.artifact.manifestId,

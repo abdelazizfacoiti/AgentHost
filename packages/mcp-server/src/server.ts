@@ -198,7 +198,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     : undefined;
   if (browserBridge !== undefined) await browserBridge.start();
   const browser = options.browser ?? createBrowserAdapter(browserBridge!);
-  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, ...(browserBridge === undefined ? {} : { browserBridge }) });
+  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
   await controlRoomStore.ensureStructure();
   const linux: LinuxAutomation =
     options.linux ?? {
@@ -299,11 +299,9 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
 
   let controlRoomServer: { start(): Promise<{ url: string }>; close(): Promise<void> } | undefined;
   if (config.controlRoom?.enabled === true) {
-    const controlRoomModule = await import("../../app-control-room/dist/index.js") as { ControlRoomServer: new (config: NonNullable<AgentHostConfig["controlRoom"]>, provider: ReturnType<ControlRoomStore["provider"]>) => { start(): Promise<{ url: string }>; close(): Promise<void> } };
-    controlRoomServer = new controlRoomModule.ControlRoomServer(config.controlRoom, controlRoomStore.provider());
-  }
-  if (controlRoomServer !== undefined) {
     try {
+      const controlRoomModule = await import("../../app-control-room/dist/index.js") as { ControlRoomServer: new (config: NonNullable<AgentHostConfig["controlRoom"]>, provider: ReturnType<ControlRoomStore["provider"]>) => { start(): Promise<{ url: string }>; close(): Promise<void> } };
+      controlRoomServer = new controlRoomModule.ControlRoomServer(config.controlRoom, controlRoomStore.provider());
       const started = await controlRoomServer.start();
       console.error(`AgentHost Control Room: ${started.url}`);
     } catch (error) {

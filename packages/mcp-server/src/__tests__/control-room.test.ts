@@ -21,9 +21,46 @@ describe("ControlRoomStore", () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-control-room-shot-"));
     const store = new ControlRoomStore(root);
     await store.ensureStructure();
-    store.recordScreenshot({ screenshotId: "shot_test", sessionId: "session_test", capturedAt: new Date().toISOString(), captureKind: "full_screen", imageWidth: 100, imageHeight: 50, sensitivity: "public", thumbnailAvailable: false, retention: "available", redacted: true });
+    await store.recordScreenshot({ screenshotId: "shot_test", sessionId: "session_test", capturedAt: new Date().toISOString(), captureKind: "full_screen", imageWidth: 100, imageHeight: 50, sensitivity: "public", thumbnailAvailable: false, retention: "available", redacted: true });
     const result = await store.provider().screenshot("shot_test");
     expect(result).toEqual(expect.objectContaining({ screenshotId: "shot_test", thumbnailAvailable: false, redacted: true }));
     expect(result).not.toHaveProperty("imagePath");
+  });
+
+  it("keeps session-bound projections owner-scoped, deduplicates Forge activity, and includes inert scheduler metadata", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-control-room-owner-"));
+    const timestamp = new Date().toISOString();
+    const store = new ControlRoomStore(root, {
+      workflowTrace: { listTraces: async () => [
+        { traceId: "trace_owner", sessionId: "owner", status: "stopped", createdAt: timestamp, updatedAt: timestamp, steps: [] },
+        { traceId: "trace_other", sessionId: "other", status: "stopped", createdAt: timestamp, updatedAt: timestamp, steps: [] }
+      ] },
+      forge: { listRuntimeRuns: async () => [
+        { runtimeRunId: "run_owner", sessionId: "owner", status: "passed", createdAt: timestamp, executableStillFalse: true },
+        { runtimeRunId: "run_other", sessionId: "other", status: "passed", createdAt: timestamp, executableStillFalse: true }
+      ] },
+      scheduler: { listJobs: async () => [{ jobId: "job_inert", status: "draft", createdAt: timestamp, updatedAt: timestamp }] }
+    }, { ownerSessionId: "owner" });
+    await store.ensureStructure();
+    await store.recordToolActivity({ sessionId: "owner", timestamp, tool: "forge.run_sandboxed_tool", riskLevel: "low", preview: false, ok: true, durationMs: 1, confirmation: false });
+    await store.recordToolActivity({ sessionId: "other", timestamp, tool: "system.get_info", riskLevel: "observe", preview: false, ok: true, durationMs: 1, confirmation: false });
+    const tasks = (await store.provider().tasks({ limit: 100 })).tasks;
+    expect(tasks.map((task) => task.taskId)).toEqual(expect.arrayContaining(["workflow:trace_owner", "forge:run_owner", "scheduler:job_inert"]));
+    expect(tasks.map((task) => task.taskId)).not.toEqual(expect.arrayContaining(["workflow:trace_other", "forge:run_other", "direct:other"]));
+    expect(tasks.filter((task) => task.taskId === "direct:owner")).toHaveLength(0);
+    expect(tasks.find((task) => task.taskId === "scheduler:job_inert")).toMatchObject({ executable: false, actionsExecuted: false, source: "scheduler_metadata" });
+  });
+
+  it("drops screenshot paths and cross-owner metadata before persistence/projection", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-control-room-shot-safe-"));
+    const store = new ControlRoomStore(root, {}, { ownerSessionId: "owner" });
+    await store.ensureStructure();
+    await store.recordScreenshot({ screenshotId: "shot_safe", sessionId: "owner", capturedAt: new Date().toISOString(), captureKind: "full_screen", imageWidth: 100, imageHeight: 50, sensitivity: "public", thumbnailAvailable: true, retention: "available", redacted: true, imagePath: "/private/secret.png", imageHash: "private-hash" } as never);
+    await store.recordScreenshot({ screenshotId: "shot_other", sessionId: "other", capturedAt: new Date().toISOString(), captureKind: "full_screen", imageWidth: 100, imageHeight: 50, sensitivity: "public", thumbnailAvailable: false, retention: "available", redacted: true });
+    const result = await store.provider().screenshot("shot_safe");
+    expect(result).toMatchObject({ thumbnailAvailable: false, redacted: true });
+    expect(result).not.toHaveProperty("imagePath");
+    expect(result).not.toHaveProperty("imageHash");
+    await expect(store.provider().screenshot("shot_other")).rejects.toThrow("control_room_screenshot_not_found");
   });
 });
