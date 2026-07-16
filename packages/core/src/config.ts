@@ -19,6 +19,7 @@ const policyProfileNameSchema = z.enum([
 const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "firejail", "unshare"]);
 const overlayRendererModeSchema = z.enum(["headless", "auto", "gtk3-x11"]);
 const browserBridgeSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), pairingTokenFile: z.string().min(1).optional() }).strict();
+const controlRoomSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), accessTokenFile: z.string().min(1).optional() }).strict();
 
 const automationStrategySchema = z.enum([
   "app_adapter",
@@ -120,6 +121,7 @@ const configFileSchema = z
     forgeRuntimeSandboxMode: forgeRuntimeSandboxModeSchema.optional(),
     overlayRendererMode: overlayRendererModeSchema.optional(),
     browserBridge: browserBridgeSchema.optional(),
+    controlRoom: controlRoomSchema.optional(),
     optionalAdapters: z.record(z.object({ enabled: z.boolean() }).strict()).optional(),
     grants: z.array(capabilityGrantSchema).max(500).optional()
   })
@@ -146,6 +148,15 @@ function expandHome(input: string, homeDir: string): string {
 function resolveLocalPath(input: string, homeDir: string): string {
   const expanded = expandHome(input, homeDir);
   return path.isAbsolute(expanded) ? expanded : path.resolve(expanded);
+}
+
+function resolveAgentHostPath(input: string, homeDir: string, agentHostDir: string): string {
+  const resolved = resolveLocalPath(input, homeDir);
+  const relative = path.relative(agentHostDir, resolved);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("control_room_token_path_outside_agenthost");
+  }
+  return resolved;
 }
 
 async function readConfigFile(configPath: string): Promise<z.infer<typeof configFileSchema>> {
@@ -243,6 +254,9 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const browserEnabled = env.AGENTHOST_BROWSER_BRIDGE_ENABLED === undefined ? fileConfig.browserBridge?.enabled ?? false : env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1";
   const browserPort = env.AGENTHOST_BROWSER_BRIDGE_PORT === undefined ? fileConfig.browserBridge?.port ?? 43117 : Number(env.AGENTHOST_BROWSER_BRIDGE_PORT);
   const browserBridge = { enabled: browserEnabled, port: z.number().int().min(1024).max(65535).parse(browserPort), pairingTokenFile: resolveLocalPath(env.AGENTHOST_BROWSER_PAIRING_TOKEN_FILE ?? fileConfig.browserBridge?.pairingTokenFile ?? path.join(agentHostDir, "browser", "pairing-token"), homeDir) };
+  const controlRoomEnabled = env.AGENTHOST_CONTROL_ROOM_ENABLED === undefined ? fileConfig.controlRoom?.enabled ?? false : env.AGENTHOST_CONTROL_ROOM_ENABLED === "1";
+  const controlRoomPort = env.AGENTHOST_CONTROL_ROOM_PORT === undefined ? fileConfig.controlRoom?.port ?? 43118 : Number(env.AGENTHOST_CONTROL_ROOM_PORT);
+  const controlRoom = { enabled: controlRoomEnabled, port: z.number().int().min(1024).max(65535).parse(controlRoomPort), accessTokenFile: resolveAgentHostPath(env.AGENTHOST_CONTROL_ROOM_TOKEN_FILE ?? fileConfig.controlRoom?.accessTokenFile ?? path.join(agentHostDir, "control-room", "access-token"), homeDir, agentHostDir) };
   const logFile = resolveLocalPath(
     env.AGENTHOST_LOG_FILE ?? fileConfig.logFile ?? path.join(agentHostDir, "logs", "agenthost.jsonl"),
     homeDir
@@ -256,6 +270,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     forgeRuntimeSandboxMode,
     overlayRendererMode,
     browserBridge,
+    controlRoom,
     optionalAdapters: fileConfig.optionalAdapters ?? {},
     policy: getPolicyProfile(parsedProfile, { grants })
   };

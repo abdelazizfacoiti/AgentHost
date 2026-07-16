@@ -14,6 +14,7 @@ describe("loadAgentHostConfig", () => {
     expect(config.policy.name).toBe("strict");
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
     expect(config.overlayRendererMode).toBe("headless");
+    expect(config.controlRoom).toEqual(expect.objectContaining({ enabled: false, port: 43118 }));
   });
 
   it("loads profile and paths from a config file", async () => {
@@ -166,5 +167,16 @@ describe("loadAgentHostConfig", () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-overlay-"));
     const config = await loadAgentHostConfig({ env: { AGENTHOST_OVERLAY_MODE: "gtk3-x11" }, homeDir });
     expect(config.overlayRendererMode).toBe("gtk3-x11");
+  });
+
+  it("loads and validates Control Room configuration", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-control-room-"));
+    const config = await loadAgentHostConfig({ env: { AGENTHOST_CONTROL_ROOM_ENABLED: "1", AGENTHOST_CONTROL_ROOM_PORT: "43119" }, homeDir });
+    expect(config.controlRoom).toMatchObject({ enabled: true, port: 43119, accessTokenFile: path.join(homeDir, ".agenthost", "control-room", "access-token") });
+  });
+
+  it("rejects Control Room token paths outside AgentHost home", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-control-room-path-"));
+    await expect(loadAgentHostConfig({ env: { AGENTHOST_CONTROL_ROOM_TOKEN_FILE: "/tmp/control-room-token" }, homeDir })).rejects.toThrow("control_room_token_path_outside_agenthost");
   });
 });

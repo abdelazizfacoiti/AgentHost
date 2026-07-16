@@ -25,6 +25,18 @@ export interface OverlayRendererReply {
 export interface OverlayRendererHandshakeData {
   protocolVersion: typeof OVERLAY_IPC_VERSION;
   capabilities: OverlayCapabilityReport;
+  rendererEpoch: number;
+}
+
+export type OverlayRendererAcknowledgement = "visible" | "updated" | "dismissed" | "cleared" | "emergency_hidden";
+export interface OverlayRendererOperationData {
+  command: Exclude<OverlayRendererCommand, "hello" | "capabilities" | "state" | "close">;
+  acknowledgement: OverlayRendererAcknowledgement;
+  rendererEpoch: number;
+  overlayId?: string;
+  visibleWindowCount: number;
+  interactiveWindowCount: number;
+  reason?: string;
 }
 
 const commands = new Set<OverlayRendererCommand>(["hello", "capabilities", "show", "update", "dismiss", "clear", "emergency_hide", "state", "close"]);
@@ -65,5 +77,24 @@ export function validateRendererCommand(command: string): command is OverlayRend
 export function validateRendererHandshake(value: unknown): value is OverlayRendererHandshakeData {
   if (value === null || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
-  return record.protocolVersion === OVERLAY_IPC_VERSION && record.capabilities !== null && typeof record.capabilities === "object";
+  return record.protocolVersion === OVERLAY_IPC_VERSION && Number.isInteger(record.rendererEpoch) && Number(record.rendererEpoch) >= 1 && record.capabilities !== null && typeof record.capabilities === "object";
+}
+
+export function validateRendererOperationData(value: unknown, expectedCommand?: OverlayRendererOperationData["command"]): value is OverlayRendererOperationData {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (expectedCommand !== undefined && record.command !== expectedCommand) return false;
+  if (typeof record.command !== "string" || !["show", "update", "dismiss", "clear", "emergency_hide"].includes(record.command)) return false;
+  if (!["visible", "updated", "dismissed", "cleared", "emergency_hidden"].includes(String(record.acknowledgement))) return false;
+  if (!Number.isInteger(record.rendererEpoch) || Number(record.rendererEpoch) < 1) return false;
+  if (!Number.isInteger(record.visibleWindowCount) || Number(record.visibleWindowCount) < 0 || Number(record.visibleWindowCount) > 100) return false;
+  if (!Number.isInteger(record.interactiveWindowCount) || Number(record.interactiveWindowCount) < 0 || Number(record.interactiveWindowCount) > 100) return false;
+  if (record.overlayId !== undefined && (typeof record.overlayId !== "string" || record.overlayId.length < 1 || record.overlayId.length > 200)) return false;
+  if (record.reason !== undefined && (typeof record.reason !== "string" || record.reason.length > 200)) return false;
+  const expectedAcknowledgement: Record<string, OverlayRendererAcknowledgement> = { show: "visible", update: "updated", dismiss: "dismissed", clear: "cleared", emergency_hide: "emergency_hidden" };
+  if (expectedCommand !== undefined && record.acknowledgement !== expectedAcknowledgement[expectedCommand]) return false;
+  if (record.command === "show" || record.command === "update") {
+    if (record.acknowledgement === "visible" || record.acknowledgement === "updated") return Number(record.visibleWindowCount) > 0;
+  }
+  return true;
 }

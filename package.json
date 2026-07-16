@@ -16,6 +16,7 @@
     "lint": "tsc -b --pretty false",
     "test": "vitest run",
     "start:mcp": "node packages/mcp-server/dist/index.js",
+    "control-room": "node scripts/start-control-room.mjs",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "browser:extension:prepare": "node scripts/prepare-browser-extension.mjs",
     "browser:extension:firefox": "node scripts/prepare-browser-extension.mjs --browser firefox",

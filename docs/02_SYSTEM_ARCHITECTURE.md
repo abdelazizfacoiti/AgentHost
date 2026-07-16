@@ -122,6 +122,10 @@ Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, 
   overlays/assistance-templates/
   overlays/control-surfaces/
   overlays/control-surface-event-ledger/
+  control-room/
+    activity.jsonl
+    screenshots.jsonl
+    access-token
   scheduler/
     jobs/ reviews/ activations/ activation-reviews/
     manual-run-contracts/ manual-run-reviews/ manual-run-preflights/
@@ -132,6 +136,10 @@ Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, 
 Records are local JSON with restrictive permissions and safe atomic writes where implemented. Receipt secrets and active receipt state are process-local; raw page text, OCR, credentials, tokens, and private payloads are not persisted.
 
 The unpacked browser bundle is prepared separately under `~/AgentHost/browser-extension/{firefox,chromium}`.
+
+## Control Room reporting boundary
+
+`packages/app-control-room` serves dependency-free static HTML over a same-process Node loopback listener. `mcp-server` supplies redacted projections from existing workflow, assistance, Forge, scheduler, overlay, browser, screenshot, and tool-activity records. Service is opt-in, binds only to `127.0.0.1`, uses per-process token, rejects non-local origins, caps queries/pagination, and exposes only GET reporting routes. No MCP execution route or target-application control path exists.
 
 ## Platform and trust limitations
 

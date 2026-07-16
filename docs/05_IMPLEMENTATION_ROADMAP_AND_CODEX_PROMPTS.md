@@ -253,3 +253,9 @@ git diff --check
 ```
 
 Documentation-only changes must also run stale-claim searches and manual heading/link/code-block checks.
+
+## Milestone A status
+
+Milestone A1, A2, A3, and A4 are complete for Build Week scope. A4 adds optional local read-only Control Room reporting with redacted projections, bounded polling UI, loopback token protection, and no execution surface.
+
+Next recommended milestone remains Milestone B planning only after A4 freeze. Provider-specific workflows, scheduler execution, skill replay, remote clients, accounts, and autonomous operation remain out of scope.

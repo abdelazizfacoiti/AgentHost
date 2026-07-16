@@ -1,7 +1,7 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { OverlayCapabilityReport } from "@agenthost/core";
 import { LinuxOverlayRenderer } from "../linux-renderer.js";
 import { probeLinuxOverlay } from "../linux-probe.js";
@@ -24,18 +24,47 @@ const supported: OverlayCapabilityReport = {
   limitations: []
 };
 
-async function fakeRendererScript(exitImmediately = false, invalidHandshake = false): Promise<{ dir: string; script: string }> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-overlay-renderer-"));
-  const script = path.join(dir, "fake-renderer.mjs");
-  const source = exitImmediately
-    ? "process.exit(78);\n"
-    : [
-        "import readline from 'node:readline';",
-        "const rl = readline.createInterface({ input: process.stdin });",
-        `rl.on('line', (line) => { try { const request = JSON.parse(line); const data = request.command === 'hello' ? ${invalidHandshake ? "{ invalid: true }" : "{ protocolVersion: 1, capabilities: { supported: true } }"} : { reason: 'fake_renderer' }; process.stdout.write(JSON.stringify({ version: 1, id: request.id, ok: true, data }) + '\\n'); } catch {} });`
-      ].join("\n");
-  await writeFile(script, source, "utf8");
-  return { dir, script };
+interface FakeRendererBehavior { invalidHandshake?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; }
+
+function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWithoutNullStreams {
+  const child = new EventEmitter() as unknown as { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; killed: boolean; kill: () => boolean; };
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.killed = false;
+  child.kill = () => { child.killed = true; queueMicrotask(() => (child as unknown as EventEmitter).emit("exit", 0, null)); return true; };
+  let buffer = "";
+  child.stdin.on("data", (chunk: Buffer | string) => {
+    buffer += chunk.toString();
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      const request = JSON.parse(line) as { id: string; command: string; payload?: { rendererEpoch?: number } };
+      const epoch = request.payload?.rendererEpoch ?? 1;
+      if (request.command === "hello" && behavior.noHandshake === true) { newline = buffer.indexOf("\n"); continue; }
+      if (request.command !== "hello" && behavior.noRenderAck === true) { newline = buffer.indexOf("\n"); continue; }
+      const data = request.command === "hello"
+        ? behavior.invalidHandshake === true ? { invalid: true } : { protocolVersion: 1, rendererEpoch: behavior.wrongEpoch === true ? epoch + 1 : epoch, capabilities: { supported: true } }
+        : ["show", "update", "dismiss", "clear", "emergency_hide"].includes(request.command)
+          ? { command: request.command, acknowledgement: request.command === "show" ? "visible" : request.command === "update" ? "updated" : request.command === "dismiss" ? "dismissed" : request.command === "clear" ? "cleared" : "emergency_hidden", rendererEpoch: epoch, visibleWindowCount: 1, interactiveWindowCount: 0 }
+          : { reason: "fake_renderer" };
+      child.stdout.write(JSON.stringify({ version: 1, id: request.id, ok: true, data }) + "\n");
+      newline = buffer.indexOf("\n");
+    }
+  });
+  return child as unknown as ChildProcessWithoutNullStreams;
+}
+
+function failingSpawnProcess(): ChildProcessWithoutNullStreams {
+  const child = new EventEmitter() as unknown as { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; killed: boolean; kill: () => boolean; };
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.killed = false;
+  child.kill = () => { child.killed = true; return true; };
+  queueMicrotask(() => (child as unknown as EventEmitter).emit("exit", 78, null));
+  return child as unknown as ChildProcessWithoutNullStreams;
 }
 
 describe("GTK renderer controller", () => {
@@ -48,37 +77,35 @@ describe("GTK renderer controller", () => {
   });
 
   it("uses authenticated fixed IPC for show/update/dismiss/clear/emergency-hide", async () => {
-    const fixture = await fakeRendererScript();
-    const renderer = new LinuxOverlayRenderer({ pythonCommand: process.execPath, scriptPath: fixture.script, probe: () => supported, environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    const renderer = new LinuxOverlayRenderer({ mode: "gtk3-x11", probe: () => supported, spawnProcess: () => fakeSpawnProcess(), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
     try {
-      expect((await renderer.show({ overlayId: "overlay-1", type: "pointer", payload: { type: "pointer", sensitivity: "public" } })).ok).toBe(true);
+      const shown = await renderer.show({ overlayId: "overlay-1", type: "pointer", payload: { type: "pointer", sensitivity: "public" } });
+      expect(shown.ok).toBe(true);
+      expect(shown.acknowledged).toBe(true);
+      expect(shown.rendererEpoch).toBeGreaterThan(0);
+      expect(shown.visibleWindowCount).toBeGreaterThan(0);
       expect((await renderer.update({ overlayId: "overlay-1", type: "pointer", payload: { type: "pointer", sensitivity: "public" } })).ok).toBe(true);
       expect((await renderer.dismiss("overlay-1")).ok).toBe(true);
       expect((await renderer.clear()).ok).toBe(true);
       expect((await renderer.emergencyHide()).ok).toBe(true);
     } finally {
       await renderer.close();
-      await rm(fixture.dir, { recursive: true, force: true });
     }
   });
 
   it("falls back safely when the renderer process fails", async () => {
-    const fixture = await fakeRendererScript(true);
-    const renderer = new LinuxOverlayRenderer({ pythonCommand: process.execPath, scriptPath: fixture.script, probe: () => supported, maxRestarts: 0, environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    const renderer = new LinuxOverlayRenderer({ probe: () => supported, spawnProcess: failingSpawnProcess, maxRestarts: 0, environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
     try {
       const result = await renderer.show({ overlayId: "overlay-fallback", type: "status_toast", payload: { type: "status_toast", text: "safe", sensitivity: "public" } });
       expect(result.ok).toBe(true);
       expect((await renderer.state()).renderer.fallbackRenderer).toBe("headless");
       expect((await renderer.capabilities()).rendererStatus).toBe("degraded");
-    } finally {
-      await renderer.close();
-      await rm(fixture.dir, { recursive: true, force: true });
-    }
+      expect((await renderer.diagnostics()).lastFailure).toBe("renderer_process_exited");
+    } finally { await renderer.close(); }
   });
 
   it("reports diagnostics and supports one explicit bounded restart", async () => {
-    const fixture = await fakeRendererScript();
-    const renderer = new LinuxOverlayRenderer({ pythonCommand: process.execPath, scriptPath: fixture.script, probe: () => supported, environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    const renderer = new LinuxOverlayRenderer({ mode: "gtk3-x11", probe: () => supported, spawnProcess: () => fakeSpawnProcess(), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
     try {
       const shown = await renderer.show({ overlayId: "overlay-1", type: "pointer", payload: { type: "pointer", sensitivity: "public" } });
       expect(shown.ok).toBe(true);
@@ -87,18 +114,42 @@ describe("GTK renderer controller", () => {
       const restarted = await renderer.restart();
       expect(typeof restarted.ok).toBe("boolean");
       expect((await renderer.diagnostics()).restartCount).toBeLessThanOrEqual(1);
-    } finally { await renderer.close(); await rm(fixture.dir, { recursive: true, force: true }); }
+    } finally { await renderer.close(); }
   });
 
   it("fails closed on invalid handshake without an endless restart loop", async () => {
-    const fixture = await fakeRendererScript(false, true);
-    const renderer = new LinuxOverlayRenderer({ pythonCommand: process.execPath, scriptPath: fixture.script, probe: () => supported, maxRestarts: 0, environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    const renderer = new LinuxOverlayRenderer({ pythonCommand: process.execPath, scriptPath: "unused", probe: () => supported, maxRestarts: 0, spawnProcess: () => fakeSpawnProcess({ invalidHandshake: true }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
     try {
       expect((await renderer.show({ overlayId: "overlay-invalid", type: "pointer", payload: { type: "pointer", sensitivity: "public" } })).ok).toBe(true);
       const diagnostics = await renderer.diagnostics();
       expect(diagnostics.handshake).toBe("failed");
       expect(diagnostics.fallbackReason).toBeDefined();
       expect((await renderer.show({ overlayId: "overlay-invalid-2", type: "pointer", payload: { type: "pointer", sensitivity: "public" } })).ok).toBe(true);
-    } finally { await renderer.close(); await rm(fixture.dir, { recursive: true, force: true }); }
+    } finally { await renderer.close(); }
+  });
+
+  it("never uses fallback to satisfy strict visible mode", async () => {
+    const renderer = new LinuxOverlayRenderer({ mode: "gtk3-x11", probe: () => supported, maxRestarts: 0, spawnProcess: () => fakeSpawnProcess({ invalidHandshake: true }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    try {
+      const result = await renderer.show({ overlayId: "overlay-strict", type: "pointer", payload: { type: "pointer", sensitivity: "public" } });
+      expect(result.ok).toBe(false);
+      expect(["renderer_protocol_error", "renderer_handshake_timeout", "renderer_process_exited"]).toContain(result.reason);
+      expect((await renderer.diagnostics()).fallbackReason).toBeDefined();
+    } finally { await renderer.close(); }
+  });
+
+  it("fails closed on handshake timeout, render acknowledgement timeout, and epoch mismatch", async () => {
+    const handshakeTimeout = new LinuxOverlayRenderer({ mode: "gtk3-x11", startupTimeoutMs: 250, probe: () => supported, spawnProcess: () => fakeSpawnProcess({ noHandshake: true }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    const renderTimeout = new LinuxOverlayRenderer({ mode: "gtk3-x11", renderAckTimeoutMs: 250, probe: () => supported, spawnProcess: () => fakeSpawnProcess({ noRenderAck: true }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    const epochMismatch = new LinuxOverlayRenderer({ mode: "gtk3-x11", probe: () => supported, spawnProcess: () => fakeSpawnProcess({ wrongEpoch: true }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    try {
+      expect((await handshakeTimeout.show({ overlayId: "timeout-handshake", type: "pointer", payload: {} })).reason).toBe("renderer_handshake_timeout");
+      expect((await renderTimeout.show({ overlayId: "timeout-render", type: "pointer", payload: {} })).reason).toBe("overlay_render_not_acknowledged");
+      expect((await epochMismatch.show({ overlayId: "mismatch", type: "pointer", payload: {} })).reason).toBe("renderer_epoch_mismatch");
+    } finally {
+      await handshakeTimeout.close();
+      await renderTimeout.close();
+      await epochMismatch.close();
+    }
   });
 });

@@ -42,6 +42,16 @@ describe("overlay foundation", () => {
     expect(unresolved.errors).toContain("target_changed");
   });
 
+  it("does not register overlay state before renderer acknowledgement", async () => {
+    class NoAckRenderer extends HeadlessOverlayRenderer {
+      override show() { return { ok: false, reason: "overlay_render_not_acknowledged", acknowledged: false }; }
+    }
+    const manager = new OverlayManager(new NoAckRenderer(), { sessionId: "overlay-test" });
+    const result = await manager.showPrimitive({ type: "pointer", target, sensitivity: "public" });
+    expect(result.ok).toBe(false);
+    expect((await manager.state()).overlays).toHaveLength(0);
+  });
+
   it("probes X11, Wayland, and headless without opening windows", () => {
     expect(probeLinuxOverlay({ XDG_SESSION_TYPE: "x11", DISPLAY: ":0" }).sessionType).toBe("x11");
     expect(probeLinuxOverlay({ XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" }).sessionType).toBe("wayland");

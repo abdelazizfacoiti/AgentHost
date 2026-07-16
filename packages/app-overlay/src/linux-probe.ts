@@ -18,7 +18,7 @@ export async function probeGtk3(environment: OverlayEnvironment = process.env, t
   return await new Promise((resolve) => {
     let settled = false;
     const finish = (value: boolean) => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
-    const child = spawn("python3", ["-c", "import cairo; import gi; gi.require_version('Gtk','3.0'); gi.require_version('Gdk','3.0'); from gi.repository import Gdk, Gtk; raise SystemExit(0)"], { stdio: ["ignore", "ignore", "ignore"], env: { PATH: environment.PATH ?? process.env.PATH ?? "/usr/bin:/bin", ...(environment.DISPLAY === undefined ? {} : { DISPLAY: environment.DISPLAY }), ...(environment.XAUTHORITY === undefined ? {} : { XAUTHORITY: environment.XAUTHORITY }), ...(environment.XDG_SESSION_TYPE === undefined ? {} : { XDG_SESSION_TYPE: environment.XDG_SESSION_TYPE }) } });
+    const child = spawn("python3", ["-c", "import cairo; import gi; gi.require_version('Gtk','3.0'); gi.require_version('Gdk','3.0'); from gi.repository import Gdk, Gtk; ok, _argv = Gtk.init_check([]); raise SystemExit(0 if ok else 78)"], { stdio: ["ignore", "ignore", "ignore"], env: { PATH: environment.PATH ?? process.env.PATH ?? "/usr/bin:/bin", ...(environment.DISPLAY === undefined ? {} : { DISPLAY: environment.DISPLAY }), ...(environment.XAUTHORITY === undefined ? {} : { XAUTHORITY: environment.XAUTHORITY }), ...(environment.XDG_SESSION_TYPE === undefined ? {} : { XDG_SESSION_TYPE: environment.XDG_SESSION_TYPE }) } });
     const timer = setTimeout(() => { child.kill("SIGKILL"); finish(false); }, timeoutMs);
     child.once("error", () => finish(false));
     child.once("exit", (code) => finish(code === 0));

@@ -209,15 +209,21 @@ export class OverlayControlSurfaceStore {
   }
 
   async #render(surface: SurfaceRecord, assistance: Record<string, unknown>, overlayId?: string): Promise<void> {
-    await this.#refresh(surface, assistance);
     const result = await this.#manager.showWidget(this.#widget(surface, assistance, overlayId));
-    if (!result.ok || result.overlay === undefined) {
+    const diagnostics = await this.#manager.diagnostics();
+    const rendererReady = diagnostics.rendererStatus === "headless" || (diagnostics.rendererStatus === "available" && diagnostics.childState === "running" && diagnostics.handshake === "passed" && diagnostics.runtimeState === "ready");
+    const live = result.overlay === undefined ? false : this.#manager.isOverlayLive(result.overlay.overlayId);
+    if (!result.ok || result.overlay === undefined || !rendererReady || !live) {
+      if (result.overlay !== undefined && (!rendererReady || !live)) await this.#manager.dismiss(result.overlay.overlayId).catch(() => undefined);
       surface.status = "stale";
       surface.bindingState = "stale";
-      surface.blockers = [...new Set([...surface.blockers, result.errors[0] ?? "control_surface_render_failed"])];
+      const reason = !rendererReady ? diagnostics.lastFailure ?? (diagnostics.handshake !== "passed" ? "renderer_handshake_timeout" : "overlay_render_not_acknowledged") : !live ? "overlay_live_registration_missing" : result.errors[0] ?? "control_surface_render_failed";
+      surface.blockers = [...new Set([...surface.blockers, reason])];
       await this.#persist(surface);
       throw new Error(surface.blockers.at(-1));
     }
+    // Manager records overlay only after renderer acknowledgement; refresh projection after live registration.
+    await this.#refresh(surface, assistance);
     surface.overlayId = result.overlay.overlayId;
     surface.rendererEpoch = this.#manager.rendererEpoch();
     surface.status = "visible";
