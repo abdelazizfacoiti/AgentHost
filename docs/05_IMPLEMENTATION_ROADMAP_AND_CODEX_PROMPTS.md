@@ -59,6 +59,10 @@ Use the existing strategy order, app/adapter discovery, browser/accessibility/vi
 - reviewed Forge proposals;
 - provider-agnostic adapter contracts.
 
+### R2 status
+
+Persistent capability strategy registry and deterministic selection are complete. Built-in structural strategies, bounded local proposals/reviews, live prerequisite checks, Browser Bridge preference, bounded fallbacks, signed-receipt outcome verification, confidence/degradation, and redacted Control Room projection are implemented. Strategy selection remains advisory; no generic executor or autonomous fallback exists.
+
 ### Exclusions and risk
 
 No automatic generated-tool execution, arbitrary source execution, provider-specific core architecture, or autonomous fallback. Risk is accidental escalation from recommendation to execution.

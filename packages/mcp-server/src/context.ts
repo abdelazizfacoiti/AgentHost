@@ -52,6 +52,8 @@ import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 import type { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
 import type { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
 import type { ControlRoomStore } from "./control-room-store.js";
+import type { CapabilityStrategyStore } from "./capability-strategy-store.js";
+import type { CapabilityStrategyService } from "./capability-strategy-service.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -165,5 +167,7 @@ export interface AgentHostMcpContext {
   overlayAssistanceTemplates?: OverlayAssistanceTemplateStore;
   overlayControlSurface?: OverlayControlSurfaceStore;
   controlRoom?: ControlRoomStore;
+  strategyStore?: CapabilityStrategyStore;
+  strategyService?: CapabilityStrategyService;
   linux: LinuxAutomation;
 }

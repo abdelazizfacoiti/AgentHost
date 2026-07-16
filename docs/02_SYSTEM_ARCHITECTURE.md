@@ -22,7 +22,11 @@ Shared contracts and validators: policy profiles, grants, risk and sensitivity, 
 
 ### `packages/mcp-server`
 
-MCP server and context, `tool-runner.ts`, `tool-metadata.ts`, confirmation manager, receipt manager, audit integration, policy/grant wiring, Forge stores/tools and runtime sandbox modules, browser/desktop/accessibility/vision/checkpoint/workflow/replay/scheduler/overlay tools, workflow stores, scheduler stores, overlay assistance store, assistance projections, and the owner-scoped visual-template store.
+MCP server and context, `tool-runner.ts`, `tool-metadata.ts`, confirmation manager, receipt manager, audit integration, policy/grant wiring, Forge stores/tools and runtime sandbox modules, browser/desktop/accessibility/vision/checkpoint/workflow/replay/scheduler/overlay tools, workflow stores, scheduler stores, capability strategy store/service/tools, overlay assistance store, assistance projections, and the owner-scoped visual-template store.
+
+### Capability strategy boundary
+
+`capability-strategy-store.ts` persists versioned structural definitions, reviews, bounded selections, and safe outcome summaries under `~/.agenthost/strategies/`. `capability-strategy-service.ts` performs deterministic compatibility/health ranking, Browser Bridge preference, bounded fallback planning, fixed read-only verification, receipt validation, confidence updates, and degradation. It has no generic executor; original MCP tools remain governed execution boundary.
 
 ### `packages/os-linux`
 

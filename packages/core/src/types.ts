@@ -631,6 +631,7 @@ export interface ControlRoomHealthProjection {
   renderer?: Record<string, unknown>;
   browser?: Record<string, unknown>;
   stores: { activity: "available" | "unavailable"; workflows: "available" | "unavailable"; forge: "available" | "unavailable"; scheduler: "available" | "unavailable" };
+  strategies?: Record<string, unknown>;
   limitations: string[];
 }
 
