@@ -194,7 +194,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
   });
   const browserBridge = options.browser === undefined
-    ? new BrowserBridgeServer(config.browserBridge ?? { enabled: false, port: 43117, pairingTokenFile: path.join(config.agentHostDir, "browser", "pairing-token") })
+    ? new BrowserBridgeServer(config.browserBridge ?? { enabled: false, port: 43117, pairingTokenFile: path.join(config.agentHostDir, "browser", "pairing-token") }, SERVER_VERSION)
     : undefined;
   if (browserBridge !== undefined) await browserBridge.start();
   const browser = options.browser ?? createBrowserAdapter(browserBridge!);

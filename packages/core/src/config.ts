@@ -18,7 +18,12 @@ const policyProfileNameSchema = z.enum([
 
 const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "firejail", "unshare"]);
 const overlayRendererModeSchema = z.enum(["headless", "auto", "gtk3-x11"]);
-const browserBridgeSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), pairingTokenFile: z.string().min(1).optional() }).strict();
+const browserBridgeSchema = z.object({
+  enabled: z.boolean().optional(),
+  port: z.number().int().min(1024).max(65535).optional(),
+  pairingTokenFile: z.string().min(1).optional(),
+  pairingStateFile: z.string().min(1).optional()
+}).strict();
 const controlRoomSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), accessTokenFile: z.string().min(1).optional() }).strict();
 
 const automationStrategySchema = z.enum([
@@ -253,7 +258,13 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
   const browserEnabled = env.AGENTHOST_BROWSER_BRIDGE_ENABLED === undefined ? fileConfig.browserBridge?.enabled ?? false : env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1";
   const browserPort = env.AGENTHOST_BROWSER_BRIDGE_PORT === undefined ? fileConfig.browserBridge?.port ?? 43117 : Number(env.AGENTHOST_BROWSER_BRIDGE_PORT);
-  const browserBridge = { enabled: browserEnabled, port: z.number().int().min(1024).max(65535).parse(browserPort), pairingTokenFile: resolveLocalPath(env.AGENTHOST_BROWSER_PAIRING_TOKEN_FILE ?? fileConfig.browserBridge?.pairingTokenFile ?? path.join(agentHostDir, "browser", "pairing-token"), homeDir) };
+  const pairingTokenFile = resolveLocalPath(env.AGENTHOST_BROWSER_PAIRING_TOKEN_FILE ?? fileConfig.browserBridge?.pairingTokenFile ?? path.join(agentHostDir, "browser", "pairing-token"), homeDir);
+  const browserBridge = {
+    enabled: browserEnabled,
+    port: z.number().int().min(1024).max(65535).parse(browserPort),
+    pairingTokenFile,
+    pairingStateFile: resolveLocalPath(env.AGENTHOST_BROWSER_PAIRING_STATE_FILE ?? fileConfig.browserBridge?.pairingStateFile ?? path.join(path.dirname(pairingTokenFile), "paired-devices.json"), homeDir)
+  };
   const controlRoomEnabled = env.AGENTHOST_CONTROL_ROOM_ENABLED === undefined ? fileConfig.controlRoom?.enabled ?? false : env.AGENTHOST_CONTROL_ROOM_ENABLED === "1";
   const controlRoomPort = env.AGENTHOST_CONTROL_ROOM_PORT === undefined ? fileConfig.controlRoom?.port ?? 43118 : Number(env.AGENTHOST_CONTROL_ROOM_PORT);
   const controlRoom = { enabled: controlRoomEnabled, port: z.number().int().min(1024).max(65535).parse(controlRoomPort), accessTokenFile: resolveAgentHostPath(env.AGENTHOST_CONTROL_ROOM_TOKEN_FILE ?? fileConfig.controlRoom?.accessTokenFile ?? path.join(agentHostDir, "control-room", "access-token"), homeDir, agentHostDir) };

@@ -10,3 +10,4 @@ coverage/
 .agenthost-git/
 skills-lock.json
 .agents/
+release/

@@ -661,6 +661,8 @@ export interface BrowserBridgeConfig {
   enabled: boolean;
   port: number;
   pairingTokenFile: string;
+  /** Persistent revocable browser-device records. Defaults beside pairingTokenFile. */
+  pairingStateFile?: string;
 }
 
 export type BrowserFamily = "firefox" | "chromium";

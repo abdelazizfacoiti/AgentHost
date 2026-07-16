@@ -43,7 +43,7 @@ Unknown fields, malformed values, unsupported dangerous capabilities, invalid ro
 
 ## Browser bridge and element safety
 
-The Firefox/Chromium bridge is disabled by default, binds only to `127.0.0.1`, requires a protected pairing token and rotating session token, allows one active session, and caps bodies, commands, and polling. Extension origins are checked. No cookies, storage, history, debugger, webRequest, password APIs, arbitrary JavaScript, upload, submit, send, or form API exists.
+Firefox/Chromium bridge is disabled by default and binds only to `127.0.0.1`. Enrollment token is short-lived and consumed once. Persistent device record binds browser family, exact origin, extension identity, protocol, and compatible version; AgentHost stores only reconnect-secret hash. Session token remains memory-only. One active session, request bodies, command queue, command timeout, and reconnect window are bounded. Revocation/rotation invalidates prior device credentials. No cookies, page storage, history, debugger, webRequest, password APIs, arbitrary JavaScript, upload, submit, send, or generic form API exists.
 
 Setup diagnostics expose state codes and recovery steps, not tokens, page content, or private URLs. Pairing-token generation/reset is dry-run and confirmation-gated; explicit generation returns the token once. Tokens never enter logs.
 

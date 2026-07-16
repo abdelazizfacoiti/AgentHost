@@ -1,1 +1,21 @@
-{"manifest_version":3,"name":"AgentHost Browser Bridge","version":"0.1.0","permissions":["tabs","storage","scripting"],"host_permissions":["http://127.0.0.1/*"],"optional_host_permissions":["https://*/*","http://*/*"],"background":{"scripts":["background.js"]},"action":{"default_popup":"popup.html"}}
+{
+  "manifest_version": 3,
+  "name": "AgentHost Browser Bridge",
+  "version": "0.1.0",
+  "description": "Local, paired browser bridge for AgentHost.",
+  "permissions": ["tabs", "storage", "scripting", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "browser-bridge@agenthost.local",
+      "strict_min_version": "109.0"
+    }
+  }
+}

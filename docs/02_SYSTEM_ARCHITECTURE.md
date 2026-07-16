@@ -65,7 +65,7 @@ Central verification does not replace domain checks. Confirmation envelopes do n
 
 ## Browser trust boundary
 
-The bridge is disabled by default and binds to `127.0.0.1`. Extension origin, pairing token, rotating session token, body size, command timeout, and one-session limits are validated. The extension receives only fixed commands. Browser content is sanitized and sensitivity-gated before it reaches a ToolResult. If the extension is unavailable, AgentHost recommends accessibility, local vision/OCR, pointer, or guide strategies explicitly; it never silently executes a fallback.
+The bridge is disabled by default and binds to `127.0.0.1`. Initial enrollment uses one short-lived, single-use token. AgentHost then persists a revocable device record containing exact extension identity/origin and only a hash of the reconnect secret. Session tokens remain memory-only. Protocol and extension versions are checked on enrollment/reconnect; command/body/session queues are bounded. Extension receives only fixed commands. Browser content is sanitized and sensitivity-gated before it reaches a ToolResult. If extension is unavailable, AgentHost recommends accessibility, local vision/OCR, pointer, or guide strategies explicitly; it never silently executes a fallback.
 
 ## Overlay renderer boundary
 
@@ -113,6 +113,7 @@ Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, 
   outputs/
   screenshots/
   browser/pairing-token
+  browser/paired-devices.json
   forge/
     manifests/ reviews/ artifacts/ proposals/ generated/
     validations/ harness-runs/ registrations/ runtime-runs/
