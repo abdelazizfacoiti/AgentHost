@@ -32,6 +32,8 @@ describe("registered tool execution metadata", () => {
     expect(capabilities.some((tool) => tool.name === "system.get_info")).toBe(true);
     expect(capabilities.every((tool) => tool.execution !== undefined)).toBe(true);
     expect(capabilities.some((tool) => tool.name === "blender.run_python")).toBe(false);
+    expect(capabilities.some((tool) => tool.name === "speech.list_providers" && tool.execution?.executionClass === "read_only")).toBe(true);
+    expect(capabilities.find((tool) => tool.name === "speech.synthesize")?.execution).toMatchObject({ executionClass: "state_changing", requiresDryRun: true, requiresConfirmationToken: true });
     expect(capabilities.filter((tool) => tool.name.startsWith("overlay.control_surface_")).map((tool) => tool.name)).toEqual([
       "overlay.control_surface_show",
       "overlay.control_surface_get",

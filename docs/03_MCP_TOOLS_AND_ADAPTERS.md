@@ -4,7 +4,7 @@ All callable tools return `ToolResult`. MCP transport is stdio. The browser brid
 
 ## Inventory and execution classes
 
-The server materializes one validated `ToolDefinition[]`. MCP `tools/list` and `system.list_capabilities` are projections of that same loaded set. The default set currently has 210 tools: 46 `read_only`, 3 `diagnostic`, 107 `metadata_only`, 25 `state_changing`, and 29 `visual_only`. No loaded tool currently uses the available `inert` class; inert/review-only records are materialized as `metadata_only` today.
+The server materializes one validated `ToolDefinition[]`. MCP `tools/list` and `system.list_capabilities` are projections of that same loaded set. Inventory count is generated from the loaded set at startup and must not be treated as a hard-coded documentation contract. Speech tools are included when the base server loads; optional adapters remain conditional. No loaded tool currently uses the available `inert` class; inert/review-only records are materialized as `metadata_only` today.
 
 Each loaded definition has:
 
@@ -114,3 +114,9 @@ State-changing tools declare dry-run/confirmation metadata. The central runner v
 ## Control Room
 
 Control Room is HTTP reporting surface, not MCP capability. It is disabled by default and starts only when explicitly enabled. It displays bounded dashboard, task, timeline, screenshot-metadata, and health projections from real local records. It never invokes MCP tools, creates confirmations, grants access, starts replay, starts jobs, or controls browser/desktop targets.
+
+## Speech tools
+
+`speech.list_providers`, `speech.get_capabilities`, `speech.list_voices`, `speech.list_languages`, `speech.devices_list`, and `speech.routing_diagnose` expose bounded local/offline metadata. `speech.artifact_get`, `speech.playback_state`, and `speech.transmission_get` return owner-scoped metadata only. `speech.synthesize` creates an expiring owner-scoped artifact; `speech.play` and `speech.stop` affect only AgentHost-owned local playback. These state-changing tools require dry-run and confirmation.
+
+`speech.transmission_prepare` validates an existing local default output route and target without transmitting. `speech.transmission_execute` is separate, high-risk, grant- and confirmation-gated, one-time exact-binding playback; execution rechecks artifact metadata, route readiness, owner, expiry, and target binding. Arbitrary device routing is unsupported. It does not join meetings, create routes, record microphones, transcribe, send written recaps, or use network TTS.

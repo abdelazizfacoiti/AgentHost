@@ -115,4 +115,12 @@ Control Room binds only to `127.0.0.1`, uses separate default port `43118`, requ
 
 Control Room receives redacted activity summaries and screenshot metadata only. It omits private page/OCR/file content, secrets, cookies, passwords, environment values, raw screenshots, and receipt signatures. Service failure cannot weaken or alter AgentHost tool safety.
 
+## Local speech security
+
+Speech provider discovery uses fixed local commands only. No provider installation, model download, cloud TTS, or silent network fallback exists. Provider processes receive filtered environment and bounded arguments; secrets, tokens, cookies, credentials, GUI variables, and arbitrary commands are excluded.
+
+Synthesis input is size-limited and never persisted as raw text. Secret-looking text is blocked; private/sensitive text requires grants. Artifacts use opaque owner-scoped IDs, AgentHost-only directories, restrictive permissions, atomic writes, and TTL cleanup. Logs, traces, and Control Room contain hashes, lengths, provider/voice IDs, status, limits, and counts only.
+
+Playback is limited to AgentHost-owned artifacts and owned child processes. Device/routing diagnostics are read-only; AgentHost does not create sinks, loopbacks, virtual microphones, or routes. Transmission preparation does not transmit. Transmission execution rechecks target, route, artifact, grants, policy, expiry, owner, and exact confirmation, then consumes preparation before playback to prevent reuse. Only an already-available default output route is supported. Communication, financial, credential/security, and admin targets fail closed. No microphone recording, transcription, CAPTCHA/MFA bypass, automatic recap, or written-message delivery is present.
+
 Session-bound Control Room projections use owner context derived from the MCP server session; owner IDs are never accepted from HTTP input. Forge runtime records carry that owner binding for new runs, while legacy records without binding fail closed from session-scoped views. Scheduler records remain inert, local governance metadata and never imply execution. Pagination, date ranges, cursors, response size, and screenshot metadata are bounded and validated.

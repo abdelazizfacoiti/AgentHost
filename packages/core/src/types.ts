@@ -631,6 +631,7 @@ export interface ControlRoomHealthProjection {
   renderer?: Record<string, unknown>;
   browser?: Record<string, unknown>;
   stores: { activity: "available" | "unavailable"; workflows: "available" | "unavailable"; forge: "available" | "unavailable"; scheduler: "available" | "unavailable" };
+  speech?: Record<string, unknown>;
   strategies?: Record<string, unknown>;
   limitations: string[];
 }
@@ -654,8 +655,21 @@ export interface AgentHostConfig {
   overlayRendererMode?: import("./overlay.js").OverlayRendererMode;
   browserBridge?: BrowserBridgeConfig;
   controlRoom?: ControlRoomConfig;
+  speech?: SpeechConfig;
   optionalAdapters?: Record<string, { enabled: boolean }>;
   policy: PolicyProfile;
+}
+
+export interface SpeechConfig {
+  enabled: boolean;
+  providerPreference: Array<"espeak-ng" | "piper" | "speech-dispatcher">;
+  defaultProvider?: "espeak-ng" | "piper" | "speech-dispatcher";
+  artifactTtlMs: number;
+  maxTextChars: number;
+  maxDurationMs: number;
+  maxArtifactBytes: number;
+  synthesisTimeoutMs: number;
+  playbackTimeoutMs: number;
 }
 
 export interface BrowserBridgeConfig {

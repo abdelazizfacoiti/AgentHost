@@ -25,6 +25,17 @@ const browserBridgeSchema = z.object({
   pairingStateFile: z.string().min(1).optional()
 }).strict();
 const controlRoomSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), accessTokenFile: z.string().min(1).optional() }).strict();
+const speechSchema = z.object({
+  enabled: z.boolean().optional(),
+  providerPreference: z.array(z.enum(["espeak-ng", "piper", "speech-dispatcher"])).min(1).max(3).optional(),
+  defaultProvider: z.enum(["espeak-ng", "piper", "speech-dispatcher"]).optional(),
+  artifactTtlMs: z.number().int().positive().max(86_400_000).optional(),
+  maxTextChars: z.number().int().positive().max(20_000).optional(),
+  maxDurationMs: z.number().int().positive().max(300_000).optional(),
+  maxArtifactBytes: z.number().int().positive().max(50_000_000).optional(),
+  synthesisTimeoutMs: z.number().int().positive().max(60_000).optional(),
+  playbackTimeoutMs: z.number().int().positive().max(300_000).optional()
+}).strict();
 
 const automationStrategySchema = z.enum([
   "app_adapter",
@@ -127,6 +138,7 @@ const configFileSchema = z
     overlayRendererMode: overlayRendererModeSchema.optional(),
     browserBridge: browserBridgeSchema.optional(),
     controlRoom: controlRoomSchema.optional(),
+    speech: speechSchema.optional(),
     optionalAdapters: z.record(z.object({ enabled: z.boolean() }).strict()).optional(),
     grants: z.array(capabilityGrantSchema).max(500).optional()
   })
@@ -268,6 +280,17 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const controlRoomEnabled = env.AGENTHOST_CONTROL_ROOM_ENABLED === undefined ? fileConfig.controlRoom?.enabled ?? false : env.AGENTHOST_CONTROL_ROOM_ENABLED === "1";
   const controlRoomPort = env.AGENTHOST_CONTROL_ROOM_PORT === undefined ? fileConfig.controlRoom?.port ?? 43118 : Number(env.AGENTHOST_CONTROL_ROOM_PORT);
   const controlRoom = { enabled: controlRoomEnabled, port: z.number().int().min(1024).max(65535).parse(controlRoomPort), accessTokenFile: resolveAgentHostPath(env.AGENTHOST_CONTROL_ROOM_TOKEN_FILE ?? fileConfig.controlRoom?.accessTokenFile ?? path.join(agentHostDir, "control-room", "access-token"), homeDir, agentHostDir) };
+  const speech = {
+    enabled: fileConfig.speech?.enabled ?? true,
+    providerPreference: fileConfig.speech?.providerPreference ?? ["espeak-ng", "piper", "speech-dispatcher"] as Array<"espeak-ng" | "piper" | "speech-dispatcher">,
+    ...(fileConfig.speech?.defaultProvider === undefined ? {} : { defaultProvider: fileConfig.speech.defaultProvider }),
+    artifactTtlMs: fileConfig.speech?.artifactTtlMs ?? 900_000,
+    maxTextChars: fileConfig.speech?.maxTextChars ?? 4_000,
+    maxDurationMs: fileConfig.speech?.maxDurationMs ?? 120_000,
+    maxArtifactBytes: fileConfig.speech?.maxArtifactBytes ?? 20_000_000,
+    synthesisTimeoutMs: fileConfig.speech?.synthesisTimeoutMs ?? 30_000,
+    playbackTimeoutMs: fileConfig.speech?.playbackTimeoutMs ?? 300_000
+  };
   const logFile = resolveLocalPath(
     env.AGENTHOST_LOG_FILE ?? fileConfig.logFile ?? path.join(agentHostDir, "logs", "agenthost.jsonl"),
     homeDir
@@ -282,6 +305,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     overlayRendererMode,
     browserBridge,
     controlRoom,
+    speech,
     optionalAdapters: fileConfig.optionalAdapters ?? {},
     policy: getPolicyProfile(parsedProfile, { grants })
   };

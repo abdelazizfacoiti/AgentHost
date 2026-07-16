@@ -18,6 +18,7 @@ import type { ToolReceiptManager } from "./tool-receipts.js";
 import { CapabilityStrategyStore } from "./capability-strategy-store.js";
 import type { OverlayManager } from "@agenthost/app-overlay";
 import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
+import type { SpeechService } from "./speech-service.js";
 
 type Binding = { selection: CapabilityStrategySelection; strategy?: CapabilityStrategyDefinition; destination?: string; assistanceSessionId?: string; createdAt: number };
 type Verification = { verificationId: string; selectionId: string; strategyId: string; checkpoint: CapabilityStrategyDefinition["verificationCheckpoints"][number]; status: "verified_success" | "verified_failure"; toolFamily: CapabilityStrategyOutcome["toolFamily"]; expiresAt: number };
@@ -30,6 +31,7 @@ function strategyFamily(tool: string): CapabilityStrategyOutcome["toolFamily"] {
   if (tool.startsWith("vision.")) return "vision";
   if (tool.startsWith("desktop.") || tool.startsWith("window.")) return "desktop";
   if (tool.startsWith("overlay.")) return "overlay";
+  if (tool.startsWith("speech.")) return "speech";
   if (tool.startsWith("adapter.") || tool.startsWith("app.")) return "adapter";
   return "guide";
 }
@@ -43,6 +45,7 @@ export interface StrategyServiceContext {
   browserBridge?: { status(): Record<string, unknown> };
   overlay?: Pick<OverlayManager, "state" | "diagnostics">;
   overlayAssistance?: Pick<OverlayAssistanceStore, "explain">;
+  speech?: Pick<SpeechService, "capabilities">;
   receipts?: Pick<ToolReceiptManager, "verify">;
 }
 
@@ -72,6 +75,14 @@ export class CapabilityStrategyService {
     }
     for (const check of strategy?.prerequisiteChecks ?? []) {
       if (check === "browser_bridge_paired" || check === "browser_extension_compatible") continue;
+      if (check === "speech_provider_ready" || check === "audio_route_ready") {
+        try {
+          const capabilities = context.speech === undefined ? undefined : await context.speech.capabilities();
+          const status = check === "speech_provider_ready" ? (capabilities?.synthesisSupported === true ? "passed" : "failed") : (capabilities?.playbackSupported === true ? "passed" : "failed");
+          checks.push({ check, status, reason: status === "passed" ? "Local speech capability is ready." : "Local speech capability is unavailable." });
+        } catch { checks.push({ check, status: "unknown", reason: "Local speech health unavailable." }); }
+        continue;
+      }
       const status = check === "adapter_available" ? (context.adapters.listAdapters().length > 0 ? "passed" : "failed") : "unknown";
       checks.push({ check, status, reason: status === "passed" ? "Available." : "No safe live probe is registered." });
     }

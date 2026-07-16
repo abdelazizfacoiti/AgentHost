@@ -11,19 +11,19 @@ export const CAPABILITY_STRATEGY_GOALS = [
   "meeting_recap", "local_tts", "speech_output"
 ] as const;
 export type CapabilityStrategyGoal = (typeof CAPABILITY_STRATEGY_GOALS)[number];
-export const CAPABILITY_STRATEGY_FAMILIES = ["browser", "accessibility", "vision", "desktop", "overlay", "guide", "adapter", "speech_unavailable"] as const;
+export const CAPABILITY_STRATEGY_FAMILIES = ["browser", "accessibility", "vision", "desktop", "overlay", "guide", "adapter", "speech", "speech_unavailable"] as const;
 export type CapabilityStrategyFamily = (typeof CAPABILITY_STRATEGY_FAMILIES)[number];
 export const CAPABILITY_STRATEGY_OPERATIONS = [
   "inspect_bridge", "reuse_tab", "open_tab", "navigate", "wait_ready", "verify_url", "inspect_page",
   "find_element", "prepare_field", "submission_boundary", "recover_target", "show_visual_guidance",
-  "inspect_meeting_state", "prepare_recap", "synthesize_local_audio", "prepare_speech_output", "guide_operator"
+  "inspect_meeting_state", "prepare_recap", "list_speech_providers", "list_speech_voices", "diagnose_audio_routing", "synthesize_local_audio", "prepare_audio_transmission", "execute_audio_transmission", "prepare_speech_output", "guide_operator"
 ] as const;
 export type CapabilityStrategyOperation = (typeof CAPABILITY_STRATEGY_OPERATIONS)[number];
 export const CAPABILITY_STRATEGY_BINDINGS = ["none", "normalized_url", "current_session_goal", "declared_parameter", "fresh_target_reference"] as const;
 export type CapabilityStrategyBinding = (typeof CAPABILITY_STRATEGY_BINDINGS)[number];
-export const CAPABILITY_STRATEGY_RESULTS = ["bridge_status", "browser_tab", "page_context", "field_metadata", "checkpoint_passed", "visual_session", "meeting_metadata", "audio_artifact", "operator_guidance"] as const;
+export const CAPABILITY_STRATEGY_RESULTS = ["bridge_status", "browser_tab", "page_context", "field_metadata", "checkpoint_passed", "visual_session", "meeting_metadata", "provider_status", "voice_list", "audio_artifact", "routing_status", "transmission_preparation", "operator_guidance"] as const;
 export type CapabilityStrategyResult = (typeof CAPABILITY_STRATEGY_RESULTS)[number];
-export const CAPABILITY_STRATEGY_CHECKPOINTS = ["bridge_paired", "browser_url_verified", "page_ready", "safe_structure_observed", "field_prepared_without_submit", "target_revalidated", "visual_session_state", "meeting_source_authorized", "audio_ready", "manual_operator_check"] as const;
+export const CAPABILITY_STRATEGY_CHECKPOINTS = ["bridge_paired", "browser_url_verified", "page_ready", "safe_structure_observed", "field_prepared_without_submit", "target_revalidated", "visual_session_state", "meeting_source_authorized", "provider_ready", "audio_ready", "routing_ready", "transmission_prepared", "manual_operator_check"] as const;
 export type CapabilityStrategyCheckpoint = (typeof CAPABILITY_STRATEGY_CHECKPOINTS)[number];
 export const CAPABILITY_STRATEGY_FAILURES = [
   "bridge_unavailable", "extension_disconnected", "extension_version_mismatch", "invalid_url", "navigation_timeout",
@@ -160,7 +160,7 @@ const MAX_FALLBACKS = 3;
 const SAFE_TEXT = /^[^\u0000-\u001f\u007f]+$/;
 const PROHIBITED_TEXT = /password|passwd|api[ _-]?key|access[ _-]?token|pairing\s*(token|secret)|confirmation\s*(token|secret)|cookie|private key|bearer|javascript:|data:|file:|curl\s+[^ ]+\||wget\s+[^ ]+\||message body|meeting transcript|screenshot bytes|ocr text|page text|\/home\/|\/tmp\//i;
 const SAFE_ID = /^[a-z0-9][a-z0-9._-]{1,100}$/;
-const TRUSTED_TOOL_NAMES = new Set(["browser.detect", "browser.get_active_tab", "browser.open_url", "browser.wait_for_state", "browser.current_url", "browser.get_page_context", "browser.find_element", "browser.fill_text", "browser.get_form_state", "browser.diagnose_bridge", "vision.find_target", "overlay.assistance_step_show", "guide.explain_strategy", "guide.create_steps"]);
+const TRUSTED_TOOL_NAMES = new Set(["browser.detect", "browser.get_active_tab", "browser.open_url", "browser.wait_for_state", "browser.current_url", "browser.get_page_context", "browser.find_element", "browser.fill_text", "browser.get_form_state", "browser.diagnose_bridge", "vision.find_target", "overlay.assistance_step_show", "guide.explain_strategy", "guide.create_steps", "speech.list_providers", "speech.list_voices", "speech.synthesize", "speech.routing_diagnose", "speech.transmission_prepare", "speech.transmission_execute"]);
 const STRATEGY_KEYS = new Set(["strategyId", "schemaVersion", "name", "description", "goalCategory", "goalVariants", "supportedOperatingSystems", "supportedApplications", "supportedAdapters", "compatibleProfiles", "compatibleAgentHostRange", "compatibleBrowserExtensionRange", "compatibleAdapterRanges", "requiredCapabilities", "prerequisiteChecks", "preferredSteps", "fallbackStrategyIds", "verificationCheckpoints", "expectedSafety", "expectedConfirmationBoundary", "knownFailureCodes", "successCount", "failureCount", "consecutiveFailureCount", "confidence", "source", "createdAt", "updatedAt", "lastUsedAt", "lastVerifiedAt", "invalidationConditions", "status", "reviewId", "lastFailureCode"]);
 const STEP_KEYS = new Set(["stepId", "operation", "capabilityFamily", "trustedTool", "prerequisite", "inputBinding", "expectedResult", "verification", "timeoutMs", "retryLimit", "fallbackCode", "expectedExecutionClass", "expectedRiskLevel", "requiresDryRun", "requiresConfirmation"]);
 const SAFETY_KEYS = new Set(["executionClasses", "maxRiskLevel", "requiresDryRun", "requiresConfirmation", "exactTarget"]);

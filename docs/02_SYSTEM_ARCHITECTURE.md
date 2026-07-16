@@ -28,6 +28,12 @@ MCP server and context, `tool-runner.ts`, `tool-metadata.ts`, confirmation manag
 
 `capability-strategy-store.ts` persists versioned structural definitions, reviews, bounded selections, and safe outcome summaries under `~/.agenthost/strategies/`. `capability-strategy-service.ts` performs deterministic compatibility/health ranking, Browser Bridge preference, bounded fallback planning, fixed read-only verification, receipt validation, confidence updates, and degradation. It has no generic executor; original MCP tools remain governed execution boundary.
 
+## Local speech boundary
+
+`packages/os-linux/src/speech.ts` owns fixed Linux provider, voice, device, routing, synthesis, and playback subprocess probes. `speech-service.ts` coordinates provider health, bounded artifacts, owner/session checks, preparation TTLs, and transmission revalidation. `speech-store.ts` stores only opaque artifact/preparation metadata under `~/.agenthost/speech/`; audio files never enter logs or Control Room projections. All commands use argument arrays, `shell:false`, filtered environment, bounded timeout/output, and cleanup.
+
+Speech transmission is generic existing-route playback only. No provider-specific meeting adapter, recording, transcription, route mutation, or autonomous coordination exists. Owner-scoped artifact, playback, and preparation metadata projections remain bounded and redacted.
+
 ### `packages/os-linux`
 
 Linux system/app/file/shell/window/accessibility/desktop backends, X11 detection, Wayland limitations, screenshots, local Tesseract OCR, and sandbox-support probing.

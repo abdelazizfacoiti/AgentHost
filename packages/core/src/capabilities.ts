@@ -16,7 +16,11 @@ function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
   if (name === "overlay.assistance_template_save" || name === "overlay.assistance_template_archive" || name === "overlay.assistance_template_instantiate") return { executionClass: "metadata_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
   const visual = name.startsWith("overlay.");
   let metadata: ToolExecutionMetadata["executionClass"] = "read_only";
-  if (name === "forge.check_sandbox_support" || name === "system.check_dependency") metadata = "diagnostic";
+  if (name === "speech.get_capabilities" || name === "speech.routing_diagnose") metadata = "diagnostic";
+  else if (/^speech\.(synthesize|play|stop|transmission_execute)$/.test(name)) metadata = "state_changing";
+  else if (name === "speech.transmission_prepare") metadata = "metadata_only";
+  else if (name.startsWith("speech.")) metadata = "read_only";
+  else if (name === "forge.check_sandbox_support" || name === "system.check_dependency") metadata = "diagnostic";
   else if (/^forge\.(run_sandboxed_tool|dispatch_generated_tool)$/.test(name)) metadata = "state_changing";
   else if (name.startsWith("workflow.") || name.startsWith("scheduler.") || name.startsWith("forge.")) metadata = "metadata_only";
   else if (visual) metadata = "visual_only";
@@ -97,6 +101,20 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "strategy.revalidate", riskLevel: "low" as const, description: "Revalidates strategy prerequisites." },
     { name: "strategy.disable", riskLevel: "low" as const, description: "Disables strategy metadata." },
     { name: "strategy.archive", riskLevel: "low" as const, description: "Archives terminal strategy metadata." },
+    { name: "speech.list_providers", riskLevel: "observe" as const, description: "Lists detected local offline speech providers." },
+    { name: "speech.get_capabilities", riskLevel: "observe" as const, description: "Reports local speech and routing capability health." },
+    { name: "speech.list_voices", riskLevel: "observe" as const, description: "Lists local speech voices and languages." },
+    { name: "speech.list_languages", riskLevel: "observe" as const, description: "Lists local speech languages." },
+    { name: "speech.synthesize", riskLevel: "medium" as const, description: "Creates bounded local speech artifact after confirmation." },
+    { name: "speech.artifact_get", riskLevel: "observe" as const, description: "Gets owned speech artifact metadata." },
+    { name: "speech.playback_state", riskLevel: "observe" as const, description: "Gets owned speech playback state." },
+    { name: "speech.play", riskLevel: "medium" as const, description: "Plays owned local speech artifact after confirmation." },
+    { name: "speech.stop", riskLevel: "low" as const, description: "Stops owned local speech playback." },
+    { name: "speech.devices_list", riskLevel: "observe" as const, description: "Lists bounded local audio devices." },
+    { name: "speech.routing_diagnose", riskLevel: "observe" as const, description: "Diagnoses local audio routing without mutation." },
+    { name: "speech.transmission_prepare", riskLevel: "high" as const, description: "Prepares governed speech transmission metadata." },
+    { name: "speech.transmission_execute", riskLevel: "high" as const, description: "Executes exact prepared speech transmission after confirmation." },
+    { name: "speech.transmission_get", riskLevel: "observe" as const, description: "Gets owned speech transmission preparation metadata." },
     { name: "scheduler.job_propose", riskLevel: "low" as const, description: "Creates inert scheduled-job proposal." },
     { name: "scheduler.job_review", riskLevel: "low" as const, description: "Reviews inert scheduled-job safety." },
     { name: "scheduler.job_apply_review", riskLevel: "low" as const, description: "Applies approved inert scheduled-job review." },
