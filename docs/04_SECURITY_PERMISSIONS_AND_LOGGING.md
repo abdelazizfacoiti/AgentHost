@@ -89,6 +89,12 @@ Control surfaces derive ownership from trusted MCP server context; MCP input can
 
 `overlay.emergency_hide` hides AgentHost-owned overlays and clears owned visual state. It is not a global AgentHost process circuit breaker, does not kill target apps, and does not undo prior external actions.
 
+### Runtime activity overlay
+
+Runtime activity records are owner/session-bound, bounded, allowlisted, and redacted. They contain IDs, safe source/label keys, lifecycle state, elapsed time, authoritative progress, blocker/warning codes, renderer epoch metadata, and screenshot-suppression state only. Raw inputs/outputs, prompts, page/OCR text, messages, URLs, filesystem paths, credentials, tokens, and screenshots are excluded. Completion requires verified tool/result state; process exit alone cannot claim success. The overlay is click-through and non-focus-stealing, never invokes tools, and never grants permission.
+
+Screenshot capture serializes overlapping requests, acknowledges overlay hide before capture, verifies no live overlay remains, then acknowledges restoration. Failure returns safe suppression diagnostics; capture is never silently treated as clean. Renderer restart invalidates live bindings and reprojects only after a fresh handshake/render acknowledgement.
+
 ### Assistance previews and visual-template safety
 
 Assistance step previews and session explanations are read-only projections. They use trusted owner context, bounded status codes, renderer health, progress, target freshness, and grant IDs only. They do not render, advance, resolve targets, invoke browser/desktop/accessibility/file/shell/Forge/workflow/scheduler tools, create grants, or create confirmation tokens.

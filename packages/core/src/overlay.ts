@@ -6,6 +6,8 @@ export type OverlayRendererMode = "headless" | "auto" | "gtk3-x11";
 export type OverlaySensitivity = "public" | "private" | "secret";
 export type OverlayTheme = "system" | "light" | "dark";
 export type OverlayDensity = "compact" | "normal";
+export type OverlayPlacement = "top_left" | "top_center" | "top_right" | "bottom_left" | "bottom_center" | "bottom_right";
+export type OverlayDisplayPolicy = "primary" | "all";
 export type OverlayAnimationKind = "fade" | "slide" | "scale" | "pulse" | "glow" | "pointer_move" | "progress";
 export type OverlayControlSurfaceAction = "continue" | "pause" | "resume" | "cancel" | "retry_visual_render" | "inspect_diagnostics" | "emergency_hide" | "close_control_surface";
 export type OverlayEventName = "accepted" | "rejected" | "dismissed" | "cancelled" | "next" | "back" | "acknowledgement_checked" | "emergency_stop_requested" | OverlayControlSurfaceAction;
@@ -41,7 +43,7 @@ export type OverlayWidgetComponent =
   | { type: "warning"; text: string }
   | { type: "image_reference"; evidenceId: string; alt: string };
 
-export interface OverlayWidget { widgetId?: string; title: string; components: OverlayWidgetComponent[]; target?: OverlayTargetBinding; style?: OverlayStyleTokens; animation?: OverlayAnimation; interaction?: OverlayInteractionPolicy; accessibilityLabel?: string; sensitivity: OverlaySensitivity; ttlMs?: number; }
+export interface OverlayWidget { widgetId?: string; title: string; components: OverlayWidgetComponent[]; target?: OverlayTargetBinding; placement?: OverlayPlacement; displayPolicy?: OverlayDisplayPolicy; style?: OverlayStyleTokens; animation?: OverlayAnimation; interaction?: OverlayInteractionPolicy; accessibilityLabel?: string; sensitivity: OverlaySensitivity; ttlMs?: number; }
 export interface OverlayWidgetEvent { eventId: string; overlayId: string; event: OverlayEventName; createdAt: string; ownerSessionId: string; }
 
 export interface OverlayCapabilityReport { supported: boolean; renderer: string; rendererStatus: OverlayRendererStatus; sessionType: "x11" | "wayland" | "unknown"; displayAvailable: boolean; clickThrough: boolean; interactiveWidgets: boolean; multipleDisplays: boolean; globalOverlayAvailable: boolean; clickThroughAvailable: boolean; multiDisplayAvailable: boolean; animationAvailable: boolean; interactiveWidgetsAvailable: boolean; fallbackRenderer?: "headless" | undefined; reason: string; limitations: string[]; }
@@ -120,6 +122,8 @@ export function validateOverlayWidget(widget: OverlayWidget, reducedMotion = fal
   if (typeof widget.title !== "string" || !widget.title || widget.title.length > 200) errors.push("overlay_widget_title_invalid");
   if (typeof widget.title === "string") errors.push(...redactOverlayText(widget.title, widget.sensitivity).errors);
   if (!Array.isArray(widget.components) || widget.components.length > 30) errors.push("overlay_widget_components_invalid");
+  if (widget.placement !== undefined && !["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"].includes(widget.placement)) errors.push("overlay_widget_placement_invalid");
+  if (widget.displayPolicy !== undefined && !["primary", "all"].includes(widget.displayPolicy)) errors.push("overlay_widget_display_policy_invalid");
   const allowedComponents = new Set(["heading", "text", "divider", "icon", "status_badge", "progress", "checklist", "key_value", "button", "choice", "comparison", "warning", "image_reference"]);
   for (const component of widget.components ?? []) {
     if (component === null || typeof component !== "object") { errors.push("overlay_component_unsupported"); continue; }

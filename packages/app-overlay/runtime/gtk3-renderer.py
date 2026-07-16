@@ -138,7 +138,7 @@ class Renderer:
         geometries = self.monitor_geometries()
         signature = tuple(geometries)
         self.monitor_signature = signature
-        for geometry in geometries:
+        for monitor_index, geometry in enumerate(geometries):
             window = Gtk.Window(type=Gtk.WindowType.POPUP)
             window.set_decorated(False)
             window.set_keep_above(True)
@@ -151,7 +151,7 @@ class Renderer:
             if visual is not None:
                 window.set_visual(visual)
             area = Gtk.DrawingArea()
-            area.connect("draw", self.draw_surface, geometry)
+            area.connect("draw", self.draw_surface, (monitor_index,) + geometry)
             window.add(area)
             window.move(geometry[0], geometry[1])
             window.set_default_size(geometry[2], geometry[3])
@@ -244,10 +244,13 @@ class Renderer:
         cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
-        ox, oy = geometry[0], geometry[1]
+        monitor_index, ox, oy, monitor_width, monitor_height, _scale = geometry
         for record in list(self.records.values()):
+            policy = (record.get("payload") or {}).get("displayPolicy", "primary")
+            if policy != "all" and monitor_index != 0:
+                continue
             if not self.is_interactive(record):
-                self.draw_record(cr, record, ox, oy)
+                self.draw_record(cr, record, ox, oy, monitor_width, monitor_height)
         return False
 
     def draw_interactive(self, _area, cr, record):
@@ -258,7 +261,7 @@ class Renderer:
         self.draw_payload(cr, record.get("payload") or {}, 0, 0, allocation.width, allocation.height)
         return False
 
-    def draw_record(self, cr, record, ox, oy):
+    def draw_record(self, cr, record, ox, oy, monitor_width=1920, monitor_height=1080):
         payload = record.get("payload") or {}
         target = payload.get("target") if isinstance(payload, dict) else {}
         bounds = target.get("bounds") if isinstance(target, dict) else None
@@ -271,7 +274,16 @@ class Renderer:
         elif isinstance(point, dict):
             x, y, width, height = float(point.get("x", 0)) - ox, float(point.get("y", 0)) - oy, 48, 48
         else:
-            x, y, width, height = 20, 20, 360, 160
+            placement = payload.get("placement", "top_left")
+            width, height = 360, 160
+            margin = 24
+            if placement in {"top_center", "bottom_center"}:
+                x = (monitor_width - width) / 2
+            elif placement in {"top_right", "bottom_right"}:
+                x = monitor_width - width - margin
+            else:
+                x = margin
+            y = monitor_height - height - margin if placement in {"bottom_left", "bottom_center", "bottom_right"} else margin
         self.draw_payload(cr, payload, x, y, width, height)
 
     def draw_payload(self, cr, payload, x, y, width, height):

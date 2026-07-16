@@ -14,6 +14,7 @@ describe("loadAgentHostConfig", () => {
     expect(config.policy.name).toBe("strict");
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
     expect(config.overlayRendererMode).toBe("headless");
+    expect(config.runtimeActivityOverlay).toEqual(expect.objectContaining({ enabled: true, position: "top_left", interactiveControls: false, screenshotSuppression: true, multiTaskSummary: true }));
     expect(config.browserBridge).toEqual(expect.objectContaining({
       enabled: false,
       port: 43117,

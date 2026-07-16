@@ -44,6 +44,12 @@ R3 adds provider-agnostic Linux local speech. Provider and voice discovery are o
 
 Transmission uses two phases: preparation validates an existing route, artifact, target, grants, and limits; execution revalidates exact bindings and requires fresh confirmation. Communication, financial, credential/security, and admin contexts remain protected.
 
+## R4 global runtime activity overlay
+
+R4 adds one optional global, non-blocking activity indicator for real AgentHost work. An owner-scoped bounded store normalizes direct tools and subsystem activity into safe lifecycle states, allowlisted labels, elapsed time, authoritative progress, blocker/warning codes, terminal verification, renderer binding, and screenshot-suppression status. Approval waits and policy blocks receive deterministic priority over background metadata.
+
+The indicator is visual-only: click-through, non-focus-stealing, no keyboard interception, and no target-app action. It never renders raw prompts, arguments, page/OCR text, messages, private URLs, filesystem paths, credentials, tokens, or screenshots. GTK3/X11 requires explicit `auto` or `gtk3-x11` renderer configuration; headless and unsupported Wayland sessions report unavailable visibility without claiming success. Screenshots use acknowledged hide/capture/restore. Renderer epochs invalidate stale bindings; Control Room reads same redacted store.
+
 The execution model also defines `inert`, but no currently loaded tool materializes with that class. Review-only and generated metadata are currently represented as `metadata_only`; `inert` remains available for future explicit definitions.
 
 ### Functional and executable when policy permits
