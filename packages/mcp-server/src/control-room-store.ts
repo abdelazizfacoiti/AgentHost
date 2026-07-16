@@ -1,7 +1,7 @@
 import { appendFile, chmod, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ControlRoomDashboardProjection, ControlRoomHealthProjection, ControlRoomScreenshotProjection, ControlRoomTaskProjection, ControlRoomTimelineEvent, RiskLevel } from "@agenthost/core";
+import type { ControlRoomDashboardProjection, ControlRoomHealthProjection, ControlRoomScreenshotProjection, ControlRoomTaskProjection, ControlRoomTimelineEvent, RiskLevel, RuntimeActivityProjection } from "@agenthost/core";
 import type { ControlRoomReportProvider, ControlRoomScreenshotQuery, ControlRoomTaskQuery } from "@agenthost/app-control-room";
 
 interface ActivityRecord {
@@ -63,6 +63,7 @@ export interface ControlRoomSources {
   browserBridge?: { status(): Record<string, unknown> };
   strategies?: { summary(): Promise<Record<string, unknown>> };
   speech?: { capabilities?(): Promise<Record<string, unknown>>; projection?(ownerSessionId: string): Promise<Record<string, unknown>> };
+  runtimeActivity?: { projection(): Promise<RuntimeActivityProjection> };
 }
 
 export class ControlRoomStore {
@@ -137,7 +138,9 @@ export class ControlRoomStore {
     counts.confirmationRequests = this.#activity.filter((item) => item.confirmation && item.timestamp >= from && item.timestamp <= to).length;
     const durations = tasks.map((task) => task.durationMs).filter((value): value is number => value !== undefined);
     const health = await this.health();
-    return { generatedAt: now(), range: { from, to }, counts, ...(durations.length === 0 ? {} : { averageDurationMs: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) }), recentActivity: events.slice(0, 50), health };
+    const runtimeProjection = this.#sources.runtimeActivity === undefined ? undefined : await this.#sources.runtimeActivity.projection().catch(() => undefined);
+    const activeActivities = runtimeProjection === undefined ? undefined : runtimeProjection.activities.filter((item) => typeof item.state === "string" && !["completed", "failed", "cancelled"].includes(item.state)).slice(0, 20).map((item) => ({ activityId: item.activityId, taskId: item.taskId, source: item.source, labelKey: item.labelKey, actionKey: item.actionKey, state: item.state, elapsedMs: item.elapsedMs, ...(item.progress === undefined ? {} : { progress: item.progress }), ...(item.blockerCode === undefined ? {} : { blockerCode: item.blockerCode }), ...(item.warningCode === undefined ? {} : { warningCode: item.warningCode }), redacted: true }));
+    return { generatedAt: now(), range: { from, to }, counts, ...(durations.length === 0 ? {} : { averageDurationMs: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) }), recentActivity: events.slice(0, 50), ...(activeActivities === undefined ? {} : { activeActivities }), health };
   }
 
   async tasks(input: ControlRoomTaskQuery): Promise<{ tasks: ControlRoomTaskProjection[]; nextCursor?: string; truncated: boolean }> {
@@ -184,7 +187,15 @@ export class ControlRoomStore {
     try { strategies = this.#sources.strategies === undefined ? undefined : await this.#sources.strategies.summary(); } catch { strategies = { redacted: true, status: "unavailable" }; }
     let speech: Record<string, unknown> | undefined;
     try { speech = this.#sources.speech === undefined ? undefined : this.#sources.speech.projection === undefined ? await this.#sources.speech.capabilities?.() : await this.#sources.speech.projection(this.#ownerSessionId ?? ""); } catch { speech = { redacted: true, status: "unavailable" }; }
-    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(strategies === undefined ? {} : { strategies }), ...(speech === undefined ? {} : { speech }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only.", "Speech projections contain provider, device, artifact, and routing metadata only."] };
+    let runtimeActivity: Record<string, unknown> | undefined;
+    try {
+      const projection = this.#sources.runtimeActivity === undefined ? undefined : await this.#sources.runtimeActivity.projection();
+      if (projection !== undefined) {
+        const active = projection.activities.find((item) => typeof item.state === "string" && !["completed", "failed", "cancelled"].includes(item.state));
+        runtimeActivity = { activeCount: projection.activeCount, rendererVisible: projection.rendererVisible, rendererStatus: projection.rendererStatus, screenshotSuppression: projection.screenshotSuppression, ...(active === undefined ? {} : { active: { activityId: active.activityId, taskId: active.taskId, source: active.source, labelKey: active.labelKey, actionKey: active.actionKey, state: active.state, elapsedMs: active.elapsedMs, ...(active.progress === undefined ? {} : { progress: active.progress }), ...(active.blockerCode === undefined ? {} : { blockerCode: active.blockerCode }), ...(active.warningCode === undefined ? {} : { warningCode: active.warningCode }), redacted: true } }), redacted: true };
+      }
+    } catch { runtimeActivity = { status: "unavailable", redacted: true }; }
+    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(strategies === undefined ? {} : { strategies }), ...(speech === undefined ? {} : { speech }), ...(runtimeActivity === undefined ? {} : { runtimeActivity }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only.", "Speech projections contain provider, device, artifact, and routing metadata only."] };
   }
 
   async #buildTasks(from?: string, to?: string): Promise<ControlRoomTaskProjection[]> {
@@ -236,8 +247,27 @@ export class ControlRoomStore {
       tasks.push({ taskId: id, source: "scheduler_metadata", sourceRecordId: String(job.jobId), status, createdAt, updatedAt, category: "scheduler_metadata", riskLevel: "low", toolCount: 0, screenshotCount: 0, confirmationCount: 0, durationMs: Date.parse(updatedAt) - Date.parse(createdAt), executable: false, actionsExecuted: false, redacted: true });
       this.#eventIndex.set(id, [{ eventId: eventId("scheduler", String(job.jobId), 0), taskId: id, source: "scheduler_metadata", sourceRecordId: String(job.jobId), timestamp: updatedAt, kind: status === "failed" ? "failed" : "metadata", summary: "Scheduler metadata projected; execution remains unsupported." }]);
     }
+    const runtimeProjection = this.#sources.runtimeActivity === undefined ? undefined : await this.#sources.runtimeActivity.projection().catch(() => undefined);
+    if (runtimeProjection !== undefined) {
+      const activityIds = new Set(runtimeProjection.activities.map((item) => item.activityId));
+      for (const activity of runtimeProjection.activities) {
+        const activityId = typeof activity.activityId === "string" ? activity.activityId : undefined;
+        const createdAt = typeof activity.startedAt === "string" ? activity.startedAt : undefined;
+        const updatedAt = typeof activity.updatedAt === "string" ? activity.updatedAt : createdAt;
+        if (activityId === undefined || createdAt === undefined || updatedAt === undefined) continue;
+        if (typeof activity.parentActivityId === "string" && activityIds.has(activity.parentActivityId)) continue;
+        if ((from !== undefined && updatedAt < from) || (to !== undefined && createdAt > to)) continue;
+        const state = mapStatus(String(activity.state));
+        const id = sourceId("runtime_activity", activityId);
+        const source = typeof activity.source === "string" ? activity.source : "direct_tool";
+        const taskId = typeof activity.taskId === "string" ? activity.taskId : activityId;
+        tasks.push({ taskId: id, source: "runtime_activity", sourceRecordId: activityId, ...(this.#ownerSessionId === undefined ? {} : { sessionId: this.#ownerSessionId }), status: state, createdAt, updatedAt, category: "runtime_activity", riskLevel: "low", toolCount: 1, screenshotCount: 0, confirmationCount: state === "active" && activity.state === "waiting_for_approval" ? 1 : 0, durationMs: Number.isFinite(activity.elapsedMs) ? Math.max(0, Number(activity.elapsedMs)) : Math.max(0, Date.parse(updatedAt) - Date.parse(createdAt)), executable: false, actionsExecuted: false, redacted: true });
+        const eventKind = state === "failed" ? "failed" : state === "blocked" ? "blocked" : state === "cancelled" ? "cancelled" : state === "completed" ? "completed" : "metadata";
+        this.#eventIndex.set(id, [{ eventId: eventId("runtime_activity", activityId, 0), taskId: id, source: "runtime_activity", sourceRecordId: activityId, timestamp: updatedAt, kind: eventKind, summary: `Runtime activity ${source} status recorded; content omitted.` }]);
+      }
+    }
     const bySession = new Map<string, ActivityRecord[]>();
-    for (const activity of this.#activity) if (this.#owns(activity.sessionId) && !claimedSessions.has(activity.sessionId)) bySession.set(activity.sessionId, [...(bySession.get(activity.sessionId) ?? []), activity]);
+    if (this.#sources.runtimeActivity === undefined) for (const activity of this.#activity) if (this.#owns(activity.sessionId) && !claimedSessions.has(activity.sessionId)) bySession.set(activity.sessionId, [...(bySession.get(activity.sessionId) ?? []), activity]);
     for (const [sessionId, activity] of bySession) {
       if (activity.length === 0) continue;
       const first = activity[0]!;

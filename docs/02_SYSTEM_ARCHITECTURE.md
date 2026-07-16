@@ -46,6 +46,10 @@ Firefox/Chromium unpacked extension and fixed localhost bridge. It exposes sanit
 
 Headless renderer plus optional GTK3/X11 renderer child. Renderer commands use bounded authenticated JSONL IPC. Overlay state, targets, widgets, animation, interaction events, health, restart, fallback, emergency-hide, and generic operator control surfaces are handled here. Control-surface state is kept in `packages/mcp-server` and binds only to trusted server session ownership.
 
+### Runtime activity boundary
+
+`packages/core/src/runtime-activity.ts` defines strict lifecycle/source/label/progress contracts and legal transitions. `runtime-activity-store.ts` persists bounded owner-scoped redacted JSONL under `~/.agenthost/runtime-activity/`; `runtime-activity-service.ts` normalizes tool results; `runtime-activity-overlay.ts` projects the highest-priority activity through `OverlayManager`. Renderer bindings contain ephemeral overlay IDs and epochs and are invalidated on restart. Control Room consumes same projection, avoiding direct-activity double counting. Screenshot capture is serialized and requires acknowledged overlay suppression before capture and acknowledged restoration after capture.
+
 ### Optional adapters
 
 `packages/app-blender` is the current experimental reference adapter. Optional external-process adapters are loaded only when explicitly enabled and must declare the generic execution policy.
@@ -137,6 +141,9 @@ Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, 
     activity.jsonl
     screenshots.jsonl
     access-token
+  runtime-activity/
+    records.jsonl
+    events.jsonl
   scheduler/
     jobs/ reviews/ activations/ activation-reviews/
     manual-run-contracts/ manual-run-reviews/ manual-run-preflights/

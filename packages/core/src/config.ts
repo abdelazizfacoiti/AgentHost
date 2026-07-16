@@ -6,6 +6,7 @@ import { getPolicyProfile } from "./policies.js";
 import { PHASE20_HARD_LIMITS, PHASE20_SUPPORTED_RUNTIME_CAPABILITIES } from "./runtime-grants.js";
 import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, ForgeRuntimeSandboxMode, PolicyProfileName, ToolForgeRuntimeCapability, ToolForgeRuntimeOperation } from "./types.js";
 import type { OverlayRendererMode } from "./overlay.js";
+import type { RuntimeActivityOverlayConfig } from "./runtime-activity.js";
 
 const policyProfileNameSchema = z.enum([
   "strict",
@@ -18,6 +19,18 @@ const policyProfileNameSchema = z.enum([
 
 const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "firejail", "unshare"]);
 const overlayRendererModeSchema = z.enum(["headless", "auto", "gtk3-x11"]);
+const runtimeActivityOverlaySchema = z.object({
+  enabled: z.boolean().optional(),
+  position: z.enum(["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"]).optional(),
+  reducedMotion: z.boolean().optional(),
+  terminalAutoHideMs: z.number().int().min(0).max(300_000).optional(),
+  maxLabelChars: z.number().int().min(20).max(200).optional(),
+  showElapsed: z.boolean().optional(),
+  showProgress: z.boolean().optional(),
+  interactiveControls: z.boolean().optional(),
+  screenshotSuppression: z.boolean().optional(),
+  multiTaskSummary: z.boolean().optional()
+}).strict();
 const browserBridgeSchema = z.object({
   enabled: z.boolean().optional(),
   port: z.number().int().min(1024).max(65535).optional(),
@@ -136,6 +149,7 @@ const configFileSchema = z
     profile: policyProfileNameSchema.optional(),
     forgeRuntimeSandboxMode: forgeRuntimeSandboxModeSchema.optional(),
     overlayRendererMode: overlayRendererModeSchema.optional(),
+    runtimeActivityOverlay: runtimeActivityOverlaySchema.optional(),
     browserBridge: browserBridgeSchema.optional(),
     controlRoom: controlRoomSchema.optional(),
     speech: speechSchema.optional(),
@@ -267,6 +281,19 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const overlayRendererMode = overlayRendererModeSchema.parse(
     (env.AGENTHOST_OVERLAY_MODE ?? fileConfig.overlayRendererMode ?? "headless") as OverlayRendererMode
   );
+  const activityFile = fileConfig.runtimeActivityOverlay;
+  const runtimeActivityOverlay: RuntimeActivityOverlayConfig = {
+    enabled: env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED === undefined ? activityFile?.enabled ?? true : env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED === "1",
+    position: activityFile?.position ?? "top_left",
+    reducedMotion: env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_REDUCED_MOTION === undefined ? activityFile?.reducedMotion ?? false : env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_REDUCED_MOTION === "1",
+    terminalAutoHideMs: activityFile?.terminalAutoHideMs ?? 5_000,
+    maxLabelChars: activityFile?.maxLabelChars ?? 80,
+    showElapsed: activityFile?.showElapsed ?? true,
+    showProgress: activityFile?.showProgress ?? true,
+    interactiveControls: activityFile?.interactiveControls ?? false,
+    screenshotSuppression: activityFile?.screenshotSuppression ?? true,
+    multiTaskSummary: activityFile?.multiTaskSummary ?? true
+  };
   const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
   const browserEnabled = env.AGENTHOST_BROWSER_BRIDGE_ENABLED === undefined ? fileConfig.browserBridge?.enabled ?? false : env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1";
   const browserPort = env.AGENTHOST_BROWSER_BRIDGE_PORT === undefined ? fileConfig.browserBridge?.port ?? 43117 : Number(env.AGENTHOST_BROWSER_BRIDGE_PORT);
@@ -303,6 +330,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     profile: parsedProfile,
     forgeRuntimeSandboxMode,
     overlayRendererMode,
+    runtimeActivityOverlay,
     browserBridge,
     controlRoom,
     speech,

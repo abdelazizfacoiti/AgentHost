@@ -19,6 +19,8 @@ Milestone A3 turns A1 operator control surface and A2 read-only assistance/templ
 
 No browser, desktop, accessibility, file, shell, Forge, workflow, scheduler, send, submit, upload, delete, pay, or buy action occurs.
 
+R4 runtime activity indicator is available during real MCP work when `AGENTHOST_OVERLAY_MODE=auto` or `gtk3-x11` is selected on supported X11. It shows only redacted state/label/progress/blocker metadata, remains click-through, and hides with acknowledgement around screenshots. Headless/default mode remains safe and truthful.
+
 ## Baseline and eligible range
 
 - baseline tag: `build-week-baseline`

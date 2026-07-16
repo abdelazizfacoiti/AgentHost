@@ -573,7 +573,7 @@ export interface ControlRoomConfig {
 }
 
 export type ControlRoomTaskStatus = "active" | "recent" | "completed" | "failed" | "cancelled" | "blocked";
-export type ControlRoomTaskSource = "workflow_trace" | "assistance_session" | "forge_runtime" | "direct_activity" | "scheduler_metadata";
+export type ControlRoomTaskSource = "workflow_trace" | "assistance_session" | "forge_runtime" | "direct_activity" | "scheduler_metadata" | "runtime_activity";
 export type ControlRoomTimelineKind = "task_received" | "planning_review" | "tool_prepared" | "policy_decision" | "confirmation_requested" | "confirmation_resolved" | "tool_started" | "screenshot_captured" | "target_grounded" | "tool_completed" | "verification" | "retry_recovery" | "completed" | "failed" | "cancelled" | "blocked" | "metadata";
 
 export interface ControlRoomTaskProjection {
@@ -632,6 +632,7 @@ export interface ControlRoomHealthProjection {
   browser?: Record<string, unknown>;
   stores: { activity: "available" | "unavailable"; workflows: "available" | "unavailable"; forge: "available" | "unavailable"; scheduler: "available" | "unavailable" };
   speech?: Record<string, unknown>;
+  runtimeActivity?: Record<string, unknown>;
   strategies?: Record<string, unknown>;
   limitations: string[];
 }
@@ -642,6 +643,7 @@ export interface ControlRoomDashboardProjection {
   counts: { active: number; recent: number; completed: number; failed: number; cancelled: number; blocked: number; toolExecutions: number; screenshotCaptures: number; confirmationRequests: number };
   averageDurationMs?: number;
   recentActivity: ControlRoomTimelineEvent[];
+  activeActivities?: Array<Record<string, unknown>>;
   health: ControlRoomHealthProjection;
 }
 
@@ -656,6 +658,7 @@ export interface AgentHostConfig {
   browserBridge?: BrowserBridgeConfig;
   controlRoom?: ControlRoomConfig;
   speech?: SpeechConfig;
+  runtimeActivityOverlay?: import("./runtime-activity.js").RuntimeActivityOverlayConfig;
   optionalAdapters?: Record<string, { enabled: boolean }>;
   policy: PolicyProfile;
 }

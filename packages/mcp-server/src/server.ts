@@ -106,6 +106,9 @@ import { createCapabilityStrategyTools } from "./tools/capability-strategy.js";
 import { SpeechStore } from "./speech-store.js";
 import { SpeechService } from "./speech-service.js";
 import { createSpeechTools } from "./tools/speech.js";
+import { RuntimeActivityStore } from "./runtime-activity-store.js";
+import { RuntimeActivityService } from "./runtime-activity-service.js";
+import { RuntimeActivityOverlayController } from "./runtime-activity-overlay.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -194,6 +197,11 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const receipts = new ToolReceiptManager();
   const visionEvidence = new VisionEvidenceStore();
   const overlay = new OverlayManager(createOverlayRenderer(config.overlayRendererMode ?? "headless", { sessionId }), { sessionId });
+  const runtimeActivityStore = new RuntimeActivityStore(config.agentHostDir, { ownerSessionId: sessionId });
+  await runtimeActivityStore.ensureStructure();
+  const runtimeActivity = new RuntimeActivityService(runtimeActivityStore);
+  const runtimeActivityOverlay = new RuntimeActivityOverlayController(overlay, runtimeActivity, config.runtimeActivityOverlay ?? { enabled: true, position: "top_left", reducedMotion: false, terminalAutoHideMs: 5_000, maxLabelChars: 80, showElapsed: true, showProgress: true, interactiveControls: false, screenshotSuppression: true, multiTaskSummary: true });
+  runtimeActivityOverlay.start();
   const overlayAssistance = new OverlayAssistanceStore(config.agentHostDir, overlay, sessionId);
   await overlayAssistance.ensureStructure();
   const overlayAssistanceTemplates = new OverlayAssistanceTemplateStore(config.agentHostDir, sessionId, overlayAssistance);
@@ -210,7 +218,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   if (browserBridge !== undefined) await browserBridge.start();
   const browser = options.browser ?? createBrowserAdapter(browserBridge!);
   let speechService: SpeechService | undefined;
-  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, speech: { capabilities: async () => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.capabilities() as unknown as Record<string, unknown>, projection: async (ownerSessionId) => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.projection(ownerSessionId) }, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
+  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, runtimeActivity: { projection: async () => { const renderer = await runtimeActivityOverlay.projection(); return runtimeActivity.projection({ visible: renderer.visible, status: renderer.rendererStatus, suppression: renderer.suppression }); } }, speech: { capabilities: async () => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.capabilities() as unknown as Record<string, unknown>, projection: async (ownerSessionId) => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.projection(ownerSessionId) }, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
   await controlRoomStore.ensureStructure();
   const linux: LinuxAutomation =
     options.linux ?? {
@@ -270,6 +278,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     overlayAssistance,
     overlayAssistanceTemplates,
     overlayControlSurface,
+    runtimeActivity,
+    runtimeActivityOverlay,
     controlRoom: controlRoomStore,
     strategyStore,
     strategyService,
@@ -391,7 +401,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     return toMcpToolResult(result);
   });
 
-  server.onclose = () => { void controlRoomServer?.close(); void browserBridge?.close(); void overlayControlSurface.close(); void overlayAssistance.close(); void overlay.close(); };
+  server.onclose = () => { void controlRoomServer?.close(); void browserBridge?.close(); void overlayControlSurface.close(); void overlayAssistance.close(); void runtimeActivityOverlay.close(); void overlay.close(); };
   return {
     server,
     context

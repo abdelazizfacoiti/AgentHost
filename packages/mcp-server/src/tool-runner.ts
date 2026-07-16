@@ -18,6 +18,7 @@ import { evaluateSafety, redactWorkflowSummary, summarizeToolResult, toolFailure
 import type { z } from "zod";
 import type { GrantStore } from "./grants.js";
 import { validateToolExecutionMetadata } from "./tool-metadata.js";
+import type { RuntimeActivityService } from "./runtime-activity-service.js";
 
 export interface ToolExecutionContext {
   sessionId: string;
@@ -48,6 +49,7 @@ export interface ToolExecutionContext {
   };
   workflowTrace?: { capture(event: { sessionId: string; step: WorkflowTraceStep }): Promise<void> };
   controlRoom?: { recordToolActivity(input: { sessionId: string; timestamp: string; tool: string; strategy?: string; riskLevel: RiskLevel; preview: boolean; ok: boolean; errorCode?: string; durationMs: number; confirmation: boolean; receiptId?: string }): Promise<void> | void };
+  runtimeActivity?: RuntimeActivityService;
 }
 
 export interface ToolExecutionRuntime {
@@ -212,6 +214,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
   const start = performance.now();
   let result!: ToolResult<TData>;
   let safetyDecision: SafetyDecision | undefined;
+  const runtimeActivity = context.runtimeActivity?.startDirectTool(definition.name, context.sessionId);
   const parsed = definition.inputSchema.safeParse(rawInput ?? {});
 
   if (!parsed.success) {
@@ -361,6 +364,9 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
   }
 
   const durationMs = Math.round(performance.now() - start);
+  if (runtimeActivity !== undefined) {
+    try { context.runtimeActivity?.finishDirectTool(runtimeActivity.activityId, result); } catch { /* Activity projection never changes tool result. */ }
+  }
   if (context.receipts !== undefined && parsed.success) {
     result = { ...result, receipt: context.receipts.issue({ sessionId: context.sessionId, tool: definition.name, rawInput: parsed.data, result, riskLevel: result.riskLevel }) };
   }

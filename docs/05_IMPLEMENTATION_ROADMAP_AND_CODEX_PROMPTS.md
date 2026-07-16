@@ -65,7 +65,11 @@ Persistent capability strategy registry and deterministic selection are complete
 
 ### R3 status — complete
 
-Standard local speech is implemented Linux-first. eSpeak NG is preferred; Piper and Speech Dispatcher are optional detected providers. Provider/voice/device/routing discovery, bounded synthesis, opaque expiring artifacts, owned local playback/stop, and two-phase governed transmission are separate tools. No network TTS, installation, model download, recording, transcription, meeting adapter, route creation, or automatic recap exists. Transmission remains grant-, policy-, exact-target-, and confirmation-gated. R4 remains pending and is not started.
+Standard local speech is implemented Linux-first. eSpeak NG is preferred; Piper and Speech Dispatcher are optional detected providers. Provider/voice/device/routing discovery, bounded synthesis, opaque expiring artifacts, owned local playback/stop, and two-phase governed transmission are separate tools. No network TTS, installation, model download, recording, transcription, meeting adapter, route creation, or automatic recap exists. Transmission remains grant-, policy-, exact-target-, and confirmation-gated.
+
+### R4 status — complete
+
+Global runtime activity overlay is implemented as one owner-scoped redacted authoritative store. Direct MCP work is normalized into strict lifecycle states and safe labels, rendered through the existing click-through GTK3/X11/headless boundary, prioritized deterministically, suppressed around screenshots with acknowledgement, and reprojected after renderer epoch changes. Control Room consumes the same projection. No target-app action, permission grant, confirmation creation, background loop, or private-content storage was added. R5 remains pending.
 
 ### Exclusions and risk
 
