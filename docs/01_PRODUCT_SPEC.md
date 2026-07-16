@@ -28,13 +28,15 @@ The browser extension is preferred for structured DOM work, but is not required.
 
 ## Current implementation status
 
-The default loaded registry currently contains 210 tools with validated execution metadata:
+The default loaded registry currently contains 223 tools with validated execution metadata:
 
-- 46 `read_only`
-- 3 `diagnostic`
-- 107 `metadata_only`
+- 49 `read_only`
+- 5 `diagnostic`
+- 115 `metadata_only`
 - 25 `state_changing`
 - 29 `visual_only`
+
+R2 adds persistent installation-level capability strategies. `strategy.select` ranks only compatible active records after live capability, profile, grant, adapter, and Browser Bridge health checks. It returns bounded advisory steps and fallbacks; it never executes an underlying tool. Built-in strategies are trusted structural metadata. Local proposals require review plus two independently verified signed-receipt outcomes before activation. Strategy records persist no task content, secrets, screenshots, OCR, transient IDs, shell, code, or dynamic tool names.
 
 The execution model also defines `inert`, but no currently loaded tool materializes with that class. Review-only and generated metadata are currently represented as `metadata_only`; `inert` remains available for future explicit definitions.
 

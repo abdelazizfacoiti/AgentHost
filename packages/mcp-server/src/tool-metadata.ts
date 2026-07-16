@@ -6,7 +6,7 @@ const STATE_ACTIONS = new Set([
   "accessibility_action", "accessibility_set_value", "accessibility_focus", "browser_action",
   "communication_send", "upload", "system_change"
 ]);
-const KNOWN_TOOL_PREFIXES = ["system.", "forge.", "browser.", "workflow.", "scheduler.", "overlay.", "vision.", "checkpoint.", "guide.", "policy.", "adapter.", "app.", "shell.", "file.", "desktop.", "window.", "accessibility.", "blender."];
+const KNOWN_TOOL_PREFIXES = ["system.", "forge.", "browser.", "workflow.", "scheduler.", "overlay.", "vision.", "checkpoint.", "guide.", "policy.", "adapter.", "app.", "shell.", "file.", "desktop.", "window.", "accessibility.", "blender.", "strategy."];
 
 function classify(definition: AnyAgentHostToolDefinition): ToolExecutionClass {
   const name = definition.name;
@@ -20,6 +20,7 @@ function classify(definition: AnyAgentHostToolDefinition): ToolExecutionClass {
   }
   if (name === "system.check_dependency" || name === "forge.check_sandbox_support" || name.startsWith("browser.setup_")) return "diagnostic";
   if (name.startsWith("guide.")) return "metadata_only";
+  if (name.startsWith("strategy.")) return name === "strategy.health" || name === "strategy.verify_outcome" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" ? "read_only" : "metadata_only";
   if (name.startsWith("vision.") || name.startsWith("checkpoint.")) return "read_only";
   if (name.startsWith("blender.")) return "state_changing";
   if (STATE_ACTIONS.has(definition.safety?.actionType ?? "")) return "state_changing";

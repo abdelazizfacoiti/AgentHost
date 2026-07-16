@@ -12,6 +12,19 @@ describe("CapabilityRegistry", () => {
     const registry = createBaseCapabilityRegistry();
 
     expect(registry.listTools().map((tool) => tool.name)).toEqual([
+      "strategy.list",
+      "strategy.get",
+      "strategy.health",
+      "strategy.select",
+      "strategy.explain_selection",
+      "strategy.verify_outcome",
+      "strategy.record_outcome",
+      "strategy.propose",
+      "strategy.review",
+      "strategy.activate",
+      "strategy.revalidate",
+      "strategy.disable",
+      "strategy.archive",
       "scheduler.job_propose",
       "scheduler.job_review",
       "scheduler.job_apply_review",

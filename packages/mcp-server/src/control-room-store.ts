@@ -61,6 +61,7 @@ export interface ControlRoomSources {
   scheduler?: { listJobs(): Promise<any[]> };
   overlay?: { diagnostics(): Promise<any> };
   browserBridge?: { status(): Record<string, unknown> };
+  strategies?: { summary(): Promise<Record<string, unknown>> };
 }
 
 export class ControlRoomStore {
@@ -178,7 +179,9 @@ export class ControlRoomStore {
     try { renderer = this.#sources.overlay === undefined ? undefined : await this.#sources.overlay.diagnostics(); } catch { renderer = { rendererStatus: "unavailable" }; }
     let browser: Record<string, unknown> | undefined;
     try { browser = this.#sources.browserBridge?.status(); } catch { browser = { state: "unavailable" }; }
-    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable."] };
+    let strategies: Record<string, unknown> | undefined;
+    try { strategies = this.#sources.strategies === undefined ? undefined : await this.#sources.strategies.summary(); } catch { strategies = { redacted: true, status: "unavailable" }; }
+    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(strategies === undefined ? {} : { strategies }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only."] };
   }
 
   async #buildTasks(from?: string, to?: string): Promise<ControlRoomTaskProjection[]> {

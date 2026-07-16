@@ -17,8 +17,15 @@ The Linux-first runtime currently provides:
 - operator-facing visual control surfaces with trusted ownership, bounded events, replay protection, and renderer-health summaries;
 - read-only assistance step previews/session explanations plus owner-scoped visual-flow templates with literal parameter binding;
 - review-only scheduler jobs, activation, preflight, acknowledgement, manual-run, approval, expiry, and staleness governance.
+- persistent installation-level capability strategies with deterministic selection, Browser Bridge health preference, bounded fallbacks, signed-receipt outcome verification, confidence tracking, and degraded/revalidation lifecycle.
 
 State-changing tools remain policy/grant/dry-run/confirmation gated. Overlay and assistance tools are visual-only. Workflow replay and scheduler records are metadata-only and non-executable. Generated Forge tools are not independent live MCP tools. Blender is experimental, optional, and disabled by default.
+
+## Capability strategies
+
+`strategy.list`, `strategy.get`, `strategy.health`, and `strategy.select` expose bounded structural strategy metadata. Selection checks current profile, grants, loaded capabilities, adapter/browser health, compatibility, and deterministic scores. Browser navigation prefers the paired Browser Bridge before accessibility, vision, pointer, or guide fallback. Selection is advisory: it never executes tools, creates confirmations, grants permissions, or stores task content.
+
+Local proposals require review and two independently verified receipt-backed outcomes before activation. Strategies persist under `~/.agenthost/strategies/` with restrictive permissions and contain no passwords, tokens, page/file content, screenshots, OCR, arbitrary code, shell, dynamic tool names, or transient target IDs. Failed compatibility or verified outcomes degrade strategies; revalidation is explicit.
 
 Unsupported by design: autonomous background operation, arbitrary generated code, silent send/submit/upload/delete/archive/pay/buy, credential or secret extraction, CAPTCHA/MFA/login/payment bypass, public browser access, sudo, package installation, and remote endpoints.
 

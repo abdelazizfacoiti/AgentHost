@@ -16,6 +16,10 @@ Each loaded definition has:
 - `source` (`base` or `optional_adapter`);
 - `availability`.
 
+### Capability strategy registry
+
+`strategy.list`, `strategy.get`, `strategy.health`, `strategy.select`, and `strategy.explain_selection` expose redacted structural strategy metadata. `strategy.select` uses deterministic goal/profile/capability/adapter/Browser Bridge health filtering and stable scoring, then returns at most three bounded fallback IDs. `strategy.verify_outcome` performs one fixed read-only verification checkpoint. `strategy.propose`, `strategy.review`, `strategy.activate`, `strategy.record_outcome`, `strategy.revalidate`, `strategy.disable`, and `strategy.archive` change local strategy metadata only. No strategy tool invokes browser, desktop, accessibility, file, shell, Forge, workflow, or scheduler execution. Local strategy activation requires explicit review and two independently verified signed-receipt outcomes; built-ins are trusted structural definitions.
+
 Missing/contradictory metadata and duplicate names fail closed. Disabled optional tools and generated Forge tool names are absent from both callable inventories.
 
 ## Strategy order

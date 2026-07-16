@@ -100,6 +100,9 @@ import { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-st
 import { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
 import { materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
 import { ControlRoomStore } from "./control-room-store.js";
+import { CapabilityStrategyStore } from "./capability-strategy-store.js";
+import { CapabilityStrategyService } from "./capability-strategy-service.js";
+import { createCapabilityStrategyTools } from "./tools/capability-strategy.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -178,6 +181,9 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   await workflowTrace.ensureStructure();
   const workflowReplay = new WorkflowReplayStore(config.agentHostDir);
   await workflowReplay.ensureStructure();
+  const strategyStore = new CapabilityStrategyStore(config.agentHostDir);
+  await strategyStore.ensureStructure();
+  const strategyService = new CapabilityStrategyService(strategyStore);
   const scheduler = new SchedulerStore(config.agentHostDir);
   await scheduler.ensureStructure();
   const receipts = new ToolReceiptManager();
@@ -198,7 +204,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     : undefined;
   if (browserBridge !== undefined) await browserBridge.start();
   const browser = options.browser ?? createBrowserAdapter(browserBridge!);
-  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
+  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
   await controlRoomStore.ensureStructure();
   const linux: LinuxAutomation =
     options.linux ?? {
@@ -257,11 +263,14 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     overlayAssistanceTemplates,
     overlayControlSurface,
     controlRoom: controlRoomStore,
+    strategyStore,
+    strategyService,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux
   };
   const tools = [
     ...createSystemTools(),
+    ...createCapabilityStrategyTools(),
     ...createForgeTools(),
     ...createForgeSandboxTools(),
     ...createBrowserTools(), ...createBrowserSetupTools(),

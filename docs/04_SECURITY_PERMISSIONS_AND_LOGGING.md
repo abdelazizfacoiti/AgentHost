@@ -77,6 +77,10 @@ Optional external-process/application adapters must be disabled by default and d
 
 Blender is the reference optional adapter, not a core feature. When explicitly enabled, `blender.run_python` requires reviewed script input, dry-run, exact confirmation bound to the reviewed input/output target, static Python safety checks, shell-free bounded subprocess execution, filtered environment, AgentHost output-root validation, expected-output validation, timeout/output caps, and redacted results. It remains distinct from Forge’s bounded JSON runtime.
 
+## Capability strategy security
+
+Strategy records are installation-local, schema-versioned, bounded, atomic, and mode `0600`. They contain structural goal/capability/health/verification metadata only. Validators reject secrets, credentials, private content, screenshots/OCR/page/file content, transient browser/accessibility/vision/overlay/window IDs, coordinates, arbitrary code/shell, callbacks, expressions, dynamic tool names, hidden retries, and unbounded loops. Profile, grant, compatibility, protected-context, and live prerequisite checks run again at selection. Selection is advisory and cannot execute or authorize actions. Local strategies require explicit review plus two independently verified signed receipts; stale or failing strategies degrade and fail closed. Audit logs contain IDs/status/counts/failure codes only, never strategy inputs or receipt signatures.
+
 ## Overlay and renderer safety
 
 Overlay targets are fresh, owner/session-bound, sensitivity-checked, and TTL-limited. Widgets accept only allowlisted intent events. Events update overlay/session state only and never invoke another tool. The GTK child uses authenticated bounded JSONL IPC, filtered environment, handshake validation, crash detection, bounded restart, and headless fallback.

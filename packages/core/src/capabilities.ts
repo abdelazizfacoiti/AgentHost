@@ -8,6 +8,10 @@ import {
 } from "./types.js";
 
 function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
+  if (name.startsWith("strategy.")) {
+    const executionClass = name === "strategy.health" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.verify_outcome" ? "read_only" : "metadata_only";
+    return { executionClass, externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
+  }
   if (name === "overlay.assistance_step_preview" || name === "overlay.assistance_session_explain" || name === "overlay.assistance_template_validate" || name === "overlay.assistance_template_preview" || name === "overlay.assistance_template_get" || name === "overlay.assistance_template_list") return { executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
   if (name === "overlay.assistance_template_save" || name === "overlay.assistance_template_archive" || name === "overlay.assistance_template_instantiate") return { executionClass: "metadata_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
   const visual = name.startsWith("overlay.");
@@ -80,6 +84,19 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
 
   for (const capability of [
+    { name: "strategy.list", riskLevel: "observe" as const, description: "Lists persistent structural capability strategies." },
+    { name: "strategy.get", riskLevel: "observe" as const, description: "Gets one structural capability strategy." },
+    { name: "strategy.health", riskLevel: "observe" as const, description: "Checks live strategy prerequisites." },
+    { name: "strategy.select", riskLevel: "low" as const, description: "Selects a deterministic advisory strategy." },
+    { name: "strategy.explain_selection", riskLevel: "observe" as const, description: "Explains bounded strategy selection." },
+    { name: "strategy.verify_outcome", riskLevel: "low" as const, description: "Verifies one fixed strategy checkpoint." },
+    { name: "strategy.record_outcome", riskLevel: "low" as const, description: "Records signed verified strategy outcome metadata." },
+    { name: "strategy.propose", riskLevel: "low" as const, description: "Proposes structural strategy metadata for review." },
+    { name: "strategy.review", riskLevel: "low" as const, description: "Reviews structural strategy metadata." },
+    { name: "strategy.activate", riskLevel: "low" as const, description: "Activates trusted or verified strategy metadata." },
+    { name: "strategy.revalidate", riskLevel: "low" as const, description: "Revalidates strategy prerequisites." },
+    { name: "strategy.disable", riskLevel: "low" as const, description: "Disables strategy metadata." },
+    { name: "strategy.archive", riskLevel: "low" as const, description: "Archives terminal strategy metadata." },
     { name: "scheduler.job_propose", riskLevel: "low" as const, description: "Creates inert scheduled-job proposal." },
     { name: "scheduler.job_review", riskLevel: "low" as const, description: "Reviews inert scheduled-job safety." },
     { name: "scheduler.job_apply_review", riskLevel: "low" as const, description: "Applies approved inert scheduled-job review." },
