@@ -209,7 +209,7 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "browser.diagnose_bridge", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Diagnoses local browser bridge setup without exposing tokens or page data." },
     { name: "browser.generate_pairing_token", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated browser pairing-token rotation." },
     { name: "browser.reset_pairing", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated browser pairing reset." },
-    { name: "browser.get_extension_install_instructions", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Returns browser-specific explicit unpacked extension install steps." },
+    { name: "browser.get_extension_install_instructions", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Returns explicit public or development browser-extension install steps." },
     { name: "browser.verify_pairing", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Verifies active paired extension connection without page access." },
     { name: "browser.list_tabs", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Lists sanitized tabs from the paired local browser." },
     { name: "browser.get_active_tab", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Returns the active paired-browser tab metadata." },

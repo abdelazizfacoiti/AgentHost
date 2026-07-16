@@ -1,5 +1,4 @@
 import { access, chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -18,7 +17,9 @@ for (const family of families) {
   const manifest = JSON.parse(await readFile(manifestSource, "utf8"));
   const background = manifest.background ?? {};
   const backgroundFile = background.service_worker ?? background.scripts?.[0];
-  if (typeof backgroundFile !== "string" || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("storage") || !manifest.permissions?.includes("scripting")) throw new Error(`Invalid ${family} manifest.`);
+  if (typeof backgroundFile !== "string"
+    || !["tabs", "storage", "scripting", "alarms"].every((permission) => manifest.permissions?.includes(permission))
+    || JSON.stringify(manifest.host_permissions) !== JSON.stringify(["http://127.0.0.1/*"])) throw new Error(`Invalid ${family} manifest.`);
   const destination = path.join(output, family);
   await rm(destination, { recursive: true, force: true }); await mkdir(destination, { recursive: true, mode: 0o700 });
   await cp(path.join(source, "background.js"), path.join(destination, "background.js"));
@@ -27,20 +28,18 @@ for (const family of families) {
   try { await cp(path.join(source, "popup.css"), path.join(destination, "popup.css")); } catch { /* optional during source-only setup */ }
   await writeFile(path.join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   console.log(`${family}: ${path.join(destination, "manifest.json")}`);
-  if (family === "firefox") console.log("Firefox: open about:debugging#/runtime/this-firefox, Load Temporary Add-on…, select manifest.json. Reload after browser restart.");
-  else console.log("Chromium: open chrome://extensions, enable Developer mode, Load unpacked, select folder.");
+  if (family === "firefox") console.log("Firefox development only: open about:debugging#/runtime/this-firefox, Load Temporary Add-on…, select manifest.json. Public users must install Mozilla-signed XPI.");
+  else console.log("Chromium development only: open chrome://extensions, enable Developer mode, Load unpacked, select folder. Public users should install store release.");
 }
 if (!setup) console.log("Start AgentHost with browserBridge.enabled=true, then use browser.generate_pairing_token dry-run + confirmation. Paste returned token in extension popup.");
 if (setup) {
-  const home = os.homedir(), agentHost = path.join(home, ".agenthost"), configPath = path.join(agentHost, "config.json"), tokenPath = path.join(agentHost, "browser", "pairing-token");
+  const home = os.homedir(), agentHost = path.join(home, ".agenthost"), configPath = path.join(agentHost, "config.json");
   let config = {};
   try { config = JSON.parse(await readFile(configPath, "utf8")); } catch { /* first local setup */ }
   const currentBridge = typeof config.browserBridge === "object" && config.browserBridge !== null ? config.browserBridge : {};
   config.browserBridge = { ...currentBridge, enabled: true, port: Number.isInteger(currentBridge.port) ? currentBridge.port : 43117 };
   await mkdir(agentHost, { recursive: true, mode: 0o700 }); await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 }); await chmod(configPath, 0o600);
-  let pairingToken = "";
-  try { pairingToken = (await readFile(tokenPath, "utf8")).trim(); } catch { pairingToken = `AH-${randomBytes(15).toString("hex").toUpperCase().match(/.{1,5}/g).join("-")}`; await mkdir(path.dirname(tokenPath), { recursive: true, mode: 0o700 }); await writeFile(tokenPath, `${pairingToken}\n`, { mode: 0o600 }); await chmod(tokenPath, 0o600); }
-  console.log("\nBrowser bridge enabled. Restart AgentHost MCP server, then load extension and paste this one-time pairing token:");
-  console.log(pairingToken);
-  console.log("Keep this token private. Do not paste it into chat, source files, or screenshots.");
+  console.log("\nBrowser bridge enabled. Restart AgentHost MCP server.");
+  console.log("Then use browser.generate_pairing_token dry-run + confirmation and paste returned one-time token into extension popup.");
+  console.log("Setup script does not create, print, or preserve pairing credentials.");
 }

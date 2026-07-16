@@ -15,5 +15,24 @@ async function call(contextValue: AgentHostMcpContext, name: string, input: unkn
 
 describe("browser setup tools", () => {
   it("reports disabled bridge and actionable diagnostics without a token", async () => { const value = context(); const status = await call(value, "browser.setup_status", {}); expect(status).toMatchObject({ ok: true, data: { state: "bridge_disabled", tokenExists: false } }); expect(JSON.stringify(status)).not.toContain("AH-"); const diagnose = await call(value, "browser.diagnose_bridge", {}); expect(diagnose).toMatchObject({ ok: true, data: { state: "bridge_disabled" } }); });
-  it("returns install instructions and exposes setup tools", async () => { const value = context(); const install = await call(value, "browser.get_extension_install_instructions", { browser: "firefox" }); expect(install).toMatchObject({ ok: true, data: { browser: "firefox", neverAutoInstalled: true } }); expect(createBrowserSetupTools().map((tool) => tool.name)).toEqual(expect.arrayContaining(["browser.generate_pairing_token", "browser.reset_pairing", "browser.verify_pairing"])); });
+  it("separates public and development install instructions", async () => {
+    const value = context();
+    const publicInstall = await call(value, "browser.get_extension_install_instructions", { browser: "firefox" });
+    expect(publicInstall).toMatchObject({ ok: true, data: { browser: "firefox", channel: "public", neverAutoInstalled: true } });
+    expect(JSON.stringify(publicInstall)).not.toContain("Load Temporary Add-on");
+    const development = await call(value, "browser.get_extension_install_instructions", { browser: "firefox", channel: "development" });
+    expect(development).toMatchObject({ ok: true, data: { browser: "firefox", channel: "development" } });
+    expect(createBrowserSetupTools().map((tool) => tool.name)).toEqual(expect.arrayContaining(["browser.generate_pairing_token", "browser.reset_pairing", "browser.verify_pairing"]));
+  });
+  it("returns enrollment token once while audit logs omit credentials", async () => {
+    const value = context();
+    const preview = await call(value, "browser.generate_pairing_token", { dryRun: true });
+    expect(preview).toMatchObject({ ok: true, preview: true });
+    const confirmationToken = (preview.data as { confirmationToken: string }).confirmationToken;
+    const generated = await call(value, "browser.generate_pairing_token", { confirmationToken });
+    const pairingToken = (generated.data as { pairingToken: string }).pairingToken;
+    expect(pairingToken).toMatch(/^AH-/);
+    expect(JSON.stringify((value.logger as Logger).entries)).not.toContain(pairingToken);
+    expect(JSON.stringify(value.browserBridge!.status())).not.toContain(pairingToken);
+  });
 });

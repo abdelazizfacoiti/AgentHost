@@ -69,14 +69,22 @@ The bridge is disabled by default and binds only to `127.0.0.1`.
 npm run browser:setup
 ```
 
-This prepares explicit unpacked bundles, enables local bridge configuration, and prints a pairing token once. It does not install an extension silently. Restart AgentHost, then load the prepared bundle:
+This command is development setup. It prepares unpacked bundles and enables local bridge configuration. It does not install an extension or create pairing credentials silently. Restart AgentHost, then use confirmation-gated `browser.generate_pairing_token`.
 
-- Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → `~/AgentHost/browser-extension/firefox/manifest.json`.
-- Chromium: `chrome://extensions` → Developer mode → **Load unpacked** → `~/AgentHost/browser-extension/chromium`.
+- Firefox development: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → `~/AgentHost/browser-extension/firefox/manifest.json`.
+- Chromium development: `chrome://extensions` → Developer mode → **Load unpacked** → `~/AgentHost/browser-extension/chromium`.
 
-Paste the token into the extension popup, keep the configured port, pair, and verify with `browser.verify_pairing`. Use `browser.setup_status` and `browser.diagnose_bridge` for recovery. Pairing/session tokens are never logged. Token files are text data; read them with a safe tool or `cat`, never execute them and never use `sudo` on them.
+Public installation is separate: Firefox uses a Mozilla-signed XPI and Chromium uses a verified Chrome Web Store release. Generate deterministic unsigned review artifacts with:
 
-Full state checks, restart recovery, blocked-action tests, and explicit fallback routing are in [Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md).
+```bash
+npm run browser:extension:build
+```
+
+Unsigned artifacts are not public-installable. Exact signing/publishing procedure: [Browser Extension Release](docs/07_BROWSER_EXTENSION_RELEASE.md).
+
+Paste enrollment token once, keep configured port, and verify with `browser.verify_pairing`. Extension stores device-scoped reconnect credential locally; AgentHost stores only its hash. Pairing survives normal browser/AgentHost restarts, remains origin/identity/version bound, and can be revoked or rotated. Use `browser.setup_status` and `browser.diagnose_bridge` for recovery. Pairing/session credentials are never logged.
+
+Full state checks and recovery: [Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md).
 
 If the extension is unavailable, AgentHost may recommend accessibility, local OCR/vision, pointer fallback, or guide mode. It never executes a fallback silently.
 

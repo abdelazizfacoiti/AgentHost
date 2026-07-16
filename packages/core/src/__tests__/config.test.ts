@@ -14,7 +14,46 @@ describe("loadAgentHostConfig", () => {
     expect(config.policy.name).toBe("strict");
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
     expect(config.overlayRendererMode).toBe("headless");
+    expect(config.browserBridge).toEqual(expect.objectContaining({
+      enabled: false,
+      port: 43117,
+      pairingTokenFile: path.join(homeDir, ".agenthost", "browser", "pairing-token"),
+      pairingStateFile: path.join(homeDir, ".agenthost", "browser", "paired-devices.json")
+    }));
     expect(config.controlRoom).toEqual(expect.objectContaining({ enabled: false, port: 43118 }));
+  });
+
+  it("loads explicit browser pairing state path without broad defaults", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-browser-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    await writeFile(configPath, JSON.stringify({
+      browserBridge: {
+        enabled: true,
+        port: 43119,
+        pairingTokenFile: "~/.agenthost/browser/enrollment-token",
+        pairingStateFile: "~/.agenthost/browser/devices.json"
+      }
+    }), "utf8");
+    const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
+    expect(config.browserBridge).toEqual({
+      enabled: true,
+      port: 43119,
+      pairingTokenFile: path.join(homeDir, ".agenthost", "browser", "enrollment-token"),
+      pairingStateFile: path.join(homeDir, ".agenthost", "browser", "devices.json")
+    });
+  });
+
+  it("rejects configurable browser bridge hosts", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-browser-host-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    await writeFile(configPath, JSON.stringify({
+      browserBridge: { enabled: true, host: "0.0.0.0" }
+    }), "utf8");
+    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
   });
 
   it("loads profile and paths from a config file", async () => {
