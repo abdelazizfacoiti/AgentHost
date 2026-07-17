@@ -69,7 +69,11 @@ Standard local speech is implemented Linux-first. eSpeak NG is preferred; Piper 
 
 ### R4 status — complete
 
-Global runtime activity overlay is implemented as one owner-scoped redacted authoritative store. Direct MCP work is normalized into strict lifecycle states and safe labels, rendered through the existing click-through GTK3/X11/headless boundary, prioritized deterministically, suppressed around screenshots with acknowledgement, and reprojected after renderer epoch changes. Control Room consumes the same projection. No target-app action, permission grant, confirmation creation, background loop, or private-content storage was added. R5 remains pending.
+Global runtime activity overlay is implemented as one owner-scoped redacted authoritative store. Direct MCP work is normalized into strict lifecycle states and safe labels, rendered through the existing click-through GTK3/X11/headless boundary, prioritized deterministically, suppressed around screenshots with acknowledgement, and reprojected after renderer epoch changes. Control Room consumes the same projection. No target-app action, permission grant, confirmation creation, background loop, or private-content storage was added. R5 packaging is tracked separately below.
+
+## R5 — Minimal Public Linux Release Candidate Packaging
+
+R5 packages existing capabilities as a rootless Linux x86_64 archive with the `agenthost` CLI, resumable setup, redacted doctor diagnostics, safe Codex MCP integration, lifecycle controls, browser/overlay/Control Room/speech onboarding, deterministic release scans, manual update/rollback, and ownership-scoped uninstall. No new automation capability, scheduler execution, remote endpoint, system service, or privileged installation is included. R6 is not started.
 
 ### Exclusions and risk
 

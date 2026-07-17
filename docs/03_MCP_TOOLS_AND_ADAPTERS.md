@@ -2,6 +2,8 @@
 
 All callable tools return `ToolResult`. MCP transport is stdio. The browser bridge and overlay child are separate local channels, not public MCP transports.
 
+The public Linux CLI starts this same stdio runtime from an installed release. Codex integration registers `agenthost start`, never a repository path; packaging commands do not add MCP tools or bypass tool safety.
+
 ## Inventory and execution classes
 
 The server materializes one validated `ToolDefinition[]`. MCP `tools/list` and `system.list_capabilities` are projections of that same loaded set. Inventory count is generated from the loaded set at startup and must not be treated as a hard-coded documentation contract. Speech tools are included when the base server loads; optional adapters remain conditional. No loaded tool currently uses the available `inert` class; inert/review-only records are materialized as `metadata_only` today.

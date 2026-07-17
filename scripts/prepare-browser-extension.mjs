@@ -7,7 +7,7 @@ const root = process.cwd();
 const source = path.join(root, "packages", "app-browser", "extension");
 const requested = process.argv.includes("--browser") ? process.argv[process.argv.indexOf("--browser") + 1] : "all";
 const outputFlag = process.argv.indexOf("--output");
-const output = outputFlag >= 0 ? path.resolve(process.argv[outputFlag + 1]) : path.join(os.homedir(), "AgentHost", "browser-extension");
+const output = outputFlag >= 0 ? path.resolve(process.argv[outputFlag + 1]) : (process.env.AGENTHOST_BROWSER_EXTENSION_DIR ?? path.join(os.homedir(), "AgentHost", "browser-extension"));
 const setup = process.argv.includes("--setup");
 const families = requested === "all" ? ["firefox", "chromium"] : [requested];
 if (!families.every((item) => item === "firefox" || item === "chromium")) throw new Error("Use --browser firefox, chromium, or all.");
@@ -33,7 +33,7 @@ for (const family of families) {
 }
 if (!setup) console.log("Start AgentHost with browserBridge.enabled=true, then use browser.generate_pairing_token dry-run + confirmation. Paste returned token in extension popup.");
 if (setup) {
-  const home = os.homedir(), agentHost = path.join(home, ".agenthost"), configPath = path.join(agentHost, "config.json");
+  const home = os.homedir(), agentHost = process.env.AGENTHOST_HOME ?? path.join(home, ".agenthost"), configPath = process.env.AGENTHOST_CONFIG ?? path.join(agentHost, "config.json");
   let config = {};
   try { config = JSON.parse(await readFile(configPath, "utf8")); } catch { /* first local setup */ }
   const currentBridge = typeof config.browserBridge === "object" && config.browserBridge !== null ? config.browserBridge : {};

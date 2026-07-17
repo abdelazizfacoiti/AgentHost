@@ -10,6 +10,7 @@ import {
   JsonlAuditLogger,
   loadAgentHostConfig,
   validateOptionalAdapterExecutionPolicy,
+  AGENTHOST_VERSION,
   type AdapterRegistry,
   type AgentHostConfig,
   type AuditLogger,
@@ -110,7 +111,7 @@ import { RuntimeActivityStore } from "./runtime-activity-store.js";
 import { RuntimeActivityService } from "./runtime-activity-service.js";
 import { RuntimeActivityOverlayController } from "./runtime-activity-overlay.js";
 
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = AGENTHOST_VERSION;
 
 const SERVER_INSTRUCTIONS =
   "AgentHost is a universal local automation host. It can help operate many apps through layered strategies: app adapters, official APIs, CLI/scripts, browser automation, accessibility, GUI fallback, and guide mode. Prefer reliable app APIs and adapters over GUI clicking. Use GUI click/type only as fallback and only when policy allows. High-risk actions require approval.";

@@ -24,6 +24,11 @@
     "browser:extension:build": "node scripts/build-browser-extension.mjs",
     "browser:extension:verify": "node scripts/build-browser-extension.mjs",
     "browser:setup": "node scripts/prepare-browser-extension.mjs --setup",
+    "release:build": "node scripts/build-release.mjs",
+    "release:scan": "node scripts/scan-release.mjs",
+    "release:verify": "node scripts/verify-release.mjs",
+    "release:install": "node scripts/install-release.mjs",
+    "agenthost": "node packages/agenthost-cli/dist/index.js",
     "demo:overlay": "node scripts/demo-overlay.mjs",
     "demo:visual-copilot": "node scripts/demo-visual-copilot.mjs"
   },

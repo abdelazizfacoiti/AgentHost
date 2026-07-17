@@ -648,6 +648,8 @@ export interface ControlRoomDashboardProjection {
 }
 
 export interface AgentHostConfig {
+  /** Public configuration schema version. Loader accepts legacy files without this field. */
+  schemaVersion?: 1;
   agentHostDir: string;
   configPath: string;
   logFile: string;

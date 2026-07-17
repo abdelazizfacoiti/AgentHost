@@ -144,6 +144,7 @@ const capabilityGrantSchema = z
 
 const configFileSchema = z
   .object({
+    schemaVersion: z.literal(1).optional(),
     agentHostDir: z.string().min(1).optional(),
     logFile: z.string().min(1).optional(),
     profile: policyProfileNameSchema.optional(),
@@ -269,7 +270,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const homeDir = options.homeDir ?? os.homedir();
   const defaultAgentHostDir = path.join(homeDir, ".agenthost");
   const initialAgentHostDir = resolveLocalPath(env.AGENTHOST_HOME ?? defaultAgentHostDir, homeDir);
-  const configPath = resolveLocalPath(options.configPath ?? path.join(initialAgentHostDir, "config.json"), homeDir);
+  const configPath = resolveLocalPath(options.configPath ?? env.AGENTHOST_CONFIG ?? path.join(initialAgentHostDir, "config.json"), homeDir);
   const fileConfig = await readConfigFile(configPath);
 
   const agentHostDir = resolveLocalPath(env.AGENTHOST_HOME ?? fileConfig.agentHostDir ?? initialAgentHostDir, homeDir);
@@ -324,6 +325,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   );
 
   return {
+    schemaVersion: 1,
     agentHostDir,
     configPath,
     logFile,
