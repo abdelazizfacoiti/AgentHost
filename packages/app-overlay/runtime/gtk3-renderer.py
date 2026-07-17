@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Fixed GTK3 overlay renderer. JSONL stdio only; never executes target-app actions."""
-import cairo
 import hashlib
 import hmac
 import json
@@ -15,6 +14,20 @@ try:
     gi.require_version("Gtk", "3.0")
     gi.require_version("Gdk", "3.0")
     from gi.repository import Gdk, GLib, Gtk
+    try:
+        import cairo
+    except Exception:
+        cairo = None
+    try:
+        # Optional Debian `python3-gi-cairo` bridge. When absent, use the
+        # bounded GTK-widget renderer below; never create a Cairo callback
+        # that would fail after opening an opaque fullscreen window.
+        if cairo is None:
+            raise ImportError("pycairo_unavailable")
+        gi.require_foreign("cairo")
+        CAIRO_FOREIGN_AVAILABLE = True
+    except Exception:
+        CAIRO_FOREIGN_AVAILABLE = False
 except Exception as exc:
     print("gtk3_unavailable", file=sys.stderr)
     raise SystemExit(78) from exc
@@ -85,21 +98,46 @@ class Renderer:
         self.token = None
         self.session_id = "renderer"
         self.windows = []
+        self.surface_roots = []
         self.interactive = {}
         self.records = {}
         self.events = []
         self.emergency_hidden = False
         self.monitor_signature = None
         self.renderer_epoch = 0
+        self.last_render_reason = None
+        self.widget_css_ready = False
         self.tick_source = GLib.timeout_add(33, self.tick)
 
     def capability(self):
         display = Gdk.Display.get_default()
         count = display.get_n_monitors() if display is not None else 0
+        screen = Gdk.Screen.get_default() if display is not None else None
+        try:
+            composited = bool(screen is not None and screen.is_composited())
+        except Exception:
+            composited = False
+        try:
+            visual = screen.get_rgba_visual() if screen is not None else None
+        except Exception:
+            visual = None
+        transparent = bool(composited and visual is not None)
+        if display is None:
+            reason = "GTK3 display unavailable."
+            limitations = ["No supported graphical display session is available."]
+        elif not composited:
+            reason = "overlay_compositor_unavailable"
+            limitations = ["An X11 compositor is required for transparent overlays.", "Visible mode is disabled to prevent an opaque fullscreen window from covering the desktop."]
+        elif visual is None:
+            reason = "overlay_transparency_unavailable"
+            limitations = ["The display does not expose an RGBA visual for transparent overlays.", "Visible mode is disabled to prevent an opaque fullscreen window from covering the desktop."]
+        else:
+            reason = "GTK3 X11 renderer ready."
+            limitations = ["Compositor and window-manager z-order behavior may vary."]
         return {
-            "supported": display is not None,
+            "supported": transparent,
             "renderer": "gtk3-x11",
-            "rendererStatus": "available" if display is not None else "unavailable",
+            "rendererStatus": "available" if transparent else "unavailable",
             "sessionType": "x11",
             "displayAvailable": display is not None,
             "clickThrough": True,
@@ -110,8 +148,12 @@ class Renderer:
             "multiDisplayAvailable": count > 0,
             "animationAvailable": True,
             "interactiveWidgetsAvailable": True,
-            "reason": "GTK3 X11 renderer ready." if display is not None else "GTK3 display unavailable.",
-            "limitations": ["Compositor and window-manager z-order behavior may vary."],
+            "compositorAvailable": composited,
+            "transparentWindowsAvailable": transparent,
+            "drawingBackend": "cairo" if CAIRO_FOREIGN_AVAILABLE else "gtk3-widgets",
+            "cairoCallbacks": CAIRO_FOREIGN_AVAILABLE,
+            "reason": reason,
+            "limitations": limitations + ([] if CAIRO_FOREIGN_AVAILABLE else ["PyGObject Cairo foreign bindings are unavailable; bounded GTK widgets render cards and targets."]),
         }
 
     def monitor_geometries(self):
@@ -129,12 +171,19 @@ class Renderer:
         for window in self.windows:
             window.destroy()
         self.windows = []
+        self.surface_roots = []
         for window in list(self.interactive.values()):
             window.destroy()
         self.interactive = {}
 
     def rebuild(self):
         self.destroy_windows()
+        capability = self.capability()
+        if not capability.get("supported"):
+            self.last_render_reason = capability.get("reason", "overlay_transparency_unavailable")
+            self.monitor_signature = tuple(self.monitor_geometries())
+            return False
+        self.last_render_reason = None
         geometries = self.monitor_geometries()
         signature = tuple(geometries)
         self.monitor_signature = signature
@@ -146,26 +195,141 @@ class Renderer:
             window.set_accept_focus(False)
             window.set_focus_on_map(False)
             window.set_app_paintable(True)
-            screen = window.get_screen()
+            # Resolve visual from default X11 screen before realization. Some
+            # GTK builds return no visual from an unrealized popup window,
+            # which otherwise leaves an opaque black fullscreen surface.
+            screen = Gdk.Screen.get_default()
+            if screen is not None:
+                window.set_screen(screen)
             visual = screen.get_rgba_visual() if screen is not None else None
-            if visual is not None:
-                window.set_visual(visual)
-            area = Gtk.DrawingArea()
-            area.connect("draw", self.draw_surface, (monitor_index,) + geometry)
-            window.add(area)
+            if screen is None:
+                self.last_render_reason = "overlay_screen_unavailable"
+                self.destroy_windows()
+                return False
+            self.ensure_widget_css(screen)
+            if visual is None:
+                self.last_render_reason = "overlay_transparency_unavailable"
+                self.destroy_windows()
+                return False
+            window.set_visual(visual)
+            if CAIRO_FOREIGN_AVAILABLE:
+                area = Gtk.DrawingArea()
+                area.set_app_paintable(True)
+                area.connect("draw", self.draw_surface, (monitor_index,) + geometry)
+                window.add(area)
+            else:
+                root = Gtk.Fixed()
+                root.set_app_paintable(True)
+                root.get_style_context().add_class("agenthost-overlay-surface")
+                window.add(root)
+                self.surface_roots.append((root, (monitor_index,) + geometry))
             window.move(geometry[0], geometry[1])
             window.set_default_size(geometry[2], geometry[3])
             window.show_all()
+            window.get_window().set_keep_above(True) if window.get_window() is not None else None
             gdk_window = window.get_window()
             if gdk_window is not None:
-                try:
-                    gdk_window.input_shape_combine_region(cairo.Region(), 0, 0)
-                except Exception:
-                    pass
+                if CAIRO_FOREIGN_AVAILABLE:
+                    try:
+                        gdk_window.input_shape_combine_region(cairo.Region(), 0, 0)
+                    except Exception:
+                        gdk_window.set_pass_through(True)
+                else:
+                    gdk_window.set_pass_through(True)
             self.windows.append(window)
+        if not CAIRO_FOREIGN_AVAILABLE:
+            for root, geometry in self.surface_roots:
+                self.render_widget_surface(root, geometry)
         for record in self.records.values():
             if self.is_interactive(record):
                 self.create_interactive(record)
+        return True
+
+    def ensure_widget_css(self, screen):
+        if self.widget_css_ready or screen is None:
+            return
+        provider = Gtk.CssProvider()
+        provider.load_from_data(b"""
+        .agenthost-overlay-surface { background-color: rgba(0,0,0,0); }
+        .agenthost-overlay-card { background-color: rgba(10,13,21,0.96); border: 2px solid #4d8dff; border-radius: 12px; padding: 12px; color: #f5f7ff; }
+        .agenthost-overlay-warning { border-color: #e3a82b; }
+        .agenthost-overlay-danger { border-color: #e05b5b; }
+        .agenthost-overlay-highlight { background-color: rgba(45,126,255,0.10); border: 3px solid #4d8dff; border-radius: 10px; }
+        .agenthost-overlay-pointer { color: #75aaff; font-size: 30px; }
+        .agenthost-overlay-title { color: #f5f7ff; font-weight: bold; font-size: 16px; }
+        .agenthost-overlay-text { color: #d5dbea; font-size: 13px; }
+        .agenthost-overlay-progress trough { background-color: rgba(30,35,48,0.92); border-radius: 8px; min-height: 16px; }
+        .agenthost-overlay-progress progress { background-color: #4d8dff; border-radius: 8px; }
+        """, -1)
+        Gtk.StyleContext.add_provider_for_screen(screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.widget_css_ready = True
+
+    def widget_label(self, text, style_class="agenthost-overlay-text"):
+        label = Gtk.Label(label=safe_text(text, 500))
+        label.set_xalign(0.0)
+        label.set_line_wrap(True)
+        label.set_max_width_chars(80)
+        label.get_style_context().add_class(style_class)
+        return label
+
+    def render_widget_surface(self, root, geometry):
+        monitor_index, ox, oy, monitor_width, monitor_height, _scale = geometry
+        for record in list(self.records.values()):
+            policy = (record.get("payload") or {}).get("displayPolicy", "primary")
+            if policy != "all" and monitor_index != 0:
+                continue
+            if not self.is_interactive(record):
+                self.render_widget_record(root, record, ox, oy, monitor_width, monitor_height)
+
+    def render_widget_record(self, root, record, ox, oy, monitor_width, monitor_height):
+        payload = record.get("payload") or {}
+        kind = payload.get("type", "widget")
+        bounds = self.target_bounds(record)
+        x, y, width, height = bounds
+        target = payload.get("target") if isinstance(payload, dict) else {}
+        if not isinstance(target, dict) or (target.get("bounds") is None and target.get("point") is None):
+            placement = payload.get("placement", "top_left")
+            width, height, margin = 360, 160, 24
+            x = (monitor_width - width) / 2 if placement in {"top_center", "bottom_center"} else monitor_width - width - margin if placement in {"top_right", "bottom_right"} else margin
+            y = monitor_height - height - margin if placement in {"bottom_left", "bottom_center", "bottom_right"} else margin
+        x, y = int(x - ox), int(y - oy)
+        width, height = int(max(32, min(width, monitor_width))), int(max(32, min(height, monitor_height)))
+        if kind in {"pointer", "arrow"}:
+            widget = self.widget_label("➤", "agenthost-overlay-pointer")
+            width, height = 48, 48
+        elif kind in {"highlight", "spotlight"}:
+            widget = Gtk.Frame()
+            widget.get_style_context().add_class("agenthost-overlay-highlight")
+        elif kind == "progress":
+            widget = Gtk.ProgressBar()
+            widget.get_style_context().add_class("agenthost-overlay-progress")
+            try:
+                widget.set_fraction(max(0.0, min(1.0, float(payload.get("progress", payload.get("value", 0.0))))))
+            except Exception:
+                widget.set_fraction(0.0)
+            height = 18
+        else:
+            frame = Gtk.Frame()
+            frame.get_style_context().add_class("agenthost-overlay-card")
+            style = payload.get("style") if isinstance(payload.get("style"), dict) else {}
+            if style.get("semantic") == "warning": frame.get_style_context().add_class("agenthost-overlay-warning")
+            if style.get("semantic") == "danger": frame.get_style_context().add_class("agenthost-overlay-danger")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            title = payload.get("label") or payload.get("title") or payload.get("text") or kind
+            box.pack_start(self.widget_label(title, "agenthost-overlay-title"), False, False, 0)
+            components = payload.get("components")
+            if isinstance(components, list):
+                for component in components[:12]:
+                    if isinstance(component, dict):
+                        text = component.get("text") or component.get("label") or component.get("key")
+                        if isinstance(text, str): box.pack_start(self.widget_label(text), False, False, 0)
+            elif isinstance(payload.get("text"), str):
+                box.pack_start(self.widget_label(payload["text"]), False, False, 0)
+            frame.add(box); widget = frame
+            width, height = max(width, 260), max(height, 84)
+        root.put(widget, x, y)
+        widget.set_size_request(width, height)
+        widget.show_all()
 
     def visibility_counts(self):
         for _index in range(8):
@@ -227,6 +391,31 @@ class Renderer:
         focus_required = isinstance(interaction, dict) and interaction.get("focus") == "when_required"
         window.set_accept_focus(focus_required)
         window.set_focus_on_map(focus_required)
+        if not CAIRO_FOREIGN_AVAILABLE:
+            event_box = Gtk.EventBox()
+            event_box.get_style_context().add_class("agenthost-overlay-card")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            payload = record.get("payload") or {}
+            box.pack_start(self.widget_label(payload.get("title") or payload.get("label") or payload.get("type", "overlay"), "agenthost-overlay-title"), False, False, 0)
+            for component in payload.get("components", []) if isinstance(payload, dict) else []:
+                if not isinstance(component, dict):
+                    continue
+                event = component.get("event")
+                label = component.get("label") or component.get("text")
+                if component.get("type") in {"button", "choice"} and isinstance(label, str) and isinstance(event, str):
+                    button = Gtk.Button(label=safe_text(label, 200))
+                    button.connect("clicked", self.widget_interactive_event, record, event)
+                    box.pack_start(button, False, False, 0)
+                elif isinstance(label, str):
+                    box.pack_start(self.widget_label(label), False, False, 0)
+            event_box.add(box)
+            event_box.connect("key-press-event", self.interactive_key, record)
+            window.add(event_box)
+            window.move(int(x), int(y))
+            window.set_default_size(int(width), int(height))
+            window.show_all()
+            self.interactive[record.get("overlayId")] = window
+            return
         area = Gtk.DrawingArea()
         area.set_can_focus(focus_required)
         area.add_events(Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.KEY_PRESS_MASK)
@@ -239,7 +428,14 @@ class Renderer:
         window.show_all()
         self.interactive[record.get("overlayId")] = window
 
+    def widget_interactive_event(self, _button, record, event):
+        if event in EVENTS:
+            self.events.append({"eventId": "event_" + uuid.uuid4().hex, "overlayId": record.get("overlayId"), "event": event, "createdAt": now_iso(), "ownerSessionId": self.session_id})
+            self.events = self.events[-100:]
+
     def draw_surface(self, _area, cr, geometry):
+        # Clear with SOURCE on the RGBA visual. Using OVER here leaves the
+        # window's default opaque background behind the overlay primitives.
         cr.set_operator(cairo.OPERATOR_SOURCE)
         cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
@@ -392,9 +588,13 @@ class Renderer:
         encoded = json.dumps(record, separators=(",", ":"))
         if len(encoded.encode("utf-8")) > MAX_BYTES:
             return {"ok": False, "reason": "render_record_oversized"}
+        if not self.capability().get("supported"):
+            return {"ok": False, "reason": self.last_render_reason or "overlay_transparency_unavailable"}
         self.records[record["overlayId"]] = record
         self.emergency_hidden = False
-        self.rebuild()
+        if not self.rebuild():
+            self.records.pop(record["overlayId"], None)
+            return {"ok": False, "reason": self.last_render_reason or "overlay_transparency_unavailable"}
         visible, _interactive = self.visibility_counts()
         if visible <= 0:
             self.records.pop(record["overlayId"], None)
