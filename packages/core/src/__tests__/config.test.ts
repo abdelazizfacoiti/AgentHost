@@ -10,6 +10,7 @@ describe("loadAgentHostConfig", () => {
     const config = await loadAgentHostConfig({ env: {}, homeDir });
 
     expect(config.agentHostDir).toBe(path.join(homeDir, ".agenthost"));
+    expect(config.schemaVersion).toBe(1);
     expect(config.profile).toBe("strict");
     expect(config.policy.name).toBe("strict");
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
@@ -45,6 +46,15 @@ describe("loadAgentHostConfig", () => {
       pairingTokenFile: path.join(homeDir, ".agenthost", "browser", "enrollment-token"),
       pairingStateFile: path.join(homeDir, ".agenthost", "browser", "devices.json")
     });
+  });
+
+  it("accepts explicit AGENTHOST_CONFIG path and schema version", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-explicit-"));
+    const configPath = path.join(homeDir, "public-config.json");
+    await writeFile(configPath, JSON.stringify({ schemaVersion: 1, profile: "dev" }), "utf8");
+    const config = await loadAgentHostConfig({ env: { AGENTHOST_CONFIG: configPath }, homeDir });
+    expect(config.configPath).toBe(configPath);
+    expect(config.schemaVersion).toBe(1);
   });
 
   it("rejects configurable browser bridge hosts", async () => {

@@ -28,6 +28,8 @@ The browser extension is preferred for structured DOM work, but is not required.
 
 ## Current implementation status
 
+R5 adds an honest Linux x86_64 release-candidate surface around existing capabilities: rootless archive installation, `agenthost` CLI, resumable setup, redacted doctor diagnostics, Codex MCP integration with preview/backup/rollback, controlled lifecycle, browser/overlay/Control Room/speech onboarding, and deterministic release scans. Packaging adds no execution capability and keeps host dependencies explicit.
+
 The default loaded registry currently contains 223 tools with validated execution metadata:
 
 - 49 `read_only`

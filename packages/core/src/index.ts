@@ -32,3 +32,4 @@ export * from "./overlay-assistance-templates.js";
 export * from "./capability-strategy.js";
 export * from "./speech.js";
 export * from "./runtime-activity.js";
+export * from "./release.js";

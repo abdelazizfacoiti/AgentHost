@@ -4,6 +4,10 @@
 
 AgentHost is local-first, visible, permissioned, previewable, confirmation-bound, bounded, auditable, and conservative. It must never behave like malware, spyware, credential theft software, stealth remote control, or an unattended automation service.
 
+## Release and installation boundary
+
+R5 installation is rootless and limited to AgentHost-owned user paths. It performs no package installation, system-service registration, public binding, browser auto-installation, or secret generation. Codex configuration edits require preview, explicit apply, backup, validation, and rollback. Release scans reject credential-like material, token values, current-user absolute paths, screenshots/audio/logs, caches, and runtime state. Uninstall preserves runtime data by default.
+
 ## Hard non-negotiables
 
 - no silent send, submit, post, upload, delete, archive, pay, buy, publish, or destructive overwrite;

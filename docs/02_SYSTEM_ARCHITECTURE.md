@@ -12,6 +12,10 @@ Codex / agent
   -> ToolResult + receipt + redacted audit record
 ```
 
+### Release boundary
+
+`packages/agenthost-cli` and `scripts/build-release.mjs` wrap existing compiled packages without changing tool execution. Installed runtime paths resolve from release metadata, public config lives under `~/.config/agenthost`, and runtime state remains under `~/.agenthost`. Rootless lifecycle locks, release manifests, checksum verification, and redacted doctor output are packaging concerns only.
+
 Core is app-agnostic. Linux and application implementations stay outside `packages/core`.
 
 ## Packages and modules

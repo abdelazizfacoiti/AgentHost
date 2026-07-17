@@ -68,6 +68,30 @@ For local development, set `AGENTHOST_HOME` to an isolated directory:
 AGENTHOST_HOME=.agenthost npm run start:mcp
 ```
 
+## Linux release candidate
+
+R5 packages existing AgentHost capabilities for rootless Linux x86_64 use. Build and verify archive from a built checkout:
+
+```bash
+npm run build
+npm run release:build
+npm run release:scan
+npm run release:verify
+```
+
+Install from a release directory or archive with `npm run release:install -- <release-directory-or-tar.gz>`. Installation stays under `~/.local/share/agenthost` and `~/.local/bin`; no `sudo`, system service, package installation, or hidden browser installation occurs. The installed CLI is `agenthost`.
+
+```bash
+agenthost doctor
+agenthost setup
+agenthost integrations codex add
+agenthost start
+```
+
+`agenthost integrations codex add --apply` is required before editing Codex configuration. It creates a backup, preserves unrelated MCP servers, registers installed `agenthost start`, and can be removed with `agenthost integrations codex remove --apply`. `agenthost doctor --json` reports bounded, redacted diagnostics. Node.js 20+, Python 3, and optional GTK/X11, browser, and speech dependencies remain host prerequisites.
+
+Config is canonical at `~/.config/agenthost/config.json`; legacy `~/.agenthost/config.json` is read for compatibility and migrated only by `agenthost setup`. Runtime state remains under `~/.agenthost`. Updates are manual and checksum-verified; uninstall preserves runtime data unless explicit removal is requested.
+
 ## Browser bridge setup
 
 The bridge is disabled by default and binds only to `127.0.0.1`.

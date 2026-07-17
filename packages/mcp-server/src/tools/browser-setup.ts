@@ -15,8 +15,13 @@ const browser = z.object({
 }).strict();
 function bridge(context: AgentHostMcpContext) { if (context.browserBridge === undefined) throw new Error("browser_bridge_unavailable"); return context.browserBridge; }
 function failure(name: string, error: unknown) { const code = error instanceof Error ? error.message : "browser_setup_failed"; return toolFailure({ tool: name, riskLevel: "low", error: { code, message: code.replaceAll("_", " ") }, observations: ["No token or browser content was logged."] }); }
-function root(family: "firefox" | "chromium") { return path.join(os.homedir(), "AgentHost", "browser-extension", family); }
-function releaseRoot() { return path.resolve("release", "browser"); }
+function root(family: "firefox" | "chromium") {
+  const base = process.env.AGENTHOST_BROWSER_EXTENSION_DIR ?? path.join(os.homedir(), "AgentHost", "browser-extension");
+  return path.join(base, family);
+}
+function releaseRoot() {
+  return process.env.AGENTHOST_BROWSER_RELEASE_ROOT ?? path.resolve("release", "browser");
+}
 async function manifest(family: "firefox" | "chromium") { const folder = root(family), manifestPath = path.join(folder, "manifest.json"); try { const data = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>; const background = data.background as Record<string, unknown> | undefined; const backgroundPath = typeof background?.service_worker === "string" ? background.service_worker : Array.isArray(background?.scripts) && typeof background.scripts[0] === "string" ? background.scripts[0] : undefined; if (typeof backgroundPath !== "string") return { folder, manifestPath, valid: false, reason: "background_missing" }; await access(path.join(folder, backgroundPath)); const popup = (data.action as Record<string, unknown> | undefined)?.default_popup; if (typeof popup === "string") await access(path.join(folder, popup)); return { folder, manifestPath, valid: true, reason: "valid" }; } catch { return { folder, manifestPath, valid: false, reason: "manifest_missing" }; } }
 async function releaseArtifact(family: "firefox" | "chromium") {
   try {
