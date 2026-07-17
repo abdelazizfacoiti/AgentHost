@@ -85,7 +85,7 @@ The bridge is disabled by default and binds to `127.0.0.1`. Initial enrollment u
 
 The Node renderer client starts the GTK3/X11 child lazily. It sends bounded JSONL messages authenticated by a random session token and validates handshake, command, reply, payload, timeout, and crash state. The child receives a filtered environment and only renderer commands. It cannot invoke AgentHost tools. Headless state is the safe fallback.
 
-GTK3/X11 supports transparent/topmost/click-through overlays and bounded widgets where the display and PyGObject probe succeed. Wayland does not claim global coordinates, layer-shell, or guaranteed click-through; it reports limited/unavailable support.
+GTK3/X11 supports transparent/topmost/click-through overlays and bounded widgets only after display compositor/RGBA checks. Cairo is used when its PyGObject bridge exists; otherwise the child uses bounded GTK widgets without Cairo draw callbacks. It never creates an opaque fullscreen surface. Wayland does not claim global coordinates, layer-shell, or guaranteed click-through; it reports limited/unavailable support.
 
 ## Assistance UX and visual-template boundary
 
@@ -95,7 +95,7 @@ GTK3/X11 supports transparent/topmost/click-through overlays and bounded widgets
 
 `overlay.assistance_target_refresh` is visual-only recovery boundary. It accepts no owner identity, validates only current step through existing target resolver, enforces TTL/bounds/sensitivity, and permits at most two explicit refreshes per step. Target-bound steps opt into required-target blocking; static unbound primitives retain existing behavior. Missing or stale required targets fail before renderer invocation. Renderer epoch changes invalidate overlay IDs; operator must explicitly re-show/retry. Recovery state derives from preview/explanation metadata.
 
-`npm run demo:visual-copilot` runs production assistance/control-surface stores against public fixture in isolated demo home. Prompts gate start, target binding, events, retry, and completion. It performs no target-app operation. Visible mode requires GTK3/X11, PyCairo, and `xdotool`; renderer or geometry limitations are reported and the launcher exits safely. `--headless` is a capability check, not a simulated visible flow.
+`npm run demo:visual-copilot` runs production assistance/control-surface stores against public fixture in isolated demo home. Prompts gate start, target binding, events, retry, and completion. It performs no target-app operation. Visible mode requires GTK3/PyGObject on X11; renderer or geometry limitations are reported and the launcher exits safely. Cairo is optional because bounded GTK-widget rendering is used when its PyGObject bridge is absent. `xdotool` is needed only for geometry probing. `--headless` is a capability check, not a simulated visible flow.
 
 ## Forge runtime boundary
 

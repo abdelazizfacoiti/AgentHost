@@ -115,7 +115,7 @@ Workflow traces are redacted. Skills, checkpoint templates, replay dry-runs, rep
 
 ## Platform scope
 
-Linux is first. X11 supports the GTK3 overlay and pointer/window backends when dependencies are available. Wayland reports honest limitations and uses safe unavailable/headless behavior where no supported backend exists. Windows and macOS are future platform work.
+Linux is first. X11 supports the GTK3 overlay and pointer/window backends when dependencies are available. Transparent composition is checked before visible windows are created; Cairo is preferred when its PyGObject bridge exists, with bounded GTK-widget rendering otherwise. Wayland reports honest limitations and uses safe unavailable/headless behavior where no supported backend exists. Windows and macOS are future platform work.
 
 ## Non-negotiables
 

@@ -154,7 +154,13 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     if (hello?.ok !== true) { this.#fail(typeof hello?.error === "string" ? hello.error : this.#lastFailure ?? "renderer_protocol_error"); return false; }
     if (!validateRendererHandshake(hello.data)) { this.#fail("renderer_protocol_error"); return false; }
     if (hello.data.rendererEpoch !== candidateEpoch) { this.#fail("renderer_epoch_mismatch"); return false; }
-    this.#rendererEpoch = candidateEpoch; this.#handshake = "passed"; this.#childState = "running"; this.#runtimeState = "ready"; this.#report = { ...this.#report, rendererStatus: "available", supported: true, fallbackRenderer: undefined };
+    if (hello.data.capabilities.supported !== true) {
+      const reason = typeof hello.data.capabilities.reason === "string" && ["overlay_compositor_unavailable", "overlay_transparency_unavailable"].includes(hello.data.capabilities.reason) ? hello.data.capabilities.reason : "overlay_transparency_unavailable";
+      this.#report = { ...this.#report, ...hello.data.capabilities };
+      this.#fail(reason);
+      return false;
+    }
+    this.#rendererEpoch = candidateEpoch; this.#handshake = "passed"; this.#childState = "running"; this.#runtimeState = "ready"; this.#report = { ...this.#report, ...hello.data.capabilities, rendererStatus: "available", supported: true, fallbackRenderer: undefined };
     return true;
   }
 

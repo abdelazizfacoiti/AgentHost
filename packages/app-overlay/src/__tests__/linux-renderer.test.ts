@@ -24,7 +24,7 @@ const supported: OverlayCapabilityReport = {
   limitations: []
 };
 
-interface FakeRendererBehavior { invalidHandshake?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; }
+interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; }
 
 function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWithoutNullStreams {
   const child = new EventEmitter() as unknown as { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; killed: boolean; kill: () => boolean; };
@@ -45,7 +45,7 @@ function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWith
       if (request.command === "hello" && behavior.noHandshake === true) { newline = buffer.indexOf("\n"); continue; }
       if (request.command !== "hello" && behavior.noRenderAck === true) { newline = buffer.indexOf("\n"); continue; }
       const data = request.command === "hello"
-        ? behavior.invalidHandshake === true ? { invalid: true } : { protocolVersion: 1, rendererEpoch: behavior.wrongEpoch === true ? epoch + 1 : epoch, capabilities: { supported: true } }
+        ? behavior.invalidHandshake === true ? { invalid: true } : { protocolVersion: 1, rendererEpoch: behavior.wrongEpoch === true ? epoch + 1 : epoch, capabilities: behavior.unsupportedRenderer === true ? { supported: false, reason: "overlay_compositor_unavailable" } : { supported: true } }
         : ["show", "update", "dismiss", "clear", "emergency_hide"].includes(request.command)
           ? { command: request.command, acknowledgement: request.command === "show" ? "visible" : request.command === "update" ? "updated" : request.command === "dismiss" ? "dismissed" : request.command === "clear" ? "cleared" : "emergency_hidden", rendererEpoch: epoch, visibleWindowCount: 1, interactiveWindowCount: 0 }
           : { reason: "fake_renderer" };
@@ -151,5 +151,15 @@ describe("GTK renderer controller", () => {
       await renderTimeout.close();
       await epochMismatch.close();
     }
+  });
+
+  it("rejects a child that cannot provide transparent compositor-backed windows", async () => {
+    const renderer = new LinuxOverlayRenderer({ mode: "gtk3-x11", probe: () => supported, maxRestarts: 0, spawnProcess: () => fakeSpawnProcess({ unsupportedRenderer: true }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    try {
+      const result = await renderer.show({ overlayId: "opaque-window", type: "pointer", payload: {} });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe("overlay_compositor_unavailable");
+      expect((await renderer.diagnostics()).fallbackReason).toBe("overlay_compositor_unavailable");
+    } finally { await renderer.close(); }
   });
 });
