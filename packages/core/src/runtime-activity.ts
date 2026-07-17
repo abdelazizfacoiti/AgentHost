@@ -16,7 +16,7 @@ export const RUNTIME_ACTIVITY_LABEL_KEYS = [
   "agenthost_working", "opening_browser", "inspecting_page", "waiting_for_page", "checking_permissions",
   "waiting_for_approval", "waiting_for_user", "preparing_screenshot", "analyzing_screenshot", "recovering_target",
   "synthesizing_speech", "playing_speech", "preparing_transmission", "transmitting_speech", "running_workflow",
-  "visual_assistance", "validating_generated_tool", "checking_scheduler", "checking_strategy", "blocked_by_policy",
+  "visual_assistance", "validating_generated_tool", "checking_scheduler", "checking_strategy", "checking_available_methods", "using_browser_bridge", "using_application_adapter", "using_accessibility", "reading_visible_text", "trying_safe_fallback", "verifying_result", "guide_mode", "blocked_by_policy",
   "paused", "stopping", "completed", "failed", "cancelled", "renderer_unavailable", "background_work"
 ] as const;
 export type RuntimeActivityLabelKey = typeof RUNTIME_ACTIVITY_LABEL_KEYS[number];
@@ -133,7 +133,7 @@ const labels: Record<RuntimeActivityLabelKey, string> = {
   recovering_target: "Recovering target", synthesizing_speech: "Synthesizing speech", playing_speech: "Playing speech",
   preparing_transmission: "Preparing transmission", transmitting_speech: "Transmitting speech", running_workflow: "Running workflow",
   visual_assistance: "Visual assistance", validating_generated_tool: "Validating generated tool", checking_scheduler: "Checking scheduler",
-  checking_strategy: "Checking strategy", blocked_by_policy: "Blocked by policy", paused: "Paused", stopping: "Stopping",
+  checking_strategy: "Checking strategy", checking_available_methods: "Checking available methods", using_browser_bridge: "Using Browser Bridge", using_application_adapter: "Using application adapter", using_accessibility: "Using accessibility", reading_visible_text: "Reading visible text", trying_safe_fallback: "Trying safe fallback", verifying_result: "Verifying result", guide_mode: "Guide mode", blocked_by_policy: "Blocked by policy", paused: "Paused", stopping: "Stopping",
   completed: "Completed", failed: "Failed", cancelled: "Cancelled", renderer_unavailable: "Renderer unavailable", background_work: "Working"
 };
 

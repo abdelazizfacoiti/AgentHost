@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getPolicyProfile } from "./policies.js";
 import { PHASE20_HARD_LIMITS, PHASE20_SUPPORTED_RUNTIME_CAPABILITIES } from "./runtime-grants.js";
 import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, ForgeRuntimeSandboxMode, PolicyProfileName, ToolForgeRuntimeCapability, ToolForgeRuntimeOperation } from "./types.js";
-import type { OverlayRendererMode } from "./overlay.js";
+import type { OverlayRendererMode, OverlayPublicConfig } from "./overlay.js";
 import type { RuntimeActivityOverlayConfig } from "./runtime-activity.js";
 
 const policyProfileNameSchema = z.enum([
@@ -18,7 +18,17 @@ const policyProfileNameSchema = z.enum([
 ]);
 
 const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "firejail", "unshare"]);
-const overlayRendererModeSchema = z.enum(["headless", "auto", "gtk3-x11"]);
+const overlayRendererModeSchema = z.enum(["headless", "auto", "gtk3-x11", "gtk3-native", "webkit-gtk-react", "disabled"]);
+const overlaySchema = z.object({
+  rendererMode: overlayRendererModeSchema.optional(),
+  theme: z.enum(["system", "light", "dark"]).optional(),
+  density: z.enum(["compact", "normal"]).optional(),
+  reducedMotion: z.boolean().optional(),
+  terminalAutoHideMs: z.number().int().min(0).max(300_000).optional(),
+  preferredPosition: z.enum(["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"]).optional(),
+  maxWidth: z.number().int().min(240).max(1200).optional(),
+  multiMonitor: z.enum(["primary", "all"]).optional()
+}).strict();
 const runtimeActivityOverlaySchema = z.object({
   enabled: z.boolean().optional(),
   position: z.enum(["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"]).optional(),
@@ -150,6 +160,7 @@ const configFileSchema = z
     profile: policyProfileNameSchema.optional(),
     forgeRuntimeSandboxMode: forgeRuntimeSandboxModeSchema.optional(),
     overlayRendererMode: overlayRendererModeSchema.optional(),
+    overlay: overlaySchema.optional(),
     runtimeActivityOverlay: runtimeActivityOverlaySchema.optional(),
     browserBridge: browserBridgeSchema.optional(),
     controlRoom: controlRoomSchema.optional(),
@@ -280,8 +291,18 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     (env.AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE ?? fileConfig.forgeRuntimeSandboxMode ?? "auto") as ForgeRuntimeSandboxMode
   );
   const overlayRendererMode = overlayRendererModeSchema.parse(
-    (env.AGENTHOST_OVERLAY_MODE ?? fileConfig.overlayRendererMode ?? "headless") as OverlayRendererMode
+    (env.AGENTHOST_OVERLAY_MODE ?? fileConfig.overlay?.rendererMode ?? fileConfig.overlayRendererMode ?? "auto") as OverlayRendererMode
   );
+  const overlay: OverlayPublicConfig = {
+    rendererMode: overlayRendererMode,
+    theme: fileConfig.overlay?.theme ?? "system",
+    density: fileConfig.overlay?.density ?? "normal",
+    reducedMotion: fileConfig.overlay?.reducedMotion ?? false,
+    terminalAutoHideMs: fileConfig.overlay?.terminalAutoHideMs ?? fileConfig.runtimeActivityOverlay?.terminalAutoHideMs ?? 5_000,
+    preferredPosition: fileConfig.overlay?.preferredPosition ?? fileConfig.runtimeActivityOverlay?.position ?? "top_left",
+    maxWidth: fileConfig.overlay?.maxWidth ?? 520,
+    multiMonitor: fileConfig.overlay?.multiMonitor ?? "primary"
+  };
   const activityFile = fileConfig.runtimeActivityOverlay;
   const runtimeActivityOverlay: RuntimeActivityOverlayConfig = {
     enabled: env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED === undefined ? activityFile?.enabled ?? true : env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED === "1",
@@ -332,6 +353,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     profile: parsedProfile,
     forgeRuntimeSandboxMode,
     overlayRendererMode,
+    overlay,
     runtimeActivityOverlay,
     browserBridge,
     controlRoom,

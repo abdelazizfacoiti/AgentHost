@@ -36,7 +36,7 @@ npm run lint
 npm run smoke:mcp
 ```
 
-Supported visible mode: Linux X11 with GTK3/PyGObject, PyCairo, and `xdotool`. Wayland or missing dependencies receives honest fallback guidance.
+Supported visible mode: Linux X11 with GTK3/PyGObject, PyCairo, and `xdotool`. The V2 renderer preference is `auto`; explicit `headless` is deterministic for CI, and explicit visible mode fails closed if handshake/transparency/draw readiness cannot be proven. Wayland or missing dependencies receives honest fallback guidance.
 
 Before visible demo, verify dependencies in same desktop session:
 
@@ -72,6 +72,8 @@ npm run demo:visual-copilot -- --require-gui
 ```
 
 Launcher uses isolated demo metadata, public fixture text, explicit prompts, bounded retries, truthful terminal completion checks, renderer-health checks, signal cleanup, and cleanup. It never installs dependencies or requests sudo. `--diagnose` reports capability state; `--headless` does not simulate visible rendering.
+
+The V2 renderer lifecycle is: bounded child startup → authenticated handshake → epoch assignment → transparent mapped windows → draw-ready acknowledgement → live registration → control-surface projection. A headless state record or mapped opaque window never satisfies visible-demo success.
 
 Manual GUI verification:
 

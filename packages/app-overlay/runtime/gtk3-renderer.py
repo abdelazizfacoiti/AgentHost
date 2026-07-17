@@ -35,7 +35,7 @@ except Exception as exc:
 VERSION = 1
 MAX_BYTES = 256 * 1024
 COMMANDS = {"hello", "capabilities", "show", "update", "dismiss", "clear", "emergency_hide", "state", "close"}
-EVENTS = {"accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested"}
+EVENTS = {"accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested", "continue", "pause", "resume", "cancel", "acknowledge", "show_details", "hide", "retry_visual_render", "inspect_diagnostics", "open_control_room", "review_prepared_action", "emergency_hide", "close_control_surface"}
 
 
 def now_iso():
@@ -104,6 +104,7 @@ class Renderer:
         self.events = []
         self.emergency_hidden = False
         self.monitor_signature = None
+        self.draw_ready = set()
         self.renderer_epoch = 0
         self.last_render_reason = None
         self.widget_css_ready = False
@@ -172,6 +173,7 @@ class Renderer:
             window.destroy()
         self.windows = []
         self.surface_roots = []
+        self.draw_ready = set()
         for window in list(self.interactive.values()):
             window.destroy()
         self.interactive = {}
@@ -240,6 +242,7 @@ class Renderer:
         if not CAIRO_FOREIGN_AVAILABLE:
             for root, geometry in self.surface_roots:
                 self.render_widget_surface(root, geometry)
+                self.draw_ready.add(geometry[0])
         for record in self.records.values():
             if self.is_interactive(record):
                 self.create_interactive(record)
@@ -349,12 +352,23 @@ class Renderer:
 
     def operation_ack(self, command, acknowledgement, overlay_id=None, reason=None):
         visible, interactive = self.visibility_counts()
+        transparent = 0
+        for window in self.windows:
+            try:
+                if window.get_visual() is not None:
+                    transparent += 1
+            except Exception:
+                pass
         return {
             "command": command,
             "acknowledgement": acknowledgement,
             "rendererEpoch": self.renderer_epoch,
             "visibleWindowCount": visible,
             "interactiveWindowCount": interactive,
+            "transparentWindowCount": transparent,
+            "drawReadyCount": len(self.draw_ready),
+            "visible": bool(visible > 0 and len(self.draw_ready) >= len(self.windows) and transparent >= visible),
+            "liveSurfaceRegistered": bool(overlay_id is not None and overlay_id in self.records),
             **({"overlayId": overlay_id} if overlay_id is not None else {}),
             **({"reason": reason} if reason is not None else {}),
         }
@@ -447,6 +461,7 @@ class Renderer:
                 continue
             if not self.is_interactive(record):
                 self.draw_record(cr, record, ox, oy, monitor_width, monitor_height)
+        self.draw_ready.add(geometry[0])
         return False
 
     def draw_interactive(self, _area, cr, record):
@@ -691,18 +706,23 @@ def handle(line):
             reply(request["id"], True, renderer.capability())
         elif command == "show":
             result = renderer.show(payload)
+            if result.get("ok"): result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "update":
             result = renderer.update(payload)
+            if result.get("ok"): result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "dismiss":
             result = renderer.dismiss((payload or {}).get("overlayId"))
+            if result.get("ok"): result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "clear":
             result = renderer.clear()
+            if result.get("ok"): result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "emergency_hide":
             result = renderer.emergency_hide()
+            if result.get("ok"): result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "state":
             reply(request["id"], True, renderer.state())

@@ -11,7 +11,7 @@ import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer, Over
 export type LinuxOverlaySpawn = (command: string, args: string[], options: { stdio: ["pipe", "pipe", "pipe"]; env: NodeJS.ProcessEnv }) => ChildProcessWithoutNullStreams;
 export interface LinuxOverlayRendererOptions { environment?: OverlayEnvironment; mode?: OverlayRendererMode; sessionId?: string; pythonCommand?: string; scriptPath?: string; commandTimeoutMs?: number; startupTimeoutMs?: number; renderAckTimeoutMs?: number; maxRestarts?: number; probe?: () => Promise<OverlayCapabilityReport> | OverlayCapabilityReport; spawnProcess?: LinuxOverlaySpawn; }
 
-const fallbackReport = (report: OverlayCapabilityReport, reason: string): OverlayCapabilityReport => ({ ...report, supported: false, rendererStatus: "degraded", fallbackRenderer: "headless", reason, limitations: [...new Set([...report.limitations, "Headless renderer fallback is active."])] });
+const fallbackReport = (report: OverlayCapabilityReport, reason: string): OverlayCapabilityReport => ({ ...report, supported: false, available: true, visible: false, rendererStatus: "degraded", fallbackRenderer: "headless", reason, limitations: [...new Set([...report.limitations, "Headless renderer fallback is active."])] });
 const failure = (reason: string): OverlayOperationResult => ({ ok: false, reason, acknowledged: false });
 
 export class LinuxOverlayRenderer implements OverlayRenderer {
@@ -116,17 +116,22 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   }
 
   async #operation(command: Exclude<OverlayRendererCommand, "hello" | "capabilities" | "state" | "close">, payload: unknown, fallback: () => Promise<OverlayOperationResult> | OverlayOperationResult): Promise<OverlayOperationResult> {
-    if (!(await this.#ensureStarted())) return this.#mode === "gtk3-x11" ? failure(this.#lastFailure ?? "renderer_start_timeout") : await fallback();
+    if (!(await this.#ensureStarted())) return this.#mode === "auto" ? await fallback() : failure(this.#lastFailure ?? "renderer_start_timeout");
     this.#runtimeState = "rendering";
     const reply = await this.#request(command, payload, this.#renderAckTimeoutMs).catch((error: unknown) => { this.#fail(error instanceof Error ? error.message : "renderer_protocol_error"); return undefined; });
     if (reply?.ok === true && validateRendererOperationData(reply.data, command)) {
       if (reply.data.rendererEpoch !== this.#rendererEpoch) { this.#fail("renderer_epoch_mismatch"); return failure("renderer_epoch_mismatch"); }
+      if ((this.#mode === "gtk3-native" || this.#mode === "auto") && reply.data.requestId !== reply.id) { this.#fail("renderer_protocol_error"); return failure("renderer_protocol_error"); }
       this.#runtimeState = "ready"; this.#lastAckAt = new Date().toISOString();
-      return { ok: true, reason: reply.data.reason ?? "gtk3_overlay_complete", acknowledged: true, rendererEpoch: reply.data.rendererEpoch, visibleWindowCount: reply.data.visibleWindowCount, interactiveWindowCount: reply.data.interactiveWindowCount };
+      const visible = reply.data.visible ?? reply.data.visibleWindowCount > 0;
+      const drawReady = reply.data.drawReadyCount ?? (this.#mode === "gtk3-native" || this.#mode === "auto" ? 0 : reply.data.visibleWindowCount);
+      if ((command === "show" || command === "update") && (!visible || drawReady === 0)) { this.#fail("renderer_visibility_timeout"); return failure("renderer_visibility_timeout"); }
+      if ((command === "show" || command === "update") && (this.#mode === "gtk3-native" || this.#mode === "auto") && reply.data.liveSurfaceRegistered !== true) { this.#fail("overlay_live_registration_missing"); return failure("overlay_live_registration_missing"); }
+      return { ok: true, reason: reply.data.reason ?? "gtk3_overlay_complete", acknowledged: true, rendererEpoch: reply.data.rendererEpoch, visibleWindowCount: reply.data.visibleWindowCount, interactiveWindowCount: reply.data.interactiveWindowCount, ...(reply.data.transparentWindowCount === undefined ? {} : { transparentWindowCount: reply.data.transparentWindowCount }), ...(reply.data.drawReadyCount === undefined ? {} : { drawReadyCount: reply.data.drawReadyCount }), ...(reply.data.liveSurfaceRegistered === undefined ? {} : { liveSurfaceRegistered: reply.data.liveSurfaceRegistered }), ...(reply.data.visible === undefined ? {} : { visible: reply.data.visible }) };
     }
     const reason = reply?.ok === false && typeof reply.error === "string" ? reply.error : "overlay_render_not_acknowledged";
     this.#fail(reason);
-    return this.#mode === "gtk3-x11" ? failure(reason) : await fallback();
+    return this.#mode === "auto" ? await fallback() : failure(reason);
   }
 
   async #ensureStarted(): Promise<boolean> {
@@ -160,7 +165,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
       this.#fail(reason);
       return false;
     }
-    this.#rendererEpoch = candidateEpoch; this.#handshake = "passed"; this.#childState = "running"; this.#runtimeState = "ready"; this.#report = { ...this.#report, ...hello.data.capabilities, rendererStatus: "available", supported: true, fallbackRenderer: undefined };
+    this.#rendererEpoch = candidateEpoch; this.#handshake = "passed"; this.#childState = "running"; this.#runtimeState = "ready"; this.#report = { ...this.#report, ...hello.data.capabilities, rendererStatus: "available", available: true, visible: true, supported: true, fallbackRenderer: undefined };
     return true;
   }
 

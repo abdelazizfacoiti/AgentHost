@@ -36,9 +36,11 @@ export class RuntimeActivityOverlayController {
   start(): void { this.#unsubscribe = this.#activity.subscribe((record) => { this.#renderQueue = this.#renderQueue.then(() => this.#render(record)).catch(() => undefined); }); }
   async close(): Promise<void> { this.#closed = true; this.#unsubscribe?.(); if (this.#terminalTimer !== undefined) clearTimeout(this.#terminalTimer); if (this.#overlayId !== undefined) await this.#manager.dismiss(this.#overlayId).catch(() => undefined); this.#overlayId = undefined; this.#rendererEpoch = undefined; }
   async onRendererRestart(): Promise<void> { this.#activity.store().clearRendererBindings(); this.#overlayId = undefined; this.#rendererEpoch = undefined; await this.#renderQueue; const active = this.#activity.store().list({ limit: 1 })[0]; if (active !== undefined) { this.#renderQueue = this.#renderQueue.then(() => this.#render(active)).catch(() => undefined); await this.#renderQueue; } }
-  async projection(): Promise<{ visible: boolean; rendererStatus: "available" | "degraded" | "headless" | "unavailable"; suppression: RuntimeActivityScreenshotSuppression }> { const diagnostics = await this.#manager.diagnostics(); return { visible: this.#overlayId !== undefined && this.#manager.isOverlayLive(this.#overlayId) && diagnostics.rendererStatus === "available", rendererStatus: diagnostics.rendererStatus, suppression: this.#activity.store().list({ limit: 1 })[0]?.screenshotSuppression ?? "none" }; }
+  async projection(): Promise<{ visible: boolean; rendererStatus: "available" | "degraded" | "headless" | "unavailable"; suppression: RuntimeActivityScreenshotSuppression }> { const diagnostics = await this.#manager.diagnostics(); return { visible: this.#overlayId !== undefined && this.#manager.isOverlayLive(this.#overlayId) && diagnostics.rendererStatus === "available" && diagnostics.capabilities.visible !== false, rendererStatus: diagnostics.rendererStatus, suppression: this.#activity.store().list({ limit: 1 })[0]?.screenshotSuppression ?? "none" }; }
 
   async withScreenshotSuppressed<T>(capture: () => Promise<T>): Promise<T> {
+    const coordinator = this.#manager as OverlayManager & { withScreenshotSuppressed?: <R>(capture: () => Promise<R>) => Promise<R> };
+    if (coordinator.withScreenshotSuppressed !== undefined) return await coordinator.withScreenshotSuppressed(capture);
     const previous = this.#captureQueue;
     const run = previous.catch(() => undefined).then(() => this.#captureUnsafe(capture));
     this.#captureQueue = run.then(() => undefined, () => undefined);

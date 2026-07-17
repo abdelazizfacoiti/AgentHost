@@ -24,7 +24,7 @@ const supported: OverlayCapabilityReport = {
   limitations: []
 };
 
-interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; }
+interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; missingLiveRegistration?: boolean; }
 
 function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWithoutNullStreams {
   const child = new EventEmitter() as unknown as { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; killed: boolean; kill: () => boolean; };
@@ -47,7 +47,7 @@ function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWith
       const data = request.command === "hello"
         ? behavior.invalidHandshake === true ? { invalid: true } : { protocolVersion: 1, rendererEpoch: behavior.wrongEpoch === true ? epoch + 1 : epoch, capabilities: behavior.unsupportedRenderer === true ? { supported: false, reason: "overlay_compositor_unavailable" } : { supported: true } }
         : ["show", "update", "dismiss", "clear", "emergency_hide"].includes(request.command)
-          ? { command: request.command, acknowledgement: request.command === "show" ? "visible" : request.command === "update" ? "updated" : request.command === "dismiss" ? "dismissed" : request.command === "clear" ? "cleared" : "emergency_hidden", rendererEpoch: epoch, visibleWindowCount: 1, interactiveWindowCount: 0 }
+          ? { command: request.command, acknowledgement: request.command === "show" ? "visible" : request.command === "update" ? "updated" : request.command === "dismiss" ? "dismissed" : request.command === "clear" ? "cleared" : "emergency_hidden", rendererEpoch: epoch, visibleWindowCount: 1, interactiveWindowCount: 0, requestId: request.id, ...(request.command === "show" || request.command === "update" ? { transparentWindowCount: 1, drawReadyCount: 1, visible: true, liveSurfaceRegistered: behavior.missingLiveRegistration !== true } : {}) }
           : { reason: "fake_renderer" };
       child.stdout.write(JSON.stringify({ version: 1, id: request.id, ok: true, data }) + "\n");
       newline = buffer.indexOf("\n");
@@ -160,6 +160,14 @@ describe("GTK renderer controller", () => {
       expect(result.ok).toBe(false);
       expect(result.reason).toBe("overlay_compositor_unavailable");
       expect((await renderer.diagnostics()).fallbackReason).toBe("overlay_compositor_unavailable");
+    } finally { await renderer.close(); }
+  });
+
+  it("requires live registration acknowledgement in explicit native mode", async () => {
+    const renderer = new LinuxOverlayRenderer({ mode: "gtk3-native", probe: () => supported, maxRestarts: 0, spawnProcess: () => fakeSpawnProcess({ missingLiveRegistration: true }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    try {
+      const result = await renderer.show({ overlayId: "missing-live-registration", type: "pointer", payload: {} });
+      expect(result.reason).toBe("overlay_live_registration_missing");
     } finally { await renderer.close(); }
   });
 });

@@ -53,7 +53,7 @@ import {
   ,analyzeLinuxImage
 } from "@agenthost/os-linux";
 import { BrowserBridgeServer, createBrowserAdapter, type BrowserBridgeAdapter } from "@agenthost/app-browser";
-import { createOverlayRenderer, OverlayManager } from "@agenthost/app-overlay";
+import { createOverlayRenderer, OverlayManager, VisualSurfaceCoordinator } from "@agenthost/app-overlay";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { ConfirmationManager } from "./confirmation.js";
 import { ForgeStore } from "./forge-store.js";
@@ -103,6 +103,8 @@ import { materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js
 import { ControlRoomStore } from "./control-room-store.js";
 import { CapabilityStrategyStore } from "./capability-strategy-store.js";
 import { CapabilityStrategyService } from "./capability-strategy-service.js";
+import { AdaptiveActionRouter } from "./adaptive-action-router.js";
+import { RouteMetricsStore } from "./route-metrics-store.js";
 import { createCapabilityStrategyTools } from "./tools/capability-strategy.js";
 import { SpeechStore } from "./speech-store.js";
 import { SpeechService } from "./speech-service.js";
@@ -191,13 +193,16 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const strategyStore = new CapabilityStrategyStore(config.agentHostDir);
   await strategyStore.ensureStructure();
   const strategyService = new CapabilityStrategyService(strategyStore);
+  const routeMetrics = new RouteMetricsStore(config.agentHostDir);
+  await routeMetrics.ensureStructure();
+  const routeRouter = new AdaptiveActionRouter(routeMetrics);
   const speechStore = new SpeechStore(config.agentHostDir);
   await speechStore.ensureStructure();
   const scheduler = new SchedulerStore(config.agentHostDir);
   await scheduler.ensureStructure();
   const receipts = new ToolReceiptManager();
   const visionEvidence = new VisionEvidenceStore();
-  const overlay = new OverlayManager(createOverlayRenderer(config.overlayRendererMode ?? "headless", { sessionId }), { sessionId });
+  const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? config.runtimeActivityOverlay?.reducedMotion ?? false });
   const runtimeActivityStore = new RuntimeActivityStore(config.agentHostDir, { ownerSessionId: sessionId });
   await runtimeActivityStore.ensureStructure();
   const runtimeActivity = new RuntimeActivityService(runtimeActivityStore);
@@ -219,7 +224,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   if (browserBridge !== undefined) await browserBridge.start();
   const browser = options.browser ?? createBrowserAdapter(browserBridge!);
   let speechService: SpeechService | undefined;
-  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, runtimeActivity: { projection: async () => { const renderer = await runtimeActivityOverlay.projection(); return runtimeActivity.projection({ visible: renderer.visible, status: renderer.rendererStatus, suppression: renderer.suppression }); } }, speech: { capabilities: async () => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.capabilities() as unknown as Record<string, unknown>, projection: async (ownerSessionId) => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.projection(ownerSessionId) }, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
+  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, routes: routeRouter, runtimeActivity: { projection: async () => { const renderer = await runtimeActivityOverlay.projection(); return runtimeActivity.projection({ visible: renderer.visible, status: renderer.rendererStatus, suppression: renderer.suppression }); } }, speech: { capabilities: async () => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.capabilities() as unknown as Record<string, unknown>, projection: async (ownerSessionId) => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.projection(ownerSessionId) }, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
   await controlRoomStore.ensureStructure();
   const linux: LinuxAutomation =
     options.linux ?? {
@@ -284,6 +289,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     controlRoom: controlRoomStore,
     strategyStore,
     strategyService,
+    routeRouter,
     speech,
     browser, ...(browserBridge === undefined ? {} : { browserBridge }),
     linux

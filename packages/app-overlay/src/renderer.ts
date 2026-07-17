@@ -8,6 +8,10 @@ export interface OverlayOperationResult {
   rendererEpoch?: number;
   visibleWindowCount?: number;
   interactiveWindowCount?: number;
+  transparentWindowCount?: number;
+  drawReadyCount?: number;
+  liveSurfaceRegistered?: boolean;
+  visible?: boolean;
 }
 export type OverlayRendererChildState = "stopped" | "starting" | "running" | "failed" | "closed";
 export type OverlayRendererHandshakeState = "not_attempted" | "pending" | "passed" | "failed";

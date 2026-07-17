@@ -10,6 +10,10 @@ AgentHost is a Linux-first universal local capability runtime and visual copilot
 
 The live tool inventory and `system.list_capabilities` use one validated loaded set. Generated Forge tools never become independent live MCP tools.
 
+## V2 status
+
+V2-A Unified Dynamic Visual Copilot is implemented: explicit renderer modes, honest headless/disabled/WebKit-unavailable reporting, native GTK3/X11 handshake/draw-ready/live-registration checks, strict visual-surface envelopes and fixed components, one coordinator for projection/suppression/restart, and no target-app actions from visual events. V2-B Adaptive Reliable Action Routing is implemented as `strategy.route_preview`: action-level advisory candidates, bounded health observation, deterministic safety/verification-aware scoring, explicit fallback budget, and verified-only local route metrics. Actual execution remains in original governed tools; no autonomous loop, scheduler, or silent fallback exists.
+
 ## Milestone A — Visual Copilot Productization
 
 ### Goal
@@ -259,6 +263,10 @@ Historical phases remain a record of shipped work, not the future architecture.
 - Phase 51 — Overlay packaging/diagnostics and visual assistance sessions.
 - Safety Patch 1 — Strict runtime grants, execution metadata, loaded-tool/capability parity, generic optional-adapter policy, Blender opt-in.
 - Safety Patch 2 — Central fail-closed baseline for state-changing tool invocation.
+
+## V2 verification and manual boundary
+
+Automated verification covers headless protocol, strict surface validation, suppression ordering, mode selection, route scoring, metrics redaction, and advisory-only behavior. A normal X11 desktop is still required for visible pixel verification; use `npm run demo:visual-copilot -- --diagnose` first, then `npm run demo:visual-copilot -- --require-gui`. No CI run claims visible success from a headless renderer.
 
 ## Verification contract
 

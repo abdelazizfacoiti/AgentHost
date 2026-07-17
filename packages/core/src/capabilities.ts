@@ -9,7 +9,7 @@ import {
 
 function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
   if (name.startsWith("strategy.")) {
-    const executionClass = name === "strategy.health" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.verify_outcome" ? "read_only" : "metadata_only";
+    const executionClass = name === "strategy.health" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.verify_outcome" || name === "strategy.route_preview" ? "read_only" : "metadata_only";
     return { executionClass, externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
   }
   if (name === "overlay.assistance_step_preview" || name === "overlay.assistance_session_explain" || name === "overlay.assistance_template_validate" || name === "overlay.assistance_template_preview" || name === "overlay.assistance_template_get" || name === "overlay.assistance_template_list") return { executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
@@ -101,6 +101,7 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "strategy.revalidate", riskLevel: "low" as const, description: "Revalidates strategy prerequisites." },
     { name: "strategy.disable", riskLevel: "low" as const, description: "Disables strategy metadata." },
     { name: "strategy.archive", riskLevel: "low" as const, description: "Archives terminal strategy metadata." },
+    { name: "strategy.route_preview", riskLevel: "observe" as const, description: "Previews bounded action-level route selection without executing a route." },
     { name: "speech.list_providers", riskLevel: "observe" as const, description: "Lists detected local offline speech providers." },
     { name: "speech.get_capabilities", riskLevel: "observe" as const, description: "Reports local speech and routing capability health." },
     { name: "speech.list_voices", riskLevel: "observe" as const, description: "Lists local speech voices and languages." },

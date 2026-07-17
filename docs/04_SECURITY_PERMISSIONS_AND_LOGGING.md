@@ -31,6 +31,12 @@ The handler remains responsible for current target resolution, exact target/inpu
 
 Confirmation tokens are short-lived, session-bound, input-fingerprint-bound, risk-bound, single-use, and never logged raw. Confirmation verifies intent; it does not bypass policy, grants, protected contexts, or handler checks.
 
+## V2 visual and routing safety
+
+The visual coordinator is projection-only. It accepts fixed typed primitives/widgets, validates owner/session, target expiry, privacy, renderer epoch, TTL, priority, and bounded payloads, and routes only allowlisted visual intents. It cannot invoke browser, desktop, accessibility, shell, Forge, workflow, scheduler, speech transmission, or arbitrary MCP tools. Native visible mode reports success only after handshake, transparency, mapped-window, draw-ready, request-correlation, live-registration, and post-acknowledgement checks. `auto` may use headless fallback; explicit visible modes fail closed.
+
+Screenshot suppression is coordinator-wide and serialized: all dynamic surfaces hide, acknowledgement is awaited, no live surface is verified, capture runs, then eligible surfaces restore after acknowledgement. Ambiguous hide/restore, restart, epoch, or timeout states fail closed. Route previews expose bounded reason/latency/verification classes, not scores, coordinates, targets, page text, OCR, screenshots, or arguments. Persisted route metrics contain only verified aggregate outcomes and compatibility metadata.
+
 ## Profiles and grants
 
 Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. Demo mode only reduces friction for approved local/demo roots and normal apps; hard safety blocks remain.

@@ -25,6 +25,7 @@ describe("CapabilityRegistry", () => {
       "strategy.revalidate",
       "strategy.disable",
       "strategy.archive",
+      "strategy.route_preview",
       "speech.list_providers",
       "speech.get_capabilities",
       "speech.list_voices",

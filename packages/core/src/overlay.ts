@@ -2,15 +2,25 @@ import { redactSensitiveText } from "./safety/redaction.js";
 
 export type OverlayPrimitiveType = "pointer" | "arrow" | "highlight" | "spotlight" | "tooltip" | "instruction_card" | "approval_card" | "warning" | "progress" | "checkpoint_result" | "status_toast" | "comparison" | "cancel_control" | "emergency_stop_control";
 export type OverlayRendererStatus = "available" | "degraded" | "headless" | "unavailable";
-export type OverlayRendererMode = "headless" | "auto" | "gtk3-x11";
+export type OverlayRendererMode = "headless" | "auto" | "gtk3-x11" | "gtk3-native" | "webkit-gtk-react" | "disabled";
 export type OverlaySensitivity = "public" | "private" | "secret";
 export type OverlayTheme = "system" | "light" | "dark";
 export type OverlayDensity = "compact" | "normal";
 export type OverlayPlacement = "top_left" | "top_center" | "top_right" | "bottom_left" | "bottom_center" | "bottom_right";
 export type OverlayDisplayPolicy = "primary" | "all";
+export interface OverlayPublicConfig {
+  rendererMode: OverlayRendererMode;
+  theme: OverlayTheme;
+  density: OverlayDensity;
+  reducedMotion: boolean;
+  terminalAutoHideMs: number;
+  preferredPosition: OverlayPlacement;
+  maxWidth: number;
+  multiMonitor: "primary" | "all";
+}
 export type OverlayAnimationKind = "fade" | "slide" | "scale" | "pulse" | "glow" | "pointer_move" | "progress";
 export type OverlayControlSurfaceAction = "continue" | "pause" | "resume" | "cancel" | "retry_visual_render" | "inspect_diagnostics" | "emergency_hide" | "close_control_surface";
-export type OverlayEventName = "accepted" | "rejected" | "dismissed" | "cancelled" | "next" | "back" | "acknowledgement_checked" | "emergency_stop_requested" | OverlayControlSurfaceAction;
+export type OverlayEventName = "accepted" | "rejected" | "dismissed" | "cancelled" | "next" | "back" | "acknowledgement_checked" | "emergency_stop_requested" | "acknowledge" | "show_details" | "hide" | "open_control_room" | "review_prepared_action" | OverlayControlSurfaceAction;
 
 export interface OverlayBounds { x: number; y: number; width: number; height: number; }
 export interface OverlayPoint { x: number; y: number; }
@@ -46,7 +56,7 @@ export type OverlayWidgetComponent =
 export interface OverlayWidget { widgetId?: string; title: string; components: OverlayWidgetComponent[]; target?: OverlayTargetBinding; placement?: OverlayPlacement; displayPolicy?: OverlayDisplayPolicy; style?: OverlayStyleTokens; animation?: OverlayAnimation; interaction?: OverlayInteractionPolicy; accessibilityLabel?: string; sensitivity: OverlaySensitivity; ttlMs?: number; }
 export interface OverlayWidgetEvent { eventId: string; overlayId: string; event: OverlayEventName; createdAt: string; ownerSessionId: string; }
 
-export interface OverlayCapabilityReport { supported: boolean; renderer: string; rendererStatus: OverlayRendererStatus; sessionType: "x11" | "wayland" | "unknown"; displayAvailable: boolean; clickThrough: boolean; interactiveWidgets: boolean; multipleDisplays: boolean; globalOverlayAvailable: boolean; clickThroughAvailable: boolean; multiDisplayAvailable: boolean; animationAvailable: boolean; interactiveWidgetsAvailable: boolean; /** True only when compositor-backed transparent windows are available. */ compositorAvailable?: boolean | undefined; /** True only when renderer can create transparent windows without covering the desktop. */ transparentWindowsAvailable?: boolean | undefined; /** Safe child rendering path selected after handshake. */ drawingBackend?: "cairo" | "gtk3-widgets" | undefined; cairoCallbacks?: boolean | undefined; fallbackRenderer?: "headless" | undefined; reason: string; limitations: string[]; }
+export interface OverlayCapabilityReport { supported: boolean; available?: boolean; visible?: boolean; renderer: string; rendererStatus: OverlayRendererStatus; sessionType: "x11" | "wayland" | "unknown"; displayAvailable: boolean; clickThrough: boolean; interactiveWidgets: boolean; multipleDisplays: boolean; globalOverlayAvailable: boolean; clickThroughAvailable: boolean; multiDisplayAvailable: boolean; animationAvailable: boolean; interactiveWidgetsAvailable: boolean; /** True only when compositor-backed transparent windows are available. */ compositorAvailable?: boolean | undefined; /** True only when renderer can create transparent windows without covering the desktop. */ transparentWindowsAvailable?: boolean | undefined; /** Safe child rendering path selected after handshake. */ drawingBackend?: "cairo" | "gtk3-widgets" | undefined; cairoCallbacks?: boolean | undefined; fallbackRenderer?: "headless" | undefined; reason: string; limitations: string[]; }
 export interface OverlayStateSummary { overlayId: string; ownerSessionId: string; type: OverlayPrimitiveType | "widget"; target?: OverlayTargetSummary; sensitivity: OverlaySensitivity; interactive: boolean; visible: boolean; createdAt: string; updatedAt: string; expiresAt: string; lastEvent?: OverlayWidgetEvent; }
 export interface OverlayStateSnapshot { renderer: OverlayCapabilityReport; overlays: OverlayStateSummary[]; pendingEvents: OverlayWidgetEvent[]; emergencyHidden: boolean; }
 
@@ -108,7 +118,7 @@ export function validateOverlayInteractionPolicy(policy?: OverlayInteractionPoli
   if (policy === undefined) return [];
   if (typeof policy !== "object" || policy === null) return ["overlay_interaction_invalid"];
   const errors: string[] = [];
-  const events: OverlayEventName[] = ["accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested", "continue", "pause", "resume", "cancel", "retry_visual_render", "inspect_diagnostics", "emergency_hide", "close_control_surface"];
+  const events: OverlayEventName[] = ["accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested", "acknowledge", "show_details", "hide", "open_control_room", "review_prepared_action", "continue", "pause", "resume", "cancel", "retry_visual_render", "inspect_diagnostics", "emergency_hide", "close_control_surface"];
   if (typeof policy.interactive !== "boolean" || typeof policy.dismissible !== "boolean" || !["never", "when_required"].includes(policy.focus)) errors.push("overlay_interaction_invalid");
   if (!Array.isArray(policy.allowedEvents) || policy.allowedEvents.length > 8 || policy.allowedEvents.some((event) => !events.includes(event))) errors.push("overlay_event_invalid");
   return [...new Set(errors)];

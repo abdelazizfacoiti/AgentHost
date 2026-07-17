@@ -62,6 +62,7 @@ export interface ControlRoomSources {
   overlay?: { diagnostics(): Promise<any> };
   browserBridge?: { status(): Record<string, unknown> };
   strategies?: { summary(): Promise<Record<string, unknown>> };
+  routes?: { summary(): Record<string, unknown> };
   speech?: { capabilities?(): Promise<Record<string, unknown>>; projection?(ownerSessionId: string): Promise<Record<string, unknown>> };
   runtimeActivity?: { projection(): Promise<RuntimeActivityProjection> };
 }
@@ -195,7 +196,8 @@ export class ControlRoomStore {
         runtimeActivity = { activeCount: projection.activeCount, rendererVisible: projection.rendererVisible, rendererStatus: projection.rendererStatus, screenshotSuppression: projection.screenshotSuppression, ...(active === undefined ? {} : { active: { activityId: active.activityId, taskId: active.taskId, source: active.source, labelKey: active.labelKey, actionKey: active.actionKey, state: active.state, elapsedMs: active.elapsedMs, ...(active.progress === undefined ? {} : { progress: active.progress }), ...(active.blockerCode === undefined ? {} : { blockerCode: active.blockerCode }), ...(active.warningCode === undefined ? {} : { warningCode: active.warningCode }), redacted: true } }), redacted: true };
       }
     } catch { runtimeActivity = { status: "unavailable", redacted: true }; }
-    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(strategies === undefined ? {} : { strategies }), ...(speech === undefined ? {} : { speech }), ...(runtimeActivity === undefined ? {} : { runtimeActivity }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only.", "Speech projections contain provider, device, artifact, and routing metadata only."] };
+    const routes = this.#sources.routes?.summary();
+    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(strategies === undefined ? {} : { strategies }), ...(routes === undefined ? {} : { routes }), ...(speech === undefined ? {} : { speech }), ...(runtimeActivity === undefined ? {} : { runtimeActivity }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only.", "Route projections contain families, reason codes, and bounded status only.", "Speech projections contain provider, device, artifact, and routing metadata only."] };
   }
 
   async #buildTasks(from?: string, to?: string): Promise<ControlRoomTaskProjection[]> {

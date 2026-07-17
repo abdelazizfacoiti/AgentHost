@@ -20,7 +20,7 @@ function classify(definition: AnyAgentHostToolDefinition): ToolExecutionClass {
   }
   if (name === "system.check_dependency" || name === "forge.check_sandbox_support" || name.startsWith("browser.setup_")) return "diagnostic";
   if (name.startsWith("guide.")) return "metadata_only";
-  if (name.startsWith("strategy.")) return name === "strategy.health" || name === "strategy.verify_outcome" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" ? "read_only" : "metadata_only";
+  if (name.startsWith("strategy.")) return name === "strategy.health" || name === "strategy.verify_outcome" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.route_preview" ? "read_only" : "metadata_only";
   if (name === "speech.get_capabilities" || name === "speech.routing_diagnose") return "diagnostic";
   if (name === "speech.synthesize" || name === "speech.play" || name === "speech.stop" || name === "speech.transmission_execute") return "state_changing";
   if (name === "speech.transmission_prepare") return "metadata_only";

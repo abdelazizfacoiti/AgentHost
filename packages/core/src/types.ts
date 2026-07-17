@@ -657,6 +657,7 @@ export interface AgentHostConfig {
   /** Undefined only for older in-memory callers; loader always supplies `auto` by default. */
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
   overlayRendererMode?: import("./overlay.js").OverlayRendererMode;
+  overlay?: import("./overlay.js").OverlayPublicConfig;
   browserBridge?: BrowserBridgeConfig;
   controlRoom?: ControlRoomConfig;
   speech?: SpeechConfig;

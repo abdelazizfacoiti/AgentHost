@@ -28,15 +28,19 @@ The browser extension is preferred for structured DOM work, but is not required.
 
 ## Current implementation status
 
+V2-A unifies dynamic visual projection behind one owner/session-bound coordinator. Native GTK3/X11 is the selected visible backend; `auto`, `gtk3-native` (legacy `gtk3-x11` alias), `headless`, `disabled`, and diagnostic-only `webkit-gtk-react` are explicit modes. Visible success requires authenticated handshake, renderer epoch, transparent mapped windows, draw-ready acknowledgement, live registration, and post-acknowledgement projection. Headless reports `available:true`, `visible:false`, and `reason:visible_renderer_unavailable`.
+
+V2-B adds `strategy.route_preview`, an advisory action-level router over loaded browser, adapter, accessibility, OCR/vision, desktop, and guide families. It is deterministic, safety-first, bounded, verification-aware, and metrics-backed only by verified outcomes. It does not execute or silently switch tools.
+
 R5 adds an honest Linux x86_64 release-candidate surface around existing capabilities: rootless archive installation, `agenthost` CLI, resumable setup, redacted doctor diagnostics, Codex MCP integration with preview/backup/rollback, controlled lifecycle, browser/overlay/Control Room/speech onboarding, and deterministic release scans. Packaging adds no execution capability and keeps host dependencies explicit.
 
-The default loaded registry currently contains 223 tools with validated execution metadata:
+The default loaded registry currently contains 239 tools with validated execution metadata (optional adapters are conditional):
 
-- 49 `read_only`
-- 5 `diagnostic`
-- 115 `metadata_only`
-- 25 `state_changing`
-- 29 `visual_only`
+- 58 `read_only`
+- 6 `diagnostic`
+- 116 `metadata_only`
+- 29 `state_changing`
+- 30 `visual_only`
 
 R2 adds persistent installation-level capability strategies. `strategy.select` ranks only compatible active records after live capability, profile, grant, adapter, and Browser Bridge health checks. It returns bounded advisory steps and fallbacks; it never executes an underlying tool. Built-in strategies are trusted structural metadata. Local proposals require review plus two independently verified signed-receipt outcomes before activation. Strategy records persist no task content, secrets, screenshots, OCR, transient IDs, shell, code, or dynamic tool names.
 

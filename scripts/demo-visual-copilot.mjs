@@ -51,6 +51,10 @@ async function main() {
       console.log(safeStatus({ ok: true, mode, demoHome: "[isolated-demo-home]", renderer: diagnostics, recovery: "Use overlay.assistance_session_explain and overlay.control_surface_get for live status." }));
       return;
     }
+    if (headless) {
+      console.log(safeStatus({ ok: true, mode: "headless", renderer: diagnostics, visible: diagnostics?.capabilities?.visible === true, actionsExecuted: false, confirmationTokensCreated: false, note: "Headless capability check only; no visual flow was simulated." }));
+      return;
+    }
     if (!headless && diagnostics?.rendererStatus !== "available" && requireGui) {
       console.error(safeStatus({ ok: false, code: "visual_renderer_unavailable", renderer: diagnostics, next: "Run overlay.renderer_setup_instructions or use --headless." }));
       process.exitCode = 1;

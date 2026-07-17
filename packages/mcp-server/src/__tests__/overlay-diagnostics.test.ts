@@ -17,6 +17,8 @@ describe("overlay renderer diagnostics", () => {
     const value = context();
     expect(await call(value, "overlay.renderer_status")).toMatchObject({ ok: true, data: { effectiveBackend: "headless", childState: "stopped" } });
     expect(await call(value, "overlay.renderer_setup_instructions")).toMatchObject({ ok: true, data: { noAutomaticInstall: true, noPrivilegeEscalation: true } });
+    const instructions = await call(value, "overlay.renderer_setup_instructions");
+    expect((instructions.data as { modes: Array<{ mode: string }> }).modes.map((item) => item.mode)).toEqual(expect.arrayContaining(["auto", "gtk3-native", "headless", "disabled", "webkit-gtk-react"]));
     expect(await call(value, "overlay.renderer_restart", { dryRun: true })).toMatchObject({ ok: true, preview: true, data: { onlyVisualChild: true, wouldRestart: true } });
   });
 });

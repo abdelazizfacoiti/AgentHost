@@ -5,6 +5,7 @@ import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer, Over
 export interface OverlayTargetResolution { ok: boolean; summary?: OverlayTargetSummary; reason?: string; }
 export type OverlayTargetResolver = (binding: OverlayTargetBinding, sessionId: string) => Promise<OverlayTargetResolution> | OverlayTargetResolution;
 export interface OverlayOwner { sessionId: string; }
+export interface OverlaySuppressionRecord { overlayId: string; type: string; payload: unknown; record?: OverlayStateSummary; }
 
 function expiry(ttlMs = 30_000): string { return new Date(Date.now() + Math.min(300_000, Math.max(1_000, ttlMs))).toISOString(); }
 function overlayExpiry(ttlMs: number | undefined, target: OverlayTargetSummary | undefined): string { const own = Date.parse(expiry(ttlMs)); const targetExpiry = target === undefined ? own : Date.parse(target.expiresAt); return new Date(Math.min(own, targetExpiry)).toISOString(); }
@@ -76,6 +77,9 @@ export class OverlayManager {
   async close(): Promise<void> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); this.#rendererEpoch += 1; await this.#renderer.close?.(); }
   async restartRenderer(): Promise<OverlayRendererRestartResult> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); this.#rendererEpoch += 1; const result = await this.#renderer.restart?.(); if (result === undefined) return { ok: false, reason: "overlay_renderer_restart_unsupported" }; return result; }
   rendererEpoch(): number { return this.#rendererEpoch; }
+  ownerId(): string { return this.#owner.sessionId; }
+  suppressionSnapshot(): OverlaySuppressionRecord[] { return [...this.#payloads.entries()].map(([overlayId, payload]) => { const record = this.#records.get(overlayId); return { overlayId, type: record?.type ?? "widget", payload, ...(record === undefined ? {} : { record }) }; }); }
+  async restoreSuppressionSnapshot(snapshot: OverlaySuppressionRecord[]): Promise<void> { for (const item of snapshot) { if (item.record !== undefined && (item.record.ownerSessionId !== this.#owner.sessionId || Date.parse(item.record.expiresAt) <= Date.now())) continue; const result = await this.#renderer.show(item); if (result.ok && result.acknowledged === true) { const current = this.#records.get(item.overlayId); if (current !== undefined) this.#records.set(item.overlayId, { ...current, visible: true, updatedAt: new Date().toISOString() }); else if (item.record !== undefined) this.#records.set(item.overlayId, { ...item.record, visible: true, updatedAt: new Date().toISOString() }); this.#payloads.set(item.overlayId, item.payload); } } }
   isOverlayLive(overlayId: string): boolean { const current = this.#records.get(overlayId); return current?.ownerSessionId === this.#owner.sessionId && current.visible === true && Date.parse(current.expiresAt) > Date.now(); }
   pushEvent(event: OverlayWidgetEvent): void { if (event.ownerSessionId !== this.#owner.sessionId) return; const renderer = this.#renderer as OverlayRenderer & { pushEvent?: (event: OverlayWidgetEvent) => void }; renderer.pushEvent?.(event); }
   #expire() { const now = Date.now(); for (const [id, record] of this.#records) if (Date.parse(record.expiresAt) <= now) { this.#records.delete(id); this.#payloads.delete(id); this.#targets.delete(id); void this.#renderer.dismiss(id); } }

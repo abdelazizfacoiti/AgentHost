@@ -120,20 +120,24 @@ Full state checks and recovery: [Browser Setup Validation](docs/06_BROWSER_SETUP
 
 If the extension is unavailable, AgentHost may recommend accessibility, local OCR/vision, pointer fallback, or guide mode. It never executes a fallback silently.
 
-## Overlay setup
+## Unified visual copilot setup (V2)
 
-The default overlay mode is safe headless state. For an opt-in local visual demo in a supported GTK3/X11 session:
+The default renderer preference is `auto`: it selects the packaged native GTK3/X11 backend when a verified local display is available and otherwise reports an honest non-visible state. Use `headless` for deterministic CI or `disabled` to turn rendering off. WebKit mode is diagnostic-only and never silently maps to another backend.
 
 ```bash
 npm run build
 npm run demo:overlay
 ```
 
-Use `overlay.renderer_status`, `overlay.renderer_diagnose`, and `overlay.renderer_setup_instructions` for diagnostics. AgentHost does not install GTK/PyGObject dependencies or request privilege escalation. Wayland limitations are reported honestly; headless fallback remains available.
+Use `overlay.renderer_status`, `overlay.renderer_diagnose`, and `overlay.renderer_setup_instructions` for diagnostics. AgentHost does not install GTK/PyGObject dependencies or request privilege escalation. Wayland limitations are reported honestly; `auto` may fall back to headless, while explicit visible modes fail closed. A renderer acknowledgement is not considered visible success until handshake, transparency, mapping, draw-ready, epoch, and live-registration checks pass.
 
 Visual assistance control surface tools (`overlay.control_surface_show/get/update/hide/apply_event`) manage one generic operator surface per owned assistance session. They change only AgentHost visual/session state. They never click, type, navigate, move the real pointer, invoke another tool, create confirmation tokens, or grant permissions. Renderer-bound overlay IDs are ephemeral and must be reacquired after restart.
 
 R4 adds a global runtime activity indicator driven by the owner-scoped redacted activity store also used by Control Room. Direct MCP work is normalized into bounded states such as preparing, inspecting, acting, waiting for approval, blocked, and completed. Labels are allowlisted; raw prompts, arguments, page/OCR text, paths, messages, tokens, and screenshots never enter the overlay. Set `AGENTHOST_OVERLAY_MODE=auto` or `gtk3-x11` for visible X11 rendering; headless mode reports no visible overlay. The indicator is click-through and non-focus-stealing, hides with renderer acknowledgement before screenshots, then restores after capture. Renderer restart invalidates old bindings and re-projects only after a fresh acknowledgement.
+
+V2 adds one owner/session-bound `VisualSurfaceCoordinator` for runtime activity, assistance, templates, control surfaces, renderer health, route status, and screenshot suppression. It accepts only a versioned fixed component vocabulary (no HTML/CSS/JS, URLs, arbitrary commands, or dynamic imports), bounds priority/concurrency/TTL, and routes visual intents only. The coordinator hides every dynamic surface behind a serialized screenshot barrier and reprojects only after acknowledgement.
+
+`strategy.route_preview` is an advisory action-level route plan. It uses loaded capabilities, optional Browser Bridge health, deterministic route families, bounded estimates, verified-only local metrics, and explicit fallback budget. It never invokes a route or creates a confirmation; the original governed tools remain the only execution boundary.
 
 A2 assistance tools (`overlay.assistance_step_preview`, `overlay.assistance_session_explain`, and `overlay.assistance_template_*`) expose bounded read-only projections and draft-only visual template metadata. Templates allow existing visual primitives, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders. Preview never renders or advances. Instantiation creates a ready/draft assistance session only; it never starts, renders, invokes target tools, creates grants, or creates confirmation tokens.
 

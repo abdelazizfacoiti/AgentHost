@@ -48,7 +48,11 @@ Firefox/Chromium unpacked extension and fixed localhost bridge. It exposes sanit
 
 ### `packages/app-overlay`
 
-Headless renderer plus optional GTK3/X11 renderer child. Renderer commands use bounded authenticated JSONL IPC. Overlay state, targets, widgets, animation, interaction events, health, restart, fallback, emergency-hide, and generic operator control surfaces are handled here. Control-surface state is kept in `packages/mcp-server` and binds only to trusted server session ownership.
+Headless/disabled renderers plus optional GTK3/X11 renderer child. Renderer commands use bounded authenticated JSONL IPC. `VisualSurfaceCoordinator` is the single ephemeral projection/arbitration boundary for runtime activity, assistance, templates, control surfaces, renderer health, route status, owner/session/target/epoch/TTL bindings, and coordinator-wide screenshot suppression. `component-registry.ts` limits rendering to fixed trusted primitives/widgets; no HTML/CSS/JS or dynamic imports enter the child. Persistent assistance/control/activity stores remain authoritative. Control-surface state is kept in `packages/mcp-server` and binds only to trusted server session ownership.
+
+### Adaptive route boundary
+
+`adaptive-action-router.ts` provides advisory action-level candidates over loaded route families. It performs bounded health observation, deterministic safety/verification-aware scoring, explicit fallback budgeting, and verified-only metric lookup through `route-metrics-store.ts`. It never invokes a browser, desktop, accessibility, OCR, vision, adapter, guide, or other MCP tool.
 
 ### Runtime activity boundary
 
@@ -148,6 +152,8 @@ Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, 
   runtime-activity/
     records.jsonl
     events.jsonl
+  strategies/
+    routes/metrics.json
   scheduler/
     jobs/ reviews/ activations/ activation-reviews/
     manual-run-contracts/ manual-run-reviews/ manual-run-preflights/

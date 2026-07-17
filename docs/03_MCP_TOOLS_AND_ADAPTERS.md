@@ -24,6 +24,8 @@ Each loaded definition has:
 
 Missing/contradictory metadata and duplicate names fail closed. Disabled optional tools and generated Forge tool names are absent from both callable inventories.
 
+`strategy.route_preview` is read-only action-level routing advice. Families are `browser_bridge`, `structured_browser`, `native_adapter`, `accessibility`, `local_ocr`, `screenshot_vision`, `desktop_input`, and `guide_only`. It returns bounded candidates, reason codes, alternatives, verification/latency classes, and fallback budget; it never executes, retries, changes targets, or creates confirmations. Persisted route metrics are aggregate verified outcomes only.
+
 ## Strategy order
 
 1. app adapter/API
@@ -106,6 +108,8 @@ Receipts are attached by the normal runner rather than exposed as a standalone a
 R4 runtime activity is not a new execution tool. The normal tool runner emits bounded activity records and the overlay controller renders only allowlisted labels, lifecycle state, elapsed time, authoritative progress, blocker/warning codes, and renderer/suppression status. Direct tool rows are projected through this authoritative source once. Activity state never creates permissions, confirmations, target-app actions, or background work.
 
 `npm run demo:visual-copilot` is explicit local demonstration command, not MCP capability. It uses same stores and renderer boundary, prompts for every operator decision, prints redacted diagnostics, and exits safely when GUI dependencies are unavailable.
+
+V2 surface projection uses a versioned envelope and fixed trusted component registry. Dynamic markup/scripts, URLs, expressions, imports, arbitrary MCP calls, shell commands, raw arguments, secrets, and private page/OCR/filesystem content are rejected. Visible native rendering requires handshake, transparency, mapping, draw-ready, epoch, request correlation, live registration, and post-acknowledgement projection; headless state never claims visible success. Screenshot suppression hides every coordinator surface, not only runtime activity.
 
 ## Optional adapters
 

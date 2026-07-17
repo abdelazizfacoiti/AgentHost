@@ -33,9 +33,14 @@ export interface OverlayRendererOperationData {
   command: Exclude<OverlayRendererCommand, "hello" | "capabilities" | "state" | "close">;
   acknowledgement: OverlayRendererAcknowledgement;
   rendererEpoch: number;
+  requestId?: string;
   overlayId?: string;
   visibleWindowCount: number;
   interactiveWindowCount: number;
+  transparentWindowCount?: number;
+  drawReadyCount?: number;
+  liveSurfaceRegistered?: boolean;
+  visible?: boolean;
   reason?: string;
 }
 
@@ -89,7 +94,12 @@ export function validateRendererOperationData(value: unknown, expectedCommand?: 
   if (!Number.isInteger(record.rendererEpoch) || Number(record.rendererEpoch) < 1) return false;
   if (!Number.isInteger(record.visibleWindowCount) || Number(record.visibleWindowCount) < 0 || Number(record.visibleWindowCount) > 100) return false;
   if (!Number.isInteger(record.interactiveWindowCount) || Number(record.interactiveWindowCount) < 0 || Number(record.interactiveWindowCount) > 100) return false;
+  if (record.transparentWindowCount !== undefined && (!Number.isInteger(record.transparentWindowCount) || Number(record.transparentWindowCount) < 0 || Number(record.transparentWindowCount) > 100)) return false;
+  if (record.drawReadyCount !== undefined && (!Number.isInteger(record.drawReadyCount) || Number(record.drawReadyCount) < 0 || Number(record.drawReadyCount) > 100)) return false;
+  if (record.liveSurfaceRegistered !== undefined && typeof record.liveSurfaceRegistered !== "boolean") return false;
+  if (record.visible !== undefined && typeof record.visible !== "boolean") return false;
   if (record.overlayId !== undefined && (typeof record.overlayId !== "string" || record.overlayId.length < 1 || record.overlayId.length > 200)) return false;
+  if (record.requestId !== undefined && (typeof record.requestId !== "string" || record.requestId.length < 1 || record.requestId.length > 100)) return false;
   if (record.reason !== undefined && (typeof record.reason !== "string" || record.reason.length > 200)) return false;
   const expectedAcknowledgement: Record<string, OverlayRendererAcknowledgement> = { show: "visible", update: "updated", dismiss: "dismissed", clear: "cleared", emergency_hide: "emergency_hidden" };
   if (expectedCommand !== undefined && record.acknowledgement !== expectedAcknowledgement[expectedCommand]) return false;
