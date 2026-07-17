@@ -68,7 +68,7 @@ For local development, set `AGENTHOST_HOME` to an isolated directory:
 AGENTHOST_HOME=.agenthost npm run start:mcp
 ```
 
-## Linux release candidate
+## Linux release candidate (R5/R6)
 
 R5 packages existing AgentHost capabilities for rootless Linux x86_64 use. Build and verify archive from a built checkout:
 
@@ -77,9 +77,10 @@ npm run build
 npm run release:build
 npm run release:scan
 npm run release:verify
+(cd release && sha256sum -c agenthost-v0.1.0-linux-x64.tar.gz.sha256)
 ```
 
-Install from a release directory or archive with `npm run release:install -- <release-directory-or-tar.gz>`. Installation stays under `~/.local/share/agenthost` and `~/.local/bin`; no `sudo`, system service, package installation, or hidden browser installation occurs. The installed CLI is `agenthost`.
+Install archive only with its adjacent `.sha256` sidecar (or an explicit `--sha256` value): `npm run release:install -- <release-directory-or-tar.gz>`. Directory installs verify `version.json` file hashes. Installation stays under `~/.local/share/agenthost` and `~/.local/bin`; no `sudo`, system service, package installation, or hidden browser installation occurs. The installed CLI is `agenthost`.
 
 ```bash
 agenthost doctor
@@ -90,7 +91,7 @@ agenthost start
 
 `agenthost integrations codex add --apply` is required before editing Codex configuration. It creates a backup, preserves unrelated MCP servers, registers installed `agenthost start`, and can be removed with `agenthost integrations codex remove --apply`. `agenthost doctor --json` reports bounded, redacted diagnostics. Node.js 20+, Python 3, and optional GTK/X11, browser, and speech dependencies remain host prerequisites.
 
-Config is canonical at `~/.config/agenthost/config.json`; legacy `~/.agenthost/config.json` is read for compatibility and migrated only by `agenthost setup`. Runtime state remains under `~/.agenthost`. Updates are manual and checksum-verified; uninstall preserves runtime data unless explicit removal is requested.
+Config is canonical at `~/.config/agenthost/config.json`; legacy `~/.agenthost/config.json` is read for compatibility and migrated only by `agenthost setup`. Runtime state remains under `~/.agenthost`. Updates are manual, sidecar-checksum-verified, atomic, and rollback-capable; use `agenthost update --archive <archive> --apply` or provide `--sha256 <64-hex-digest>`. Uninstall preserves runtime data unless explicit removal is requested.
 
 ## Browser bridge setup
 
@@ -146,6 +147,8 @@ npm run demo:visual-copilot
 Demo uses public fixture data, explicit operator prompts, safe local screen-point grounding, bounded stale-target recovery, and terminal completion. It never controls target applications. Visible mode requires GTK3/PyGObject on X11 and fails honestly if transparent composition is unavailable. Renderer uses Cairo when its PyGObject bridge exists, otherwise bounded GTK widgets; it never opens opaque fullscreen windows. `xdotool` is needed only for screen-geometry probing. `--diagnose` prints renderer capability guidance; `--headless` is a safe capability check for CI; `--require-gui` fails clearly when visible support is unavailable. `overlay.assistance_target_refresh` revalidates only current visual target, with two explicit refreshes maximum per step. No automatic retry exists.
 
 Build Week walkthrough, setup, limitations, and video outline: [BUILD_WEEK.md](BUILD_WEEK.md).
+
+R6 release audit, storage inventory, manual verification checklist, and freeze status: [docs/09_RELEASE_AUDIT.md](docs/09_RELEASE_AUDIT.md).
 
 ## Forge runtime
 

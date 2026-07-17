@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chmod, cp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
@@ -41,6 +41,14 @@ async function prune(directory) {
   }
 }
 await prune(stage);
+async function removeDanglingSymlinks(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const item = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) { const target = await readlink(item).catch(() => ""); const resolved = path.resolve(path.dirname(item), target); if (path.isAbsolute(target) || (resolved !== stage && !resolved.startsWith(`${stage}${path.sep}`)) || !(await stat(item).catch(() => undefined))) await rm(item, { force: true }); continue; }
+    if (entry.isDirectory()) await removeDanglingSymlinks(item);
+  }
+}
+await removeDanglingSymlinks(stage);
 const wrapper = `#!/usr/bin/env node\nprocess.env.AGENTHOST_RELEASE_ROOT = new URL("..", import.meta.url).pathname.replace(/\\/$/, "");\nawait import(new URL("../packages/agenthost-cli/dist/index.js", import.meta.url));\n`;
 await mkdir(path.join(stage, "bin"), { recursive: true });
 await writeFile(path.join(stage, "bin", "agenthost.mjs"), wrapper, { mode: 0o755 }); await chmod(path.join(stage, "bin", "agenthost.mjs"), 0o755);
@@ -53,4 +61,7 @@ await mkdir(releaseRoot, { recursive: true });
 const archive = path.join(releaseRoot, `agenthost-v${version}-linux-x64.tar.gz`);
 const tar = spawnSync("tar", ["-czf", archive, "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-C", releaseRoot, path.basename(stage)], { stdio: "pipe" });
 if (tar.status !== 0) throw new Error("release_archive_failed");
+const archiveHash = createHash("sha256").update(await readFile(archive)).digest("hex");
+await writeFile(`${archive}.sha256`, `${archiveHash}  ${path.basename(archive)}\n`, { mode: 0o644 });
+await writeFile(path.join(releaseRoot, "SHA256SUMS"), `${archiveHash}  ${path.basename(archive)}\n`, { mode: 0o644 });
 console.log(JSON.stringify({ stage, archive, version, fileCount: files.length }, null, 2));

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, defaultAgentHostHome, defaultPublicConfigPath, legacyConfigPath, loadAgentHostConfig, redactLocalPath } from "@agenthost/core";
+import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, defaultAgentHostHome, defaultPublicConfigPath, legacyConfigPath, loadAgentHostConfig, normalizeSha256, readSha256Sidecar, redactLocalPath, sha256File } from "@agenthost/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
@@ -37,6 +37,7 @@ function redact(value: unknown): unknown {
   return value;
 }
 function commandExists(command: string): boolean { return spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0; }
+function pythonModuleExists(expression: string): boolean { return spawnSync("python3", ["-c", expression], { stdio: "ignore" }).status === 0; }
 async function probeMcp(entry: string): Promise<{ started: boolean; handshake: boolean; reason?: string }> {
   if (!existsSync(entry)) return { started: false, handshake: false, reason: "mcp_runtime_missing" };
   const isolatedHome = await mkdtemp(path.join(os.tmpdir(), "agenthost-doctor-")).catch(() => undefined);
@@ -70,6 +71,13 @@ function parseFlags(args: string[]): { positional: string[]; flags: Set<string>;
   for (let i = 0; i < args.length; i += 1) { const item = args[i]!; if (!item.startsWith("--")) { positional.push(item); continue; } const [key, inline] = item.slice(2).split("=", 2); if (inline !== undefined) values.set(key!, inline); else if (args[i + 1] !== undefined && !args[i + 1]!.startsWith("--")) { values.set(key!, args[++i]!); } else flags.add(key!); }
   return { positional, flags, values };
 }
+async function verifyArchiveChecksum(archive: string, supplied: string | undefined): Promise<string> {
+  const expected = supplied === undefined ? await readSha256Sidecar(archive) : normalizeSha256(supplied);
+  if (expected === undefined) throw new Error("release_checksum_required");
+  const actual = await sha256File(archive);
+  if (actual !== expected) throw new Error("release_checksum_mismatch");
+  return actual;
+}
 async function configObject(): Promise<Json> {
   const candidate = existsSync(publicConfig) ? publicConfig : legacyConfigPath(home);
   return (await readJson(candidate)) ?? {};
@@ -93,9 +101,10 @@ async function setup(flags: ReturnType<typeof parseFlags>): Promise<Output> {
       }
     }
     const stateFile = path.join(agentHome, "setup", "state.json"); const state = (await readJson(stateFile)) ?? { schemaVersion: 1, completed: [] };
-    state.completed = ["environment", "home_config", "mcp_runtime", "browser_artifacts", "browser_setup", "pairing", "reconnect", "codex", "overlay", "control_room", "speech", "strategies", "privacy", "validation"];
-    state.updatedAt = new Date().toISOString(); await safeWrite(stateFile, JSON.stringify(state, null, 2) + "\n");
-    return { ok: true, command: "setup", data: { resumable: true, configPath: "[config]", agentHostHome: "[agenthost-home]", completed: state.completed, skipped: flags.flags.has("skip-optional") ? ["browser", "control-room", "speech"] : [] }, warnings: ["Browser installation and pairing remain manual.", "System dependencies are not installed automatically."] };
+    const completed = ["environment", "home_config", ...(existsSync(mcpEntry()) ? ["mcp_runtime"] : []), "privacy", "validation"];
+    const manual = ["browser_artifacts", "browser_setup", "pairing", "reconnect", "codex", "overlay", "control_room", "speech", "strategies"];
+    state.schemaVersion = 1; state.completed = completed; state.pendingManual = flags.flags.has("skip-optional") ? [] : manual; state.skipped = flags.flags.has("skip-optional") ? manual : []; state.updatedAt = new Date().toISOString(); await safeWrite(stateFile, JSON.stringify(state, null, 2) + "\n");
+    return { ok: true, command: "setup", data: { resumable: true, configPath: "[config]", agentHostHome: "[agenthost-home]", completed, pendingManual: state.pendingManual, skipped: state.skipped }, warnings: ["Browser installation and pairing remain manual.", "System dependencies are not installed automatically."] };
   } catch (error) { return fail("setup", error instanceof Error ? error.message : "setup_failed"); }
 }
 async function readLock(): Promise<Json | undefined> { return readJson(lockPath); }
@@ -108,9 +117,9 @@ async function start(flags: ReturnType<typeof parseFlags>): Promise<Output> {
   if (!flags.flags.has("background")) { const child = spawn(process.execPath, [entry], { stdio: "inherit", env: childEnv }); const exit = await new Promise<number>((resolve) => { child.once("error", () => resolve(1)); child.once("exit", (code) => resolve(code ?? 1)); }); return exit === 0 ? { ok: true, command: "start", data: { stopped: true } } : fail("start", `mcp_exit_${exit}`); }
   const child = spawn(process.execPath, [entry], { stdio: "ignore", detached: true, env: childEnv }); child.unref(); await safeWrite(lockPath, JSON.stringify({ pid: child.pid, startedAt: new Date().toISOString(), version: AGENTHOST_VERSION }) + "\n"); return { ok: true, command: "start", data: { background: true, pid: child.pid } };
 }
-async function stop(): Promise<Output> { const lock = await readLock(); const pid = typeof lock?.pid === "number" ? lock.pid : undefined; if (pid === undefined || !processAlive(pid)) { await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: false, reason: "not_running" } }; } try { process.kill(pid, "SIGTERM"); } catch { return fail("stop", "process_stop_failed"); } await new Promise((resolve) => setTimeout(resolve, 250)); await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: true } }; }
+async function stop(): Promise<Output> { const lock = await readLock(); const pid = typeof lock?.pid === "number" ? lock.pid : undefined; if (pid === undefined || !processAlive(pid)) { await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: false, reason: "not_running" } }; } try { process.kill(pid, "SIGTERM"); } catch { return fail("stop", "process_stop_failed"); } const deadline = Date.now() + 2_000; while (processAlive(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50)); if (processAlive(pid)) return fail("stop", "process_stop_timeout"); await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: true } }; }
 async function doctor(): Promise<Output> {
-  const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: commandExists("python3"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, browserArtifacts: existsSync(extensionDir), codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
+  const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: pythonModuleExists("import gi; from gi.repository import Gtk"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, browserArtifacts: existsSync(extensionDir), codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
   const warnings = [!checks.architecture ? "x86_64 is the public RC target." : "", !checks.python ? "Install Python 3 for overlay and local speech diagnostics." : "", !checks.x11 ? "X11 DISPLAY is unavailable; visible overlay is unsupported." : "", !checks.browserArtifacts ? "Browser extension artifacts are not prepared." : ""].filter(Boolean);
   if (!mcp.handshake) warnings.push(mcp.reason ?? "mcp_handshake_unavailable");
   return { ok: config.ok, command: "doctor", data: { version: AGENTHOST_VERSION, checks, config: config.ok ? "valid" : config.error, mcp, process: await status(), paths: { agentHostHome: "[agenthost-home]", config: "[config]", mcpEntry: "[installed-mcp-runtime]" } }, warnings };
@@ -141,12 +150,14 @@ async function update(args: ReturnType<typeof parseFlags>): Promise<Output> {
     const temporary = `${current}.rollback-${process.pid}`; await rename(current, temporary).catch(() => undefined); await rename(previous, current); await rm(temporary, { recursive: true, force: true }); return { ok: true, command: "update rollback", data: { applied: true, healthCheck: "manifest_present" } };
   }
   const archive = args.values.get("archive"); if (!archive) return fail("update", "archive_required"); if (!existsSync(archive)) return fail("update", "archive_missing");
+  const checksum = await verifyArchiveChecksum(archive, args.values.get("sha256"));
   const listing = spawnSync("tar", ["-tzf", archive], { encoding: "utf8" }); if (listing.status !== 0 || listing.stdout.split("\n").some((item) => item.startsWith("/") || item.includes("../"))) return fail("update", "archive_invalid");
   const first = listing.stdout.split("\n").find((item) => item.length > 0)?.split("/")[0]; if (!first) return fail("update", "archive_layout_invalid");
-  const preview = { archive: path.basename(archive), version: first.replace(/^agenthost-v/, "").replace(/-linux-x64$/, ""), checksumRequired: true, backupRequired: true, atomicSwitch: true, rollbackOnHealthFailure: true };
+  const version = first.replace(/^agenthost-v/, "").replace(/-linux-x64$/, ""); if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)) return fail("update", "release_version_invalid");
+  const preview = { archive: path.basename(archive), version, checksum, checksumVerified: true, backupRequired: true, atomicSwitch: true, rollbackOnHealthFailure: true };
   if (!args.flags.has("apply")) return { ok: true, command: "update", data: { preview: true, ...preview } };
   const extraction = await mkdtemp(path.join(os.tmpdir(), "agenthost-update-")); const extracted = spawnSync("tar", ["-xzf", archive, "-C", extraction], { stdio: "ignore" }); if (extracted.status !== 0) return fail("update", "archive_extract_failed"); const staged = path.join(extraction, first); if (!existsSync(path.join(staged, "version.json")) || !existsSync(path.join(staged, "packages", "mcp-server", "dist", "index.js"))) return fail("update", "archive_health_check_failed");
-  const releases = path.join(home, ".local", "share", "agenthost", "releases"); const version = JSON.parse(await readFile(path.join(staged, "version.json"), "utf8")).version as string; const destination = path.join(releases, version); await mkdir(releases, { recursive: true, mode: 0o700 }); await rm(destination, { recursive: true, force: true }); await rename(staged, destination); await safeWrite(`${publicConfig}.update.bak`, existsSync(publicConfig) ? await readFile(publicConfig, "utf8") : ""); const previous = `${current}.previous`; await rm(previous, { recursive: true, force: true }); await rename(current, previous).catch(() => undefined); await rename(destination, current); return { ok: true, command: "update", data: { applied: true, version, backup: "[config-backup]", rollbackAvailable: true } };
+  const releases = path.join(home, ".local", "share", "agenthost", "releases"); const manifestVersion = JSON.parse(await readFile(path.join(staged, "version.json"), "utf8")).version as string; if (manifestVersion !== version) return fail("update", "release_version_mismatch"); const destination = path.join(releases, version); await mkdir(releases, { recursive: true, mode: 0o700 }); await rm(destination, { recursive: true, force: true }); await rename(staged, destination); await safeWrite(`${publicConfig}.update.bak`, existsSync(publicConfig) ? await readFile(publicConfig, "utf8") : ""); const previous = `${current}.previous`; await rm(previous, { recursive: true, force: true }); if (existsSync(current)) await rename(current, previous); try { await rename(destination, current); } catch (error) { await rename(previous, current).catch(() => undefined); throw error; } return { ok: true, command: "update", data: { applied: true, version, checksumVerified: true, backup: "[config-backup]", rollbackAvailable: true } };
 }
 async function uninstall(flags: ReturnType<typeof parseFlags>): Promise<Output> { const data = { preview: !flags.flags.has("yes"), removes: ["[installed-release]", "[agenthost-wrapper]"], preserves: flags.flags.has("remove-data") ? [] : ["[agenthost-home]", "[config]"], browserExtensionRemoval: "manual" }; if (!flags.flags.has("yes")) return { ok: true, command: "uninstall", data }; await stop(); await rm(path.join(home, ".local", "share", "agenthost"), { recursive: true, force: true }); await rm(path.join(home, ".local", "bin", "agenthost"), { force: true }); if (flags.flags.has("remove-data")) { await rm(agentHome, { recursive: true, force: true }); await rm(path.dirname(publicConfig), { recursive: true, force: true }); } return { ok: true, command: "uninstall", data: { ...data, preview: false } }; }
 async function main(): Promise<number> {

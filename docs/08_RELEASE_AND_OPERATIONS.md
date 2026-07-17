@@ -1,4 +1,4 @@
-# Linux Release Candidate and Operations
+# Linux Release Candidate and Operations (R5/R6)
 
 R5 packages existing AgentHost capabilities for local Linux use. It adds no automation capability and does not change safety policy.
 
@@ -19,6 +19,7 @@ npm run build
 npm run release:build
 npm run release:scan
 npm run release:verify
+(cd release && sha256sum -c agenthost-v0.1.0-linux-x64.tar.gz.sha256)
 npm run release:install -- release/agenthost-v0.1.0-linux-x64.tar.gz
 ```
 
@@ -48,7 +49,7 @@ agenthost overlay doctor
 agenthost speech doctor
 agenthost integrations codex add|status|remove [--preview|--apply]
 agenthost config validate|show
-agenthost update --archive <archive>
+agenthost update --archive <archive> [--sha256 <64-hex-digest>] [--apply]
 agenthost update --rollback
 agenthost uninstall [--dry-run] [--remove-data]
 ```
@@ -61,9 +62,9 @@ Output never contains pairing tokens, Control Room tokens, secrets, private page
 
 ## Setup and doctor
 
-`agenthost setup` is local, resumable, idempotent, and optional-step aware. Browser installation and pairing, GTK/PyGObject setup, speech provider setup, and Control Room enablement remain explicit operator actions.
+`agenthost setup` is local, resumable, idempotent, and optional-step aware. Its state records completed local checks separately from pending manual work. Browser installation and pairing, GTK/PyGObject setup, speech provider setup, and Control Room enablement remain explicit operator actions.
 
-`agenthost doctor` checks runtime versions, config, permissions, MCP availability, browser artifacts/pairing, strategy registry, X11/GTK overlay support, Control Room, speech, storage, and stale process state. JSON output uses stable status fields and redacted path labels.
+`agenthost doctor` checks runtime versions, config, permissions, MCP availability, browser artifacts/pairing, strategy registry, X11, actual GTK/PyGObject import support, Control Room, speech, storage, and stale process state. JSON output uses stable status fields and redacted path labels.
 
 ## Lifecycle and recovery
 
@@ -73,7 +74,7 @@ Updates require an operator-provided archive, checksum verification, preflight, 
 
 ## Release contents and scanning
 
-The archive contains compiled runtime, production dependencies, renderer assets, extension source/artifacts, version manifest, checksums, licenses, and documentation. It excludes runtime state, logs, screenshots, OCR/page text, audio, pairing/reconnect state, Control Room tokens, confirmations, credentials, caches, temporary files, and development tests/maps.
+The archive contains compiled runtime, production dependencies, renderer assets, extension source/artifacts, version manifest, documentation, and per-file hashes. The release directory also contains archive `SHA256SUMS` sidecars. This repository currently has no `LICENSE` file; public redistribution remains subject to an explicit license decision. The artifact excludes runtime state, logs, screenshots, OCR/page text, audio, pairing/reconnect state, Control Room tokens, confirmations, credentials, caches, temporary files, development tests/maps, absolute checkout links, and dangling development symlinks.
 
 `release:scan` fails on credential-like material, token formats, current-user absolute paths, private media/log artifacts, oversized files, or unsafe release contents. `release:verify` validates manifest fingerprints.
 

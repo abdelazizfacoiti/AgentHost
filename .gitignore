@@ -2,6 +2,15 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+*.pyc
+__pycache__/
+*.log
+*.png
+*.jpe?g
+*.webp
+*.wav
+*.mp3
+*.ogg
 
 .env
 .env.*

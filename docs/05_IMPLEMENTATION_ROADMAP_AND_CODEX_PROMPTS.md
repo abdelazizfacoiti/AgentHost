@@ -73,7 +73,11 @@ Global runtime activity overlay is implemented as one owner-scoped redacted auth
 
 ## R5 — Minimal Public Linux Release Candidate Packaging
 
-R5 packages existing capabilities as a rootless Linux x86_64 archive with the `agenthost` CLI, resumable setup, redacted doctor diagnostics, safe Codex MCP integration, lifecycle controls, browser/overlay/Control Room/speech onboarding, deterministic release scans, manual update/rollback, and ownership-scoped uninstall. No new automation capability, scheduler execution, remote endpoint, system service, or privileged installation is included. R6 is not started.
+R5 packages existing capabilities as a rootless Linux x86_64 archive with the `agenthost` CLI, resumable setup, redacted doctor diagnostics, safe Codex MCP integration, lifecycle controls, browser/overlay/Control Room/speech onboarding, deterministic release scans, manual update/rollback, and ownership-scoped uninstall. No new automation capability, scheduler execution, remote endpoint, system service, or privileged installation is included.
+
+## R6 — V1 Release Audit and Freeze
+
+R6 hardens release packaging and verification only: repository/artifact hygiene, checksum enforcement, repository-independent installed-runtime checks, Codex/config safety verification, browser/strategy/speech/overlay/Control Room manual validation, privacy/security audit, storage/documentation reconciliation, and deterministic release-candidate freeze. R6 adds no product capability, scheduler execution, autonomy, provider adapter, remote endpoint, or platform support. Recommended candidate tag: `v0.1.0-rc2`; final `v0.1.0` waits for manual desktop and external distribution sign-off.
 
 ### Exclusions and risk
 

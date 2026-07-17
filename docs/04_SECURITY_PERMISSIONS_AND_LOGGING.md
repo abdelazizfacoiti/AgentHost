@@ -6,7 +6,7 @@ AgentHost is local-first, visible, permissioned, previewable, confirmation-bound
 
 ## Release and installation boundary
 
-R5 installation is rootless and limited to AgentHost-owned user paths. It performs no package installation, system-service registration, public binding, browser auto-installation, or secret generation. Codex configuration edits require preview, explicit apply, backup, validation, and rollback. Release scans reject credential-like material, token values, current-user absolute paths, screenshots/audio/logs, caches, and runtime state. Uninstall preserves runtime data by default.
+R5/R6 installation is rootless and limited to AgentHost-owned user paths. Archive installation and update require a matching SHA-256 sidecar or explicit digest, then verify release-manifest file hashes. No package installation, system-service registration, public binding, browser auto-installation, or secret generation occurs. Codex configuration edits require preview, explicit apply, backup, validation, and rollback. Release scans reject credential-like material, token values, current-user absolute paths, screenshots/audio/logs, caches, runtime state, dangling development symlinks, and Python caches. Uninstall preserves runtime data by default.
 
 ## Hard non-negotiables
 
