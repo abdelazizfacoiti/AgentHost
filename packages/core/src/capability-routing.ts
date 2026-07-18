@@ -67,8 +67,8 @@ export interface CapabilityRouteSelection {
 export interface CapabilityRouteMetricRecord {
   schemaVersion: 1;
   routeFamily: CapabilityRouteFamily;
-  goalCategory: string;
-  appFamily?: string;
+  goalCategoryFingerprint: string;
+  appFamilyFingerprint?: string;
   compatibilityFingerprint: string;
   attempts: number;
   verifiedSuccesses: number;
@@ -77,6 +77,12 @@ export interface CapabilityRouteMetricRecord {
   medianProbeMs?: number;
   medianExecutionMs?: number;
   medianVerificationMs?: number;
+  /** Bounded numeric history used only to calculate the persisted medians. */
+  latencySamples?: {
+    probeMs?: number[];
+    executionMs?: number[];
+    verificationMs?: number[];
+  };
   lastAttemptedAt?: string;
   lastVerifiedAt?: string;
   compatibilityVersion: string;

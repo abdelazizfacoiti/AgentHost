@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { compareCapabilityRoutes, scoreCapabilityRoute, type CapabilityRouteCandidate, type CapabilityRouteFamily, type CapabilityRouteSelection } from "@agenthost/core";
 import type { AdapterRegistrySnapshot, CapabilityRegistrySnapshot, PolicyProfileName, RiskLevel } from "@agenthost/core";
 import type { BrowserBridgeAdapter } from "@agenthost/app-browser";
-import { RouteMetricsStore } from "./route-metrics-store.js";
+import { routeMetricFingerprint, RouteMetricsStore } from "./route-metrics-store.js";
 
 export interface AdaptiveActionRouterContext { registry: CapabilityRegistrySnapshot; adapters: AdapterRegistrySnapshot; profile: PolicyProfileName; browser?: BrowserBridgeAdapter; }
 export interface RoutePreviewInput { goalCategory: string; appFamily?: string; riskLevel?: RiskLevel; protectedContext?: boolean; contextTokens?: number; requiresConfirmation?: boolean; }
@@ -46,18 +46,24 @@ export class AdaptiveActionRouter {
   async preview(context: AdaptiveActionRouterContext, input: RoutePreviewInput): Promise<CapabilityRouteSelection> {
     const candidates = await this.#candidates(context, input);
     const ranked = candidates.map((candidate) => { scoreCapabilityRoute(candidate); return candidate; }).sort(compareCapabilityRoutes);
-    const selected = input.protectedContext === true && input.riskLevel !== "blocked" ? ranked.find((item) => item.routeFamily === "guide_only") : ranked.find((item) => Number.isFinite(item.finalCost));
+    // Guide mode is a terminal fallback, not a cheaper normal route. Protected
+    // contexts still force it; ordinary work must use an eligible capability
+    // whenever one exists.
+    const selected = input.protectedContext === true && input.riskLevel !== "blocked"
+      ? ranked.find((item) => item.routeFamily === "guide_only")
+      : ranked.find((item) => item.routeFamily !== "guide_only" && Number.isFinite(item.finalCost))
+        ?? ranked.find((item) => item.routeFamily === "guide_only" && Number.isFinite(item.finalCost));
     const reasonCode = selected === undefined ? "no_safe_route" : selected.routeFamily === "guide_only" ? "protected_or_unsupported_context" : selected.verificationStrength === "strong" ? "healthy_verified_route" : "bounded_safe_route";
     const result: CapabilityRouteSelection = { routeSelectionId: `route_selection_${randomUUID()}`, ...(selected === undefined ? {} : { selectedRoute: selected.routeFamily }), goalCategory: input.goalCategory, ...(input.appFamily === undefined ? {} : { appFamily: input.appFamily }), reasonCode, fallbackBudget: 2, candidates: ranked.slice(0, 8), alternatives: ranked.filter((item) => item.routeFamily !== selected?.routeFamily).slice(0, 3).map((item) => ({ routeFamily: item.routeFamily, reasonCode: item.health === "unavailable" ? "unavailable" : "deferred_lower_rank" })), fallbacks: [], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(), executable: false, actionsExecuted: false, confirmationTokensCreated: false };
     this.#last = result;
     return result;
   }
-  summary(): Record<string, unknown> { const value = this.#last; return value === undefined ? { status: "idle", routeSelection: undefined, redacted: true } : { status: "selected", routeSelection: { selectedRoute: value.selectedRoute, goalCategory: value.goalCategory, reasonCode: value.reasonCode, fallbackBudget: value.fallbackBudget, alternatives: value.alternatives, createdAt: value.createdAt, redacted: true }, redacted: true }; }
+  summary(): Record<string, unknown> { const value = this.#last; return value === undefined ? { status: "idle", routeSelection: undefined, redacted: true } : { status: "selected", routeSelection: { selectedRoute: value.selectedRoute, reasonCode: value.reasonCode, fallbackBudget: value.fallbackBudget, alternatives: value.alternatives, createdAt: value.createdAt, redacted: true }, redacted: true }; }
   async recordVerifiedOutcome(input: Parameters<RouteMetricsStore["record"]>[0]): Promise<void> { if (input.outcome === "verified_success" || input.outcome === "verified_failure") await this.#metrics.record(input); }
   async #candidates(context: AdaptiveActionRouterContext, input: RoutePreviewInput): Promise<CapabilityRouteCandidate[]> {
     const risk = input.riskLevel ?? "observe";
     const requiresConfirmation = input.requiresConfirmation === true;
-    let hasBrowser = available(context.registry, "browser.detect");
+    let hasBrowser = context.browser !== undefined && available(context.registry, "browser.detect");
     if (hasBrowser && context.browser !== undefined) {
       try {
         const state = await boundedProbe(context.browser.detect(), 500);
@@ -65,13 +71,17 @@ export class AdaptiveActionRouter {
       } catch { hasBrowser = false; }
     }
     const metricRecords = await this.#metrics.list();
-    const hasStructured = available(context.registry, "browser.get_page_context");
+    // Structured browser routes use same paired bridge in current runtime.
+    // Capability metadata alone must not make disconnected browser routes look healthy.
+    const hasStructured = hasBrowser && available(context.registry, "browser.get_page_context");
     const hasAccessibility = available(context.registry, "accessibility.get_tree");
     const hasVision = available(context.registry, "vision.find_target") || available(context.registry, "vision.analyze_image");
     const hasDesktop = available(context.registry, "desktop.click") || available(context.registry, "desktop.pointer");
     const hasAdapter = context.adapters.listAdapters().length > 0;
     const base = (routeFamily: CapabilityRouteFamily, healthy: boolean, verificationStrength: "strong" | "medium" | "weak", probeTier: 0 | 1 | 2 | 3 | 4 | 5, estimates: [number, number, number, number], reason?: string): CapabilityRouteCandidate => {
-      const metric = metricRecords.find((item) => item.routeFamily === routeFamily && item.goalCategory === input.goalCategory && item.appFamily === input.appFamily);
+      const goalCategoryFingerprint = routeMetricFingerprint(input.goalCategory);
+      const appFamilyFingerprint = input.appFamily === undefined ? undefined : routeMetricFingerprint(input.appFamily);
+      const metric = metricRecords.find((item) => item.routeFamily === routeFamily && item.goalCategoryFingerprint === goalCategoryFingerprint && item.appFamilyFingerprint === appFamilyFingerprint);
       const attempts = metric?.attempts ?? 0;
       const failures = metric?.verifiedFailures ?? 0;
       const successes = metric?.verifiedSuccesses ?? 0;
