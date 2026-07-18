@@ -141,14 +141,21 @@ V2 adds one owner/session-bound `VisualSurfaceCoordinator` for runtime activity,
 
 A2 assistance tools (`overlay.assistance_step_preview`, `overlay.assistance_session_explain`, and `overlay.assistance_template_*`) expose bounded read-only projections and draft-only visual template metadata. Templates allow existing visual primitives, declared scalar parameters, literal `{{parameterName}}` substitution, and typed target placeholders. Preview never renders or advances. Instantiation creates a ready/draft assistance session only; it never starts, renders, invokes target tools, creates grants, or creates confirmation tokens.
 
-Milestone A3 adds deterministic local Visual Copilot demo:
+Visual Copilot runtime smoke projects authoritative runtime activity through the
+same coordinator and renderer used by MCP work:
 
 ```bash
 npm run build
 npm run demo:visual-copilot
 ```
 
-Demo uses public fixture data, explicit operator prompts, safe local screen-point grounding, bounded stale-target recovery, and terminal completion. It never controls target applications. Visible mode requires GTK3/PyGObject on X11 and fails honestly if transparent composition is unavailable. Renderer uses Cairo when its PyGObject bridge exists, otherwise bounded GTK widgets; it never opens opaque fullscreen windows. `xdotool` is needed only for screen-geometry probing. `--diagnose` prints renderer capability guidance; `--headless` is a safe capability check for CI; `--require-gui` fails clearly when visible support is unavailable. `overlay.assistance_target_refresh` revalidates only current visual target, with two explicit refreshes maximum per step. No automatic retry exists.
+Smoke creates one real redacted runtime activity, projects its state, and
+completes only after authoritative terminal verification. It has no fake
+workflow controls, target binding, or target-application action. Visible mode
+requires GTK3/PyGObject on X11 and fails honestly if transparency or rendering
+cannot be acknowledged. `--diagnose` prints renderer capability guidance;
+`--headless` verifies lifecycle while reporting `visible:false`;
+`--require-gui` fails when visible support is unavailable.
 
 Build Week walkthrough, setup, limitations, and video outline: [BUILD_WEEK.md](BUILD_WEEK.md).
 

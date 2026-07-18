@@ -59,7 +59,7 @@ Diagnostics only:
 npm run demo:visual-copilot -- --diagnose
 ```
 
-Headless capability check (no visible flow, safe for CI):
+Headless authoritative runtime lifecycle check (safe for CI):
 
 ```bash
 npm run demo:visual-copilot -- --headless
@@ -71,7 +71,11 @@ Require visible renderer:
 npm run demo:visual-copilot -- --require-gui
 ```
 
-Launcher uses isolated demo metadata, public fixture text, explicit prompts, bounded retries, truthful terminal completion checks, renderer-health checks, signal cleanup, and cleanup. It never installs dependencies or requests sudo. `--diagnose` reports capability state; `--headless` does not simulate visible rendering.
+Launcher uses isolated runtime metadata and one real redacted runtime activity.
+Activity state remains authoritative from start through verified completion.
+No assistance fixture, synthetic target, fake Next control, or target-app
+action exists. Signal and normal completion both close renderer-owned state.
+`--diagnose` reports capability state; `--headless` reports visibility honestly.
 
 The V2 renderer lifecycle is: bounded child startup → authenticated handshake → epoch assignment → transparent mapped windows → draw-ready acknowledgement → live registration → control-surface projection. A headless state record or mapped opaque window never satisfies visible-demo success.
 
@@ -79,9 +83,10 @@ Manual GUI verification:
 
 1. Build from repository root and run dependency checks above in same X11 session.
 2. Run `npm run demo:visual-copilot -- --diagnose`; confirm GTK3/X11 is available.
-3. Run `npm run demo:visual-copilot -- --require-gui`; press Enter through every prompt.
-4. Confirm control surface progress updates after each step, stale-target warning appears, explicit refresh restores pointer/highlight, and final status is `completed`.
-5. Confirm target application and real pointer remain unchanged.
+3. Run `npm run demo:visual-copilot -- --require-gui`.
+4. Confirm compact runtime activity appears, updates to verification, and returns
+   a verified `completed` result.
+5. Confirm target application, focus, and real pointer remain unchanged.
 6. Press Ctrl-C during a prompt; confirm owned overlays disappear and process exits without an orphan renderer.
 
 ## Safety model
