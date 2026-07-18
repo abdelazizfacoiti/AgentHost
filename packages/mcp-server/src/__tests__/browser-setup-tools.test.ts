@@ -35,4 +35,68 @@ describe("browser setup tools", () => {
     expect(JSON.stringify((value.logger as Logger).entries)).not.toContain(pairingToken);
     expect(JSON.stringify(value.browserBridge!.status())).not.toContain(pairingToken);
   });
+  it("uses dry-run and exact confirmation for tokenless setup lifecycle tools", async () => {
+    const value = context();
+    value.grants = new GrantStore({
+      sessionGrants: [{
+        id: "browser-setup-local",
+        scope: "session",
+        effect: "allow",
+        match: {
+          tools: ["browser.setup_begin"],
+          actionTypes: ["inspect"]
+        },
+        requirements: {
+          requiresDryRun: true,
+          requiresConfirmationToken: true,
+          requiresExactTarget: true
+        }
+      }]
+    });
+    let starts = 0;
+    value.browserSetup = {
+      inventory: async () => ({
+        schemaVersion: 1,
+        browsers: [],
+        selectionRequired: false,
+        evaluatedAt: new Date().toISOString(),
+        redacted: true
+      }),
+      start: async () => {
+        starts += 1;
+        return {
+          setup: {
+            setupId: "browser_setup_test",
+            state: "waiting_for_extension",
+            redacted: true
+          },
+          inventory: { browsers: [], redacted: true }
+        };
+      },
+      approve: async () => ({ setupId: "browser_setup_test", state: "pairing", redacted: true }),
+      cancel: async () => ({ setupId: "browser_setup_test", state: "cancelled", redacted: true }),
+      verify: async () => ({ setupId: "browser_setup_test", state: "ready", redacted: true })
+    } as never;
+    const preview = await call(value, "browser.setup_begin", { browser: "firefox", dryRun: true });
+    expect(preview).toMatchObject({ ok: true, preview: true });
+    expect(starts).toBe(0);
+    const confirmationToken = (preview.data as { confirmationToken: string }).confirmationToken;
+    const result = await call(value, "browser.setup_begin", { browser: "firefox", confirmationToken });
+    expect(result.error).toBeNull();
+    expect(result).toMatchObject({
+      ok: true,
+      data: { setup: { state: "waiting_for_extension" } }
+    });
+    expect(starts).toBe(1);
+    expect(JSON.stringify((value.logger as Logger).entries)).not.toMatch(/pairingToken|refreshSecret|sessionToken/i);
+  });
+  it("registers normalized inventory and setup lifecycle tools", () => {
+    expect(createBrowserSetupTools().map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      "browser.inventory",
+      "browser.setup_begin",
+      "browser.setup_approve",
+      "browser.setup_cancel",
+      "browser.setup_verify"
+    ]));
+  });
 });

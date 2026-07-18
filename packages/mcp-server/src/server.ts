@@ -1,5 +1,6 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
+import os from "node:os";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -49,10 +50,11 @@ import {
   sendLinuxHotkey,
   setLinuxAccessibilityValue,
   typeLinuxText,
-  writeLinuxFile
-  ,analyzeLinuxImage
+  writeLinuxFile,
+  detectLinuxBrowsers,
+  analyzeLinuxImage
 } from "@agenthost/os-linux";
-import { BrowserBridgeServer, createBrowserAdapter, type BrowserBridgeAdapter } from "@agenthost/app-browser";
+import { BrowserBridgeServer, createBrowserAdapter, LOCAL_BROWSER_SETUP_OWNER, type BrowserBridgeAdapter } from "@agenthost/app-browser";
 import { createOverlayRenderer, OverlayManager, VisualSurfaceCoordinator } from "@agenthost/app-overlay";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { ConfirmationManager } from "./confirmation.js";
@@ -106,12 +108,17 @@ import { CapabilityStrategyService } from "./capability-strategy-service.js";
 import { AdaptiveActionRouter } from "./adaptive-action-router.js";
 import { RouteMetricsStore } from "./route-metrics-store.js";
 import { createCapabilityStrategyTools } from "./tools/capability-strategy.js";
+import { createGoalPlanningTools } from "./tools/goal-planning.js";
 import { SpeechStore } from "./speech-store.js";
 import { SpeechService } from "./speech-service.js";
 import { createSpeechTools } from "./tools/speech.js";
 import { RuntimeActivityStore } from "./runtime-activity-store.js";
 import { RuntimeActivityService } from "./runtime-activity-service.js";
 import { RuntimeActivityOverlayController } from "./runtime-activity-overlay.js";
+import { BrowserSetupService } from "./browser-setup-service.js";
+import { CapabilityGraphService } from "./capability-graph-service.js";
+import { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
+import { GoalPlanningService } from "./goal-planning-service.js";
 
 const SERVER_VERSION = AGENTHOST_VERSION;
 
@@ -175,6 +182,7 @@ function toMcpToolResult(result: ToolResult): {
 export async function createAgentHostMcpServer(options: AgentHostServerOptions = {}): Promise<{
   server: Server;
   context: AgentHostMcpContext;
+  closeResources: () => Promise<void>;
 }> {
   const config = options.config ?? (await loadAgentHostConfig());
   const sessionId = options.sessionId ?? createSessionId();
@@ -196,6 +204,10 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const routeMetrics = new RouteMetricsStore(config.agentHostDir);
   await routeMetrics.ensureStructure();
   const routeRouter = new AdaptiveActionRouter(routeMetrics);
+  const capabilityGraph = new CapabilityGraphService(registry, adapters);
+  const failureMemory = new SafeFailureMemoryStore(config.agentHostDir);
+  await failureMemory.ensureStructure();
+  const goalPlanning = new GoalPlanningService();
   const speechStore = new SpeechStore(config.agentHostDir);
   await speechStore.ensureStructure();
   const scheduler = new SchedulerStore(config.agentHostDir);
@@ -223,8 +235,23 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     : undefined;
   if (browserBridge !== undefined) await browserBridge.start();
   const browser = options.browser ?? createBrowserAdapter(browserBridge!);
+  const browserSetup = browserBridge === undefined
+    ? undefined
+    : new BrowserSetupService(browserBridge, {
+        // Browser setup is local server lifecycle state, not an MCP request
+        // session. Keep ownership trusted and resumable across AgentHost restarts.
+        ownerSessionId: LOCAL_BROWSER_SETUP_OWNER,
+        agentHostDir: config.agentHostDir,
+        extensionRoot: process.env.AGENTHOST_BROWSER_EXTENSION_DIR
+          ?? path.join(os.homedir(), "AgentHost", "browser-extension"),
+        releaseRoot: process.env.AGENTHOST_BROWSER_RELEASE_ROOT
+          ?? path.resolve("release", "browser"),
+        detectBrowsers: () => detectLinuxBrowsers(process.env),
+        visual: overlay
+      });
+  await browserSetup?.ensureStructure();
   let speechService: SpeechService | undefined;
-  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, routes: routeRouter, runtimeActivity: { projection: async () => { const renderer = await runtimeActivityOverlay.projection(); return runtimeActivity.projection({ visible: renderer.visible, status: renderer.rendererStatus, suppression: renderer.suppression }); } }, speech: { capabilities: async () => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.capabilities() as unknown as Record<string, unknown>, projection: async (ownerSessionId) => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.projection(ownerSessionId) }, ...(browserBridge === undefined ? {} : { browserBridge }) }, { ownerSessionId: sessionId });
+  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, routes: routeRouter, planning: goalPlanning, capabilityGraph, runtimeActivity: { projection: async () => { const renderer = await runtimeActivityOverlay.projection(); return runtimeActivity.projection({ visible: renderer.visible, status: renderer.rendererStatus, suppression: renderer.suppression }); } }, speech: { capabilities: async () => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.capabilities() as unknown as Record<string, unknown>, projection: async (ownerSessionId) => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.projection(ownerSessionId) }, ...(browserBridge === undefined ? {} : { browserBridge }), ...(browserSetup === undefined ? {} : { browserSetup }) }, { ownerSessionId: sessionId });
   await controlRoomStore.ensureStructure();
   const linux: LinuxAutomation =
     options.linux ?? {
@@ -291,12 +318,18 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     strategyService,
     routeRouter,
     speech,
-    browser, ...(browserBridge === undefined ? {} : { browserBridge }),
+    browser,
+    ...(browserBridge === undefined ? {} : { browserBridge }),
+    ...(browserSetup === undefined ? {} : { browserSetup }),
+    capabilityGraph,
+    failureMemory,
+    goalPlanning,
     linux
   };
   const tools = [
     ...createSystemTools(),
     ...createCapabilityStrategyTools(),
+    ...createGoalPlanningTools(),
     ...createForgeTools(),
     ...createForgeSandboxTools(),
     ...createBrowserTools(), ...createBrowserSetupTools(),
@@ -408,15 +441,29 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     return toMcpToolResult(result);
   });
 
-  server.onclose = () => { void controlRoomServer?.close(); void browserBridge?.close(); void overlayControlSurface.close(); void overlayAssistance.close(); void runtimeActivityOverlay.close(); void overlay.close(); };
+  let resourceClosePromise: Promise<void> | undefined;
+  const closeResources = async (): Promise<void> => {
+    if (resourceClosePromise !== undefined) return await resourceClosePromise;
+    resourceClosePromise = Promise.allSettled([
+      controlRoomServer?.close(),
+      browserBridge?.close(),
+      overlayControlSurface.close(),
+      overlayAssistance.close(),
+      runtimeActivityOverlay.close(),
+      overlay.close()
+    ]).then(() => undefined);
+    return await resourceClosePromise;
+  };
+  server.onclose = () => { void closeResources(); };
   return {
     server,
-    context
+    context,
+    closeResources
   };
 }
 
 export async function startStdioServer(): Promise<void> {
-  const { server } = await createAgentHostMcpServer();
+  const { server, closeResources } = await createAgentHostMcpServer();
   const transport = new StdioServerTransport();
   const keepAlive = setInterval(() => {
     // Keep the stdio server process alive during client startup.
@@ -425,6 +472,17 @@ export async function startStdioServer(): Promise<void> {
   let stdinEnded = false;
   let canStopOnStdinEnd = false;
   let startupGrace: ReturnType<typeof setTimeout> | undefined;
+  let stopping = false;
+
+  const shutdown = async (exitCode: number): Promise<void> => {
+    if (stopping) return;
+    stopping = true;
+    clearInterval(keepAlive);
+    if (startupGrace !== undefined) clearTimeout(startupGrace);
+    await transport.close().catch(() => undefined);
+    await closeResources();
+    process.exitCode = exitCode;
+  };
 
   const allowStopOnStdinEnd = (): void => {
     canStopOnStdinEnd = true;
@@ -449,6 +507,8 @@ export async function startStdioServer(): Promise<void> {
   server.oninitialized = allowStopOnStdinEnd;
   process.stdin.once("end", stopKeepAlive);
   process.stdin.once("close", stopKeepAlive);
+  process.once("SIGINT", () => { void shutdown(130); });
+  process.once("SIGTERM", () => { void shutdown(143); });
 
   await server.connect(transport);
   process.stdin.resume();
@@ -456,11 +516,6 @@ export async function startStdioServer(): Promise<void> {
   startupGrace = setTimeout(allowStopOnStdinEnd, 5_000);
 
   if (exitOnStdinEnd) {
-    setTimeout(() => {
-      clearInterval(keepAlive);
-      void transport.close().finally(() => {
-        process.exit(0);
-      });
-    }, 1_000);
+    setTimeout(() => { void shutdown(0); }, 1_000);
   }
 }

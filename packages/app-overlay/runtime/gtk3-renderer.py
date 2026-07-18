@@ -746,7 +746,7 @@ def stdin_watch(_source, condition):
 
 
 if __name__ == "__main__":
-    ok, _argv = Gtk.init_check([])
+    ok, _argv = Gtk.init_check()
     if not ok:
         raise SystemExit(78)
     renderer = Renderer()

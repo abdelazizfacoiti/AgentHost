@@ -1,11 +1,20 @@
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import type { CapabilityRouteFamily, CapabilityRouteMetricRecord } from "@agenthost/core";
+import { CAPABILITY_ROUTE_FAMILIES, type CapabilityRouteFamily, type CapabilityRouteMetricRecord } from "@agenthost/core";
 
 const MAX_RECORDS = 256;
 const MAX_LATENCY_SAMPLES = 31;
+const METRIC_TTL_MS = 30 * 86_400_000;
+const SAFE_VERSION = /^[a-z0-9_.:-]{1,100}$/i;
 type LatencySamples = NonNullable<CapabilityRouteMetricRecord["latencySamples"]>;
+const RECORD_KEYS = new Set([
+  "schemaVersion", "routeFamily", "goalCategoryFingerprint", "appFamilyFingerprint",
+  "compatibilityFingerprint", "attempts", "verifiedSuccesses", "verifiedFailures",
+  "consecutiveVerifiedFailures", "medianProbeMs", "medianExecutionMs",
+  "medianVerificationMs", "latencySamples", "lastAttemptedAt", "lastVerifiedAt",
+  "expiresAt", "lastFailureCode", "compatibilityVersion", "status", "redacted"
+]);
 
 export function routeMetricFingerprint(value: string): string {
   return createHash("sha256").update(value.slice(0, 256), "utf8").digest("hex").slice(0, 32);
@@ -40,6 +49,87 @@ function safeSamples(value: unknown): LatencySamples | undefined {
   return Object.keys(output).length === 0 ? undefined : output;
 }
 
+function safeInteger(value: unknown, maximum = 1_000_000): number | undefined {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= maximum
+    ? Number(value)
+    : undefined;
+}
+
+function safeTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+}
+
+function safeMetricRecord(value: unknown): CapabilityRouteMetricRecord | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (Object.keys(raw).some((key) => !RECORD_KEYS.has(key))) return undefined;
+  if (raw.schemaVersion !== 1
+    || typeof raw.routeFamily !== "string"
+    || !CAPABILITY_ROUTE_FAMILIES.includes(raw.routeFamily as CapabilityRouteFamily)
+    || raw.redacted !== true) return undefined;
+  const goalCategoryFingerprint = normalizeFingerprint(raw.goalCategoryFingerprint);
+  const appFamilyFingerprint = raw.appFamilyFingerprint === undefined
+    ? undefined
+    : normalizeFingerprint(raw.appFamilyFingerprint);
+  const compatibilityFingerprint = normalizeFingerprint(raw.compatibilityFingerprint);
+  const attempts = safeInteger(raw.attempts);
+  const verifiedSuccesses = safeInteger(raw.verifiedSuccesses);
+  const verifiedFailures = safeInteger(raw.verifiedFailures);
+  const consecutiveVerifiedFailures = safeInteger(raw.consecutiveVerifiedFailures);
+  if (goalCategoryFingerprint === undefined
+    || compatibilityFingerprint === undefined
+    || attempts === undefined
+    || verifiedSuccesses === undefined
+    || verifiedFailures === undefined
+    || consecutiveVerifiedFailures === undefined
+    || verifiedSuccesses + verifiedFailures > attempts
+    || typeof raw.compatibilityVersion !== "string"
+    || !SAFE_VERSION.test(raw.compatibilityVersion)
+    || !["active", "degraded", "expired"].includes(String(raw.status))) return undefined;
+  const samples = safeSamples(raw.latencySamples);
+  const lastAttemptedAt = safeTimestamp(raw.lastAttemptedAt);
+  const lastVerifiedAt = safeTimestamp(raw.lastVerifiedAt);
+  const storedExpiry = safeTimestamp(raw.expiresAt);
+  const derivedExpiry = new Date(
+    Math.min(
+      Date.now() + METRIC_TTL_MS,
+      (lastVerifiedAt === undefined ? Date.now() : Date.parse(lastVerifiedAt)) + METRIC_TTL_MS
+    )
+  ).toISOString();
+  const expiresAt = storedExpiry ?? derivedExpiry;
+  const expired = Date.parse(expiresAt) <= Date.now();
+  const boundedLatency = (input: unknown): number | undefined => {
+    const parsed = safeInteger(input, 86_400_000);
+    return parsed;
+  };
+  return {
+    schemaVersion: 1,
+    routeFamily: raw.routeFamily as CapabilityRouteFamily,
+    goalCategoryFingerprint,
+    ...(appFamilyFingerprint === undefined ? {} : { appFamilyFingerprint }),
+    compatibilityFingerprint,
+    attempts,
+    verifiedSuccesses,
+    verifiedFailures,
+    consecutiveVerifiedFailures,
+    ...(boundedLatency(raw.medianProbeMs) === undefined ? {} : { medianProbeMs: boundedLatency(raw.medianProbeMs)! }),
+    ...(boundedLatency(raw.medianExecutionMs) === undefined ? {} : { medianExecutionMs: boundedLatency(raw.medianExecutionMs)! }),
+    ...(boundedLatency(raw.medianVerificationMs) === undefined ? {} : { medianVerificationMs: boundedLatency(raw.medianVerificationMs)! }),
+    ...(samples === undefined ? {} : { latencySamples: samples }),
+    ...(lastAttemptedAt === undefined ? {} : { lastAttemptedAt }),
+    ...(lastVerifiedAt === undefined ? {} : { lastVerifiedAt }),
+    expiresAt,
+    ...(typeof raw.lastFailureCode === "string" && /^[a-z0-9_:-]{1,100}$/i.test(raw.lastFailureCode)
+      ? { lastFailureCode: raw.lastFailureCode }
+      : {}),
+    compatibilityVersion: raw.compatibilityVersion,
+    status: expired ? "expired" : raw.status as "active" | "degraded" | "expired",
+    redacted: true
+  };
+}
+
 export class RouteMetricsStore {
   readonly #file: string;
   #records = new Map<string, CapabilityRouteMetricRecord>();
@@ -50,25 +140,29 @@ export class RouteMetricsStore {
     let migrated = false;
     try {
       const values = JSON.parse(await readFile(this.#file, "utf8")) as unknown;
-      if (Array.isArray(values)) for (const item of values.slice(-MAX_RECORDS)) if (item && typeof item === "object" && (item as CapabilityRouteMetricRecord).schemaVersion === 1) {
-        const raw = item as CapabilityRouteMetricRecord & { goalCategory?: string; appFamily?: string };
-        const goalCategoryFingerprint = normalizeFingerprint(raw.goalCategoryFingerprint ?? raw.goalCategory);
-        const compatibilityFingerprint = normalizeFingerprint(raw.compatibilityFingerprint);
-        if (goalCategoryFingerprint === undefined || compatibilityFingerprint === undefined) continue;
-        const appFamilyFingerprint = normalizeFingerprint(raw.appFamilyFingerprint ?? raw.appFamily);
-        const samples = safeSamples(raw.latencySamples);
-        const record: CapabilityRouteMetricRecord = { ...raw, goalCategoryFingerprint, compatibilityFingerprint, ...(appFamilyFingerprint === undefined ? {} : { appFamilyFingerprint }), ...(samples === undefined ? {} : { latencySamples: samples }) };
-        delete (record as CapabilityRouteMetricRecord & { goalCategory?: string }).goalCategory;
-        delete (record as CapabilityRouteMetricRecord & { appFamily?: string }).appFamily;
+      if (Array.isArray(values)) for (const item of values.slice(-MAX_RECORDS)) {
+        const record = safeMetricRecord(item);
+        if (record === undefined) {
+          migrated = true;
+          continue;
+        }
         this.#records.set(this.key(record), record);
-        migrated ||= raw.goalCategoryFingerprint === undefined || raw.goalCategory !== undefined || raw.appFamily !== undefined || raw.appFamilyFingerprint === undefined && appFamilyFingerprint !== undefined || raw.compatibilityFingerprint !== compatibilityFingerprint;
+        migrated ||= JSON.stringify(record) !== JSON.stringify(item);
       }
     } catch { /* first run/corrupt data stays fail-closed */ }
     this.#loaded = true;
     if (migrated) await this.#save();
   }
-  async list(): Promise<CapabilityRouteMetricRecord[]> { if (!this.#loaded) await this.ensureStructure(); return [...this.#records.values()].slice(-MAX_RECORDS); }
-  async record(input: { routeFamily: CapabilityRouteFamily; goalCategory: string; appFamily?: string; compatibilityFingerprint: string; outcome: "verified_success" | "verified_failure"; probeMs?: number; executionMs?: number; verificationMs?: number; compatibilityVersion: string }): Promise<CapabilityRouteMetricRecord> {
+  async list(options: { includeExpired?: boolean } = {}): Promise<CapabilityRouteMetricRecord[]> {
+    if (!this.#loaded) await this.ensureStructure();
+    const records = [...this.#records.values()].map((record) => Date.parse(record.expiresAt ?? "") <= Date.now()
+      ? { ...record, status: "expired" as const }
+      : record);
+    return records.filter((record) => options.includeExpired === true || record.status !== "expired").slice(-MAX_RECORDS);
+  }
+  async record(input: { routeFamily: CapabilityRouteFamily; goalCategory: string; appFamily?: string; compatibilityFingerprint: string; outcome: "verified_success" | "verified_failure"; failureCode?: string; probeMs?: number; executionMs?: number; verificationMs?: number; compatibilityVersion: string }): Promise<CapabilityRouteMetricRecord> {
+    if (!CAPABILITY_ROUTE_FAMILIES.includes(input.routeFamily)) throw new Error("route_family_invalid");
+    if (!SAFE_VERSION.test(input.compatibilityVersion)) throw new Error("compatibility_version_invalid");
     if (!this.#loaded) await this.ensureStructure();
     const goalCategoryFingerprint = routeMetricFingerprint(input.goalCategory);
     const appFamilyFingerprint = input.appFamily === undefined ? undefined : routeMetricFingerprint(input.appFamily);
@@ -102,6 +196,12 @@ export class RouteMetricsStore {
       ...(Object.keys(latencySamples).length === 0 ? {} : { latencySamples }),
       lastVerifiedAt: new Date().toISOString(),
       lastAttemptedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + METRIC_TTL_MS).toISOString(),
+      ...(input.outcome === "verified_failure"
+        && typeof input.failureCode === "string"
+        && /^[a-z0-9_:-]{1,100}$/i.test(input.failureCode)
+        ? { lastFailureCode: input.failureCode }
+        : {}),
       compatibilityVersion: input.compatibilityVersion,
       status: input.outcome === "verified_failure" && (prior?.consecutiveVerifiedFailures ?? 0) >= 2 ? "degraded" : "active",
       redacted: true

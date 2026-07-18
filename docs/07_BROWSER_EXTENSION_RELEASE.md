@@ -50,7 +50,7 @@ Unpacked loading remains development-only. Store credentials remain outside repo
 6. Rotation revokes previous devices before issuing new enrollment token.
 7. Reset revokes devices and deletes pending enrollment token.
 
-Reconnect uses bounded exponential backoff with jitter, maximum 30-second interval and five-minute automatic retry window. Recovery after exhaustion requires operator Retry.
+Reconnect uses bounded exponential backoff with jitter, maximum 30-second interval and five-minute retry bursts. Existing browser alarm checks reset one bounded burst approximately once per minute while the extension remains installed, so AgentHost restarts recover without a permanent `reconnect_exhausted` dead-end. Operator Retry remains available for immediate recovery.
 
 ## Uninstall
 

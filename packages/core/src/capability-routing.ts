@@ -2,6 +2,21 @@ import type { RiskLevel } from "./types.js";
 
 export const CAPABILITY_ROUTE_FAMILIES = ["browser_bridge", "structured_browser", "native_adapter", "accessibility", "local_ocr", "screenshot_vision", "desktop_input", "guide_only"] as const;
 export type CapabilityRouteFamily = typeof CAPABILITY_ROUTE_FAMILIES[number];
+export const CAPABILITY_ROUTE_GOAL_CATEGORIES = [
+  "browser_navigation",
+  "webpage_inspection",
+  "browser_setup",
+  "form_preparation",
+  "meeting_observation",
+  "meeting_recap",
+  "visual_assistance",
+  "file_creation",
+  "local_observation",
+  "speech_output",
+  "general_computer_task",
+  "custom_goal"
+] as const;
+export type CapabilityRouteGoalCategory = typeof CAPABILITY_ROUTE_GOAL_CATEGORIES[number];
 export type CapabilityRouteVerificationStrength = "strong" | "medium" | "weak";
 export type CapabilityRouteProbeTier = 0 | 1 | 2 | 3 | 4 | 5;
 export type CapabilityRouteOutcome = "verified_success" | "verified_failure" | "prerequisite_failure" | "execution_failure" | "verification_failure" | "policy_block" | "cancelled" | "timeout" | "stale_target" | "incompatible_version" | "renderer_unavailable" | "protected_context";
@@ -62,6 +77,17 @@ export interface CapabilityRouteSelection {
   executable: false;
   actionsExecuted: false;
   confirmationTokensCreated: false;
+  probeSummary?: {
+    attempted: number;
+    succeeded: number;
+    failed: number;
+    cached: number;
+    durationMs: number;
+  };
+  latencyClass?: "instant" | "short" | "moderate" | "long";
+  verificationStatus?: "not_started" | "required" | "passed" | "failed";
+  metricStatus?: "unused" | "active" | "degraded" | "expired";
+  compatibilityFingerprint?: string;
 }
 
 export interface CapabilityRouteMetricRecord {
@@ -85,6 +111,8 @@ export interface CapabilityRouteMetricRecord {
   };
   lastAttemptedAt?: string;
   lastVerifiedAt?: string;
+  expiresAt?: string;
+  lastFailureCode?: string;
   compatibilityVersion: string;
   status: "active" | "degraded" | "expired";
   redacted: true;

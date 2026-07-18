@@ -1,11 +1,90 @@
 import type { OverlayOwner, OverlayTargetResolver } from "./manager.js";
-import type { OverlayRenderer, OverlayRendererRestartResult } from "./renderer.js";
+import type { OverlayRenderer, OverlayOperationResult, OverlayRendererRestartResult } from "./renderer.js";
 import { OverlayManager as BaseOverlayManager } from "./manager.js";
-import type { VisualSurfaceProtocolEnvelope } from "@agenthost/core";
+import type { OverlayPrimitive, OverlayPrimitiveType, OverlayWidget, OverlayWidgetComponent, VisualSurfaceProtocolEnvelope, VisualSurfaceType } from "@agenthost/core";
 import { redactVisualSurface, validateVisualSurface, visualSurfacePriorityValue } from "@agenthost/core";
 import { normalizeTrustedVisualComponents } from "./component-registry.js";
 
 export interface VisualSurfaceCoordinatorOptions { maxActiveSurfaces?: number; reducedMotion?: boolean; targetResolver?: OverlayTargetResolver | undefined; }
+
+const VISUAL_INTENTS = new Set<VisualSurfaceProtocolEnvelope["approvedIntents"][number]>([
+  "continue", "pause", "resume", "cancel", "acknowledge", "show_details", "hide",
+  "retry_visual_render", "inspect_diagnostics", "open_control_room", "review_prepared_action"
+]);
+
+const PRIMITIVE_SURFACE_TYPES: Record<OverlayPrimitiveType, VisualSurfaceType> = {
+  pointer: "pointer",
+  arrow: "arrow",
+  highlight: "target_highlight",
+  spotlight: "spotlight",
+  tooltip: "tooltip",
+  instruction_card: "instruction_card",
+  approval_card: "approval_notice",
+  warning: "warning_banner",
+  progress: "progress_card",
+  checkpoint_result: "checkpoint_result",
+  status_toast: "notification_toast",
+  comparison: "comparison_card",
+  cancel_control: "control_bar",
+  emergency_stop_control: "control_bar"
+};
+
+function safeIntents(events: readonly string[] | undefined): VisualSurfaceProtocolEnvelope["approvedIntents"] {
+  return (events ?? []).filter((event): event is VisualSurfaceProtocolEnvelope["approvedIntents"][number] => VISUAL_INTENTS.has(event as never)).slice(0, 12);
+}
+
+function primitiveComponents(input: OverlayPrimitive): OverlayWidgetComponent[] {
+  const components: OverlayWidgetComponent[] = [];
+  if (input.text !== undefined) components.push({ type: "text", text: input.text });
+  else if (input.label !== undefined) components.push({ type: "text", text: input.label });
+  if (input.progress !== undefined || input.value !== undefined) {
+    components.push({ type: "progress", value: Math.max(0, Math.min(1, input.progress ?? input.value ?? 0)) });
+  }
+  if (components.length === 0) components.push({ type: "text", text: input.type });
+  return components;
+}
+
+function compatibilitySurface(
+  input: OverlayPrimitive | OverlayWidget,
+  overlayId: string,
+  expiresAt: string,
+  rendererEpoch: number,
+  ownerSessionId: string
+): VisualSurfaceProtocolEnvelope {
+  const primitive = "type" in input;
+  const type = primitive ? PRIMITIVE_SURFACE_TYPES[input.type as OverlayPrimitiveType] : "control_bar";
+  const components = primitive ? primitiveComponents(input as OverlayPrimitive) : (input as OverlayWidget).components;
+  const title = primitive
+    ? ((input as OverlayPrimitive).accessibilityLabel ?? (input as OverlayPrimitive).type)
+    : (input as OverlayWidget).title;
+  const interaction = input.interaction;
+  const now = new Date().toISOString();
+  const surface: VisualSurfaceProtocolEnvelope = {
+    schemaVersion: 1,
+    surfaceId: overlayId,
+    ownerSessionId,
+    source: "route_status",
+    taskId: overlayId,
+    rendererEpoch,
+    type,
+    content: { title, components },
+    state: "visible",
+    ...(input.target === undefined ? {} : { target: input.target }),
+    placement: primitive ? "top_right" : ((input as OverlayWidget).placement ?? "top_right"),
+    priority: "normal",
+    interactionMode: interaction?.interactive === true ? "bounded_interactive" : "click_through",
+    approvedIntents: safeIntents(interaction?.allowedEvents),
+    ttlMs: Math.max(1_000, Math.min(300_000, Date.parse(expiresAt) - Date.now())),
+    sensitivity: input.sensitivity,
+    screenshotBehavior: "hide",
+    ...(input.style === undefined ? {} : { style: input.style }),
+    ...(input.animation === undefined ? {} : { animation: input.animation }),
+    createdAt: now,
+    updatedAt: now,
+    expiresAt
+  };
+  return redactVisualSurface(surface);
+}
 
 /** Single ephemeral projection authority. Persistent session data stays in MCP stores. */
 export class VisualSurfaceCoordinator extends BaseOverlayManager {
@@ -17,6 +96,45 @@ export class VisualSurfaceCoordinator extends BaseOverlayManager {
     super(renderer, owner);
     this.#options = { maxActiveSurfaces: Math.min(12, Math.max(1, options.maxActiveSurfaces ?? 8)), reducedMotion: options.reducedMotion ?? false, targetResolver: options.targetResolver };
   }
+
+  /** Compatibility projection for legacy stores that still call OverlayManager methods directly. */
+  override async showPrimitive(input: OverlayPrimitive, resolver?: OverlayTargetResolver, reducedMotion = false) {
+    const result = await super.showPrimitive(input, resolver, reducedMotion);
+    if (result.ok && result.overlay !== undefined) {
+      this.#surfaces.set(result.overlay.overlayId, compatibilitySurface(input, result.overlay.overlayId, result.overlay.expiresAt, this.rendererEpoch(), this.ownerSessionId()));
+    }
+    return result;
+  }
+
+  /** Compatibility projection for legacy stores that still call OverlayManager methods directly. */
+  override async showWidget(input: OverlayWidget, resolver?: OverlayTargetResolver, reducedMotion = false) {
+    const result = await super.showWidget(input, resolver, reducedMotion);
+    if (result.ok && result.overlay !== undefined) {
+      this.#surfaces.set(result.overlay.overlayId, compatibilitySurface(input, result.overlay.overlayId, result.overlay.expiresAt, this.rendererEpoch(), this.ownerSessionId()));
+    }
+    return result;
+  }
+
+  override async update(overlayId: string, patch: Record<string, unknown>): Promise<OverlayOperationResult> {
+    const result = await super.update(overlayId, patch);
+    if (result.ok) {
+      const current = this.#surfaces.get(overlayId);
+      if (current !== undefined) {
+        this.#surfaces.set(overlayId, {
+          ...current,
+          state: patch.visible === false ? "hidden" : "visible",
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }
+    return result;
+  }
+
+  override async dismiss(overlayId: string): Promise<OverlayOperationResult> {
+    this.#surfaces.delete(overlayId);
+    return await super.dismiss(overlayId);
+  }
+
   async showSurface(surface: VisualSurfaceProtocolEnvelope, targetResolver = this.#options.targetResolver): Promise<{ ok: boolean; surfaceId: string; visible: boolean; errors: string[] }> {
     if (surface === null || typeof surface !== "object") return { ok: false, surfaceId: "invalid", visible: false, errors: ["visual_surface_invalid"] };
     if (this.#suppressed) return { ok: false, surfaceId: typeof surface.surfaceId === "string" ? surface.surfaceId : "invalid", visible: false, errors: ["visual_surface_suppressed"] };
@@ -47,7 +165,7 @@ export class VisualSurfaceCoordinator extends BaseOverlayManager {
     const shown = await this.showSurface(next);
     return { ok: shown.ok, visible: shown.visible, errors: shown.errors };
   }
-  async dismissSurface(surfaceId: string): Promise<{ ok: boolean; reason: string }> { this.#surfaces.delete(surfaceId); return await super.dismiss(surfaceId); }
+  async dismissSurface(surfaceId: string): Promise<{ ok: boolean; reason: string }> { return await this.dismiss(surfaceId); }
   override async clear() { this.#surfaces.clear(); return await super.clear(); }
   override async emergencyHide() { this.#surfaces.clear(); return await super.emergencyHide(); }
   override async close() { this.#surfaces.clear(); await super.close(); }

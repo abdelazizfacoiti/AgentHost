@@ -14,6 +14,20 @@ The live tool inventory and `system.list_capabilities` use one validated loaded 
 
 V2-A Unified Dynamic Visual Copilot is implemented: explicit renderer modes, honest headless/disabled/WebKit-unavailable reporting, native GTK3/X11 handshake/draw-ready/live-registration checks, strict visual-surface envelopes and fixed components, one coordinator for projection/suppression/restart, and no target-app actions from visual events. V2-B Adaptive Reliable Action Routing is implemented as `strategy.route_preview`: action-level advisory candidates, bounded health observation, deterministic safety/verification-aware scoring, explicit fallback budget, and verified-only local route metrics. Actual execution remains in original governed tools; no autonomous loop, scheduler, or silent fallback exists.
 
+### Goal-oriented planning readiness
+
+The core now contains bounded, app-agnostic advisory contracts for `AgentGoal`,
+`ExecutionPlan`, `PlanStep`, `ActionRoute`, `VerificationCheckpoint`, and
+`GoalOutcome`. Validators reject unknown fields, private/raw content, executable
+payloads, unsafe interpolation, and unbounded budgets. Decision levels (0–3),
+safety-first plan comparison, stable tie-breaking, target invalidation, and
+fresh-confirmation requirements on material replans are structural only. These
+contracts do not execute tools, create confirmations, start replay sessions, or
+run in the background. `strategy.goal_plan_preview` exposes a bounded redacted
+goal/plan/route/checkpoint advisory preview; `strategy.capability_graph` exposes a TTL-bounded graph with optional live route-health overrides and
+`strategy.failure_memory` exposes only verified, fingerprinted route evidence.
+None of these surfaces executes a route or creates a permission.
+
 ## Milestone A — Visual Copilot Productization
 
 ### Goal
@@ -34,7 +48,7 @@ Build on `packages/app-overlay`, renderer diagnostics/setup, target grounding, b
 - renderer/setup diagnostics;
 - reviewable visual flow templates;
 - explicit fallback and Wayland guidance.
-- deterministic Build Week demo launcher and public visual fixture;
+- deterministic Build Week runtime-smoke launcher; internal visual fixtures remain test-only;
 - bounded current-step target refresh and stale-target recovery;
 - human-readable visual state/recovery projections.
 

@@ -1,0 +1,28 @@
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { detectLinuxBrowsers } from "../browser-inventory.js";
+
+describe("Linux browser inventory", () => {
+  it("detects supported executable names without exposing executable paths", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-browser-path-"));
+    const executable = path.join(root, "firefox");
+    await writeFile(executable, "#!/bin/sh\nexit 0\n", "utf8");
+    await chmod(executable, 0o700);
+    const inventory = await detectLinuxBrowsers({ PATH: root });
+    expect(inventory).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        family: "firefox",
+        installed: true,
+        executableAvailable: true,
+        executableName: "firefox"
+      }),
+      expect.objectContaining({
+        family: "chromium",
+        installed: false
+      })
+    ]));
+    expect(JSON.stringify(inventory)).not.toContain(root);
+  });
+});

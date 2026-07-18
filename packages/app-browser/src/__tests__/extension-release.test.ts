@@ -31,11 +31,31 @@ describe("browser extension release boundary", () => {
     expect(source).toContain('api.alarms.create("agenthostReconnect"');
     expect(source).toContain('"/v1/reconnect"');
     expect(source).toContain("agenthostRefreshSecret");
+    expect(source).toContain("/v1/enrollment/request");
+    expect(source).toContain("/v1/enrollment/status");
+    expect(source).toContain('message?.type==="agenthost_enroll"');
+    expect(source).toContain('alarm.name==="agenthostReconnect"&&!sessionToken){retryStartedAt=0;retryDelay=1000;schedule(0);');
     expect(source).not.toContain("console.log");
     expect(source).not.toContain("setInterval(poll,1000)");
     const setup = await readFile(path.join(root, "scripts", "prepare-browser-extension.mjs"), "utf8");
     expect(setup).toContain("does not create, print, or preserve pairing credentials");
     expect(setup).not.toContain("randomBytes");
+    const popup = await readFile(path.join(extension, "popup.html"), "utf8");
+    expect(popup).toContain('id="enroll"');
+    expect(popup).toContain("<details>");
+  });
+
+  it("reports and requests per-origin site access explicitly", async () => {
+    const background = await readFile(path.join(extension, "background.js"), "utf8");
+    const popup = await readFile(path.join(extension, "popup.js"), "utf8");
+    const popupHtml = await readFile(path.join(extension, "popup.html"), "utf8");
+    expect(background).toContain("api.permissions?.contains");
+    expect(background).toContain('site_permission_required');
+    expect(background).toContain('command==="get_page_context"');
+    expect(background).toContain('command==="extract_text"');
+    expect(popup).toContain("api.permissions.request");
+    expect(popupHtml).toContain('id="grant"');
+    expect(background).not.toContain('api.permissions.request');
   });
 
   it("builds deterministic unsigned artifacts and reports external signing honestly", async () => {

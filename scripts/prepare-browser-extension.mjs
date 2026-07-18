@@ -1,4 +1,5 @@
 import { access, chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -17,9 +18,17 @@ for (const family of families) {
   const manifest = JSON.parse(await readFile(manifestSource, "utf8"));
   const background = manifest.background ?? {};
   const backgroundFile = background.service_worker ?? background.scripts?.[0];
-  if (typeof backgroundFile !== "string"
+  const popupFile = manifest.action?.default_popup;
+  const forbiddenPermissions = new Set(["cookies", "debugger", "webRequest", "webRequestBlocking", "nativeMessaging", "history"]);
+  if (manifest.manifest_version !== 3
+    || backgroundFile !== "background.js"
+    || popupFile !== "popup.html"
     || !["tabs", "storage", "scripting", "alarms"].every((permission) => manifest.permissions?.includes(permission))
-    || JSON.stringify(manifest.host_permissions) !== JSON.stringify(["http://127.0.0.1/*"])) throw new Error(`Invalid ${family} manifest.`);
+    || manifest.permissions?.some((permission) => forbiddenPermissions.has(permission))
+    || JSON.stringify(manifest.host_permissions) !== JSON.stringify(["http://127.0.0.1/*"])
+    || JSON.stringify(manifest.optional_host_permissions) !== JSON.stringify(["https://*/*", "http://*/*"])
+    || (family === "firefox" && manifest.browser_specific_settings?.gecko?.id !== "browser-bridge@agenthost.local")
+    || (family === "chromium" && typeof manifest.key !== "string")) throw new Error(`Invalid ${family} manifest.`);
   const destination = path.join(output, family);
   await rm(destination, { recursive: true, force: true }); await mkdir(destination, { recursive: true, mode: 0o700 });
   await cp(path.join(source, "background.js"), path.join(destination, "background.js"));
@@ -33,7 +42,11 @@ for (const family of families) {
 }
 if (!setup) console.log("Start AgentHost with browserBridge.enabled=true, then use browser.generate_pairing_token dry-run + confirmation. Paste returned token in extension popup.");
 if (setup) {
-  const home = os.homedir(), agentHost = process.env.AGENTHOST_HOME ?? path.join(home, ".agenthost"), configPath = process.env.AGENTHOST_CONFIG ?? path.join(agentHost, "config.json");
+  const home = os.homedir();
+  const agentHost = process.env.AGENTHOST_HOME ?? path.join(home, ".agenthost");
+  const publicConfig = path.join(home, ".config", "agenthost", "config.json");
+  const legacyConfig = path.join(agentHost, "config.json");
+  const configPath = process.env.AGENTHOST_CONFIG ?? (existsSync(publicConfig) ? publicConfig : existsSync(legacyConfig) ? legacyConfig : publicConfig);
   let config = {};
   try { config = JSON.parse(await readFile(configPath, "utf8")); } catch { /* first local setup */ }
   const currentBridge = typeof config.browserBridge === "object" && config.browserBridge !== null ? config.browserBridge : {};

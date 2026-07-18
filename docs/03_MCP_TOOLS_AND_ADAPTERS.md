@@ -26,6 +26,21 @@ Missing/contradictory metadata and duplicate names fail closed. Disabled optiona
 
 `strategy.route_preview` is read-only action-level routing advice. Families are `browser_bridge`, `structured_browser`, `native_adapter`, `accessibility`, `local_ocr`, `screenshot_vision`, `desktop_input`, and `guide_only`. It returns bounded candidates, reason codes, alternatives, verification/latency classes, and fallback budget; it never executes, retries, changes targets, or creates confirmations. Persisted route metrics are aggregate verified outcomes only.
 
+`strategy.goal_plan_preview` is a read-only planning projection. It returns a
+bounded redacted `AgentGoal`, bounded ordered `ExecutionPlan`, optional `ActionRoute`,
+checkpoint, decision-level, candidate-plan/route comparison, and visual-surface summary. Route
+health inspection is bounded and read-only; no route action is invoked. It does
+not persist goals, create confirmations, grant permissions, or start replay.
+
+`strategy.capability_graph` returns a relevant TTL-bounded graph of loaded tools,
+route families, adapters, and prerequisites, with a bounded live read-only route-health
+overlay when the route service is available. `strategy.failure_memory` returns bounded
+verified route evidence using fingerprints only. Both are read-only and never execute
+routes or underlying tools. Planner visual selection
+chooses compact activity, progress, checklist, instruction, approval, recovery,
+comparison, or result surfaces from safe state; it never renders raw private
+content.
+
 ## Strategy order
 
 1. app adapter/API
@@ -64,6 +79,14 @@ Observation tools are read-only. Pointer, window, accessibility actions, and the
 Setup/diagnostics: `browser.detect`, `browser.setup_status`, `browser.diagnose_bridge`, `browser.generate_pairing_token`, `browser.reset_pairing`, `browser.get_extension_install_instructions`, `browser.verify_pairing`.
 
 Observation: `browser.list_tabs`, `browser.get_active_tab`, `browser.current_url`, `browser.get_page_context`, `browser.extract_text`, `browser.find_element`, `browser.wait_for_state`, `browser.get_form_state`, `browser.get_selected_text`.
+
+Browser setup is also explicit and local: `browser.inventory`,
+`browser.setup_status`, `browser.setup_begin`, `browser.setup_approve`,
+`browser.setup_cancel`, `browser.setup_verify`, `browser.diagnose_bridge`,
+and installation-instruction tools expose bounded inventory/enrollment state.
+Enrollment is browser-family scoped, identity/protocol/version checked, and
+stored as redacted local lifecycle metadata. Setup never returns reconnect
+secrets through status or logs; pairing approval remains explicit.
 
 Actions: `browser.open_url`, `browser.click_element`, `browser.fill_text`, `browser.focus_element`.
 

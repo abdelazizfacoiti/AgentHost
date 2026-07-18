@@ -18,7 +18,8 @@ function classify(definition: AnyAgentHostToolDefinition): ToolExecutionClass {
   if (name.startsWith("forge.")) {
     return /run_sandboxed_tool|dispatch_generated_tool/.test(name) ? "state_changing" : "metadata_only";
   }
-  if (name === "system.check_dependency" || name === "forge.check_sandbox_support" || name.startsWith("browser.setup_")) return "diagnostic";
+  if (name === "system.check_dependency" || name === "forge.check_sandbox_support" || name === "browser.setup_status" || name === "browser.setup_verify") return "diagnostic";
+  if (name.startsWith("browser.setup_")) return "state_changing";
   if (name.startsWith("guide.")) return "metadata_only";
   if (name.startsWith("strategy.")) return name === "strategy.health" || name === "strategy.verify_outcome" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.route_preview" ? "read_only" : "metadata_only";
   if (name === "speech.get_capabilities" || name === "speech.routing_diagnose") return "diagnostic";
@@ -66,6 +67,19 @@ export function validateToolExecutionMetadata(metadata: ToolExecutionMetadata, t
   if (metadata.source !== "base" && metadata.source !== "optional_adapter") {
     throw new Error(`Unknown tool source for ${toolName}`);
   }
+  validateRequiredGrantIds(metadata.requiredGrantIds, toolName);
+}
+
+function validateRequiredGrantIds(ids: string[] | undefined, toolName: string): void {
+  if (ids === undefined) return;
+  if (!Array.isArray(ids) || ids.length > 20) throw new Error(`Invalid required grant metadata for ${toolName}`);
+  const unique = new Set<string>();
+  for (const grantId of ids) {
+    if (typeof grantId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(grantId) || unique.has(grantId)) {
+      throw new Error(`Invalid required grant metadata for ${toolName}`);
+    }
+    unique.add(grantId);
+  }
 }
 
 export function materializeToolDefinitions(tools: AnyAgentHostToolDefinition[]): AnyAgentHostToolDefinition[] {
@@ -78,6 +92,7 @@ export function materializeToolDefinitions(tools: AnyAgentHostToolDefinition[]):
     names.add(definition.name);
     const execution = definition.execution ?? metadataFor(definition);
     validateToolExecutionMetadata(execution, definition.name);
+    validateRequiredGrantIds(definition.requiredGrantIds, definition.name);
     return { ...definition, execution };
   });
 }
@@ -88,6 +103,7 @@ export function toolCapabilities(tools: AnyAgentHostToolDefinition[]): ToolCapab
     riskLevel: tool.riskLevel,
     description: tool.description,
     inputSchema: tool.mcpInputSchema,
+    ...(tool.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...tool.requiredGrantIds] }),
     ...(tool.execution === undefined ? {} : { execution: tool.execution })
   }));
 }

@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
+import { createServer, type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -26,7 +27,11 @@ async function fixture() {
 }
 
 async function request(bridge: BrowserBridgeServer, route: string, value: unknown, origin = firefoxOrigin) {
-  return bridge.protocolRequest(route as "/v1/pair" | "/v1/reconnect", value as Record<string, unknown>, origin);
+  return bridge.protocolRequest(
+    route as "/v1/pair" | "/v1/reconnect" | "/v1/enrollment/request" | "/v1/enrollment/status",
+    value as Record<string, unknown>,
+    origin
+  );
 }
 
 async function enroll(bridge: BrowserBridgeServer) {
@@ -43,6 +48,40 @@ describe("BrowserBridgeServer", () => {
     await bridge.start();
     expect(bridge.status()).toMatchObject({ enabled: false, connected: false });
     await bridge.close();
+  });
+
+  it("degrades cleanly when the configured loopback port is occupied", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-browser-"));
+    const blocker = createServer();
+    const bindError = await new Promise<NodeJS.ErrnoException | undefined>((resolve) => {
+      blocker.once("error", (error: NodeJS.ErrnoException) => resolve(error));
+      blocker.listen(0, "127.0.0.1", () => resolve(undefined));
+    });
+    if (bindError?.code === "EPERM") {
+      // Managed CI sandboxes may forbid loopback binds. This case is covered
+      // from a normal desktop terminal in the release verification checklist.
+      expect(bindError.code).toBe("EPERM");
+      return;
+    }
+    expect(bindError).toBeUndefined();
+    const address = blocker.address() as AddressInfo;
+    const bridge = new BrowserBridgeServer({
+      enabled: true,
+      port: address.port,
+      pairingTokenFile: path.join(root, "pairing-token"),
+      pairingStateFile: path.join(root, "paired-devices.json")
+    });
+
+    await expect(bridge.start()).resolves.toBeUndefined();
+    expect(bridge.status()).toMatchObject({
+      listening: false,
+      connected: false,
+      state: "port_mismatch",
+      lastError: "port_mismatch"
+    });
+
+    await bridge.close();
+    await new Promise<void>((resolve) => blocker.close(() => resolve()));
   });
 
   it("persists enrolled device and reconnects after AgentHost restart", async () => {
@@ -89,6 +128,77 @@ describe("BrowserBridgeServer", () => {
     const version = await request(bridge, "/v1/pair", { ...identity, extensionVersion: "1.0.0", pairingToken: generated.token });
     expect(version.status).toBe(409);
     expect(version.body).toMatchObject({ error: "version_mismatch" });
+    await bridge.close();
+  });
+
+  it("enrolls browser-side without returning a token through AgentHost state", async () => {
+    const { bridge } = await fixture();
+    const enrollment = bridge.beginEnrollment("firefox");
+    const requested = await request(bridge, "/v1/enrollment/request", identity);
+    expect(requested).toMatchObject({
+      status: 202,
+      body: { enrollmentId: enrollment.enrollmentId, state: "waiting_for_approval" }
+    });
+    const requestToken = (requested.body as { requestToken: string }).requestToken;
+    expect(requestToken).toHaveLength(43);
+    expect(JSON.stringify(bridge.status())).not.toContain(requestToken);
+
+    const waiting = await request(bridge, "/v1/enrollment/status", { requestToken });
+    expect(waiting).toMatchObject({ status: 202, body: { state: "waiting_for_approval" } });
+    const approval = bridge.enrollmentStatus(enrollment.enrollmentId).approvalFingerprint;
+    expect(approval).toBeTypeOf("string");
+    await bridge.approveEnrollment(enrollment.enrollmentId, approval as string);
+    expect(bridge.status()).toMatchObject({ connected: false, enrollment: { state: "approved" } });
+
+    const delivered = await request(bridge, "/v1/enrollment/status", { requestToken });
+    expect(delivered).toMatchObject({ status: 200, body: { state: "paired" } });
+    expect(delivered.body).toHaveProperty("sessionToken");
+    expect(delivered.body).toHaveProperty("refreshSecret");
+    expect(bridge.status()).toMatchObject({ connected: true, paired: true });
+    expect(JSON.stringify(bridge.status())).not.toContain(requestToken);
+    const replayed = await request(bridge, "/v1/enrollment/status", { requestToken });
+    expect(replayed.status).toBe(403);
+    await bridge.close();
+  });
+
+  it("rejects mismatched identity, origin, protocol, and browser selection in enrollment", async () => {
+    const { bridge } = await fixture();
+    bridge.beginEnrollment("firefox");
+    const identityMismatch = await request(bridge, "/v1/enrollment/request", {
+      ...identity,
+      extensionId: "unapproved@example.invalid"
+    });
+    expect(identityMismatch).toMatchObject({ status: 403, body: { error: "extension_identity_mismatch" } });
+    const originMismatch = await request(
+      bridge,
+      "/v1/enrollment/request",
+      identity,
+      "chrome-extension://iglhiehdlonfffmediflnoepfpfiacaj"
+    );
+    expect(originMismatch.status).toBe(403);
+    const protocol = await request(bridge, "/v1/enrollment/request", {
+      ...identity,
+      protocolVersion: 99
+    });
+    expect(protocol).toMatchObject({ status: 409, body: { error: "protocol_mismatch" } });
+    const browserMismatch = await request(bridge, "/v1/enrollment/request", {
+      ...identity,
+      browser: { family: "chromium" },
+      extensionId: "iglhiehdlonfffmediflnoepfpfiacaj"
+    }, "chrome-extension://iglhiehdlonfffmediflnoepfpfiacaj");
+    expect(browserMismatch).toMatchObject({ status: 409, body: { error: "browser_selection_mismatch" } });
+    await bridge.close();
+  });
+
+  it("legacy pairing also enforces approved Firefox identity", async () => {
+    const { bridge } = await fixture();
+    const generated = await bridge.generatePairingToken();
+    const rejected = await request(bridge, "/v1/pair", {
+      ...identity,
+      extensionId: "unapproved@example.invalid",
+      pairingToken: generated.token
+    });
+    expect(rejected).toMatchObject({ status: 403, body: { error: "extension_identity_mismatch" } });
     await bridge.close();
   });
 

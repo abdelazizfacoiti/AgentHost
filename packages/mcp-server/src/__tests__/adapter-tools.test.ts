@@ -32,6 +32,25 @@ function createMockAdapter(): { adapter: AppAdapter; executeCalls: () => number 
     displayName: "Test Mock Adapter",
     appIds: ["gimp", "gmail"],
     supportedPlatforms: ["linux"],
+    optionalExecutionPolicy: {
+      enabledByDefault: false,
+      stability: "experimental",
+      execution: {
+        executionClass: "state_changing",
+        externalEffect: true,
+        requiresDryRun: true,
+        requiresConfirmationToken: true,
+        requiresExactTarget: true,
+        source: "optional_adapter",
+        availability: "available"
+      },
+      fingerprinting: "required",
+      subprocess: { required: false, shell: false, commandAllowlist: [] },
+      environment: { allowlist: [], inherit: false },
+      limits: { maxRuntimeMs: 5_000, maxOutputBytes: 64 * 1024 },
+      filesystem: { allowedOutputRoots: ["$AGENTHOST_HOME/outputs"], broadFilesystem: false },
+      audit: { redacted: true, rawInput: false, rawOutput: false }
+    },
     getCapabilities: () => [
       {
         id: "mock.export",

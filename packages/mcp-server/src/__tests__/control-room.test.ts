@@ -63,4 +63,45 @@ describe("ControlRoomStore", () => {
     expect(result).not.toHaveProperty("imageHash");
     await expect(store.provider().screenshot("shot_other")).rejects.toThrow("control_room_screenshot_not_found");
   });
+
+  it("projects browser setup state without credentials or browser content", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-control-room-browser-"));
+    const store = new ControlRoomStore(root, {
+      browserSetup: {
+        summary: async () => ({
+          status: "waiting_for_approval",
+          latest: {
+            setupId: "browser_setup_safe",
+            browserFamily: "firefox",
+            state: "waiting_for_approval",
+            recommendedNextAction: "Approve exact extension identity.",
+            redacted: true
+          },
+          redacted: true
+        })
+      }
+    });
+    await store.ensureStructure();
+    const health = await store.provider().health();
+    expect(health).toMatchObject({
+      browserSetup: {
+        status: "waiting_for_approval",
+        redacted: true
+      }
+    });
+    expect(JSON.stringify(health)).not.toMatch(/sessionToken|refreshSecret|pairingToken|cookie/i);
+  });
+
+  it("projects bounded planning and capability-graph summaries only", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-control-room-planning-"));
+    const store = new ControlRoomStore(root, {
+      planning: { summary: () => ({ status: "previewed", goalCategory: "browser_setup", decisionLevel: 1, visualSurface: { surfaceType: "task_checklist", compact: false }, executable: false, actionsExecuted: false, confirmationTokensCreated: false, redacted: true }) },
+      capabilityGraph: { summary: () => ({ nodeCount: 4, edgeCount: 3, versionFingerprint: "a".repeat(32), redacted: true }) }
+    });
+    await store.ensureStructure();
+    const health = await store.provider().health();
+    expect(health).toMatchObject({ planning: { goalCategory: "browser_setup", decisionLevel: 1, redacted: true }, capabilityGraph: { nodeCount: 4, redacted: true } });
+    const projection = JSON.stringify({ planning: health.planning, capabilityGraph: health.capabilityGraph });
+    expect(projection).not.toMatch(/prompt|page|coordinate|secret/i);
+  });
 });

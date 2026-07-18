@@ -2,8 +2,13 @@
   "name": "@agenthost/cli",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "bin": { "agenthost": "./dist/index.js" },
   "scripts": { "build": "tsc -b" },
-  "dependencies": { "@agenthost/core": "file:../core" }
+  "dependencies": {
+    "@agenthost/core": "file:../core",
+    "@agenthost/app-browser": "file:../app-browser",
+    "@agenthost/os-linux": "file:../os-linux"
+  }
 }

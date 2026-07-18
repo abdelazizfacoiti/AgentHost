@@ -5,7 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import readline from "node:readline/promises";
 import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, defaultAgentHostHome, defaultPublicConfigPath, legacyConfigPath, loadAgentHostConfig, normalizeSha256, readSha256Sidecar, redactLocalPath, sha256File } from "@agenthost/core";
+import { BrowserBridgeServer, BrowserSetupStore, browserSetupRecovery, expectedExtensionId, selectBrowserFromInventory, type BrowserInventoryEntry, type BrowserSetupRecord, type SupportedBrowserFamily } from "@agenthost/app-browser";
+import { detectLinuxBrowsers } from "@agenthost/os-linux";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
@@ -58,6 +61,10 @@ async function probeMcp(entry: string): Promise<{ started: boolean; handshake: b
 function runtimeRoot(): string {
   if (process.env.AGENTHOST_RELEASE_ROOT) return path.resolve(process.env.AGENTHOST_RELEASE_ROOT);
   return path.resolve(here, "../../..");
+}
+function packagedBrowserArtifactsAvailable(): boolean {
+  const packagedRoot = path.join(runtimeRoot(), "browser-extension");
+  return existsSync(path.join(packagedRoot, "source")) || existsSync(path.join(packagedRoot, "artifacts"));
 }
 function mcpEntry(): string {
   const explicit = process.env.AGENTHOST_MCP_ENTRY;
@@ -119,19 +126,240 @@ async function start(flags: ReturnType<typeof parseFlags>): Promise<Output> {
 }
 async function stop(): Promise<Output> { const lock = await readLock(); const pid = typeof lock?.pid === "number" ? lock.pid : undefined; if (pid === undefined || !processAlive(pid)) { await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: false, reason: "not_running" } }; } try { process.kill(pid, "SIGTERM"); } catch { return fail("stop", "process_stop_failed"); } const deadline = Date.now() + 2_000; while (processAlive(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50)); if (processAlive(pid)) return fail("stop", "process_stop_timeout"); await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: true } }; }
 async function doctor(): Promise<Output> {
-  const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: pythonModuleExists("import gi; from gi.repository import Gtk"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, browserArtifacts: existsSync(extensionDir), codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
+  const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: pythonModuleExists("import gi; from gi.repository import Gtk"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, browserArtifacts: existsSync(extensionDir) || packagedBrowserArtifactsAvailable(), codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
   const warnings = [!checks.architecture ? "x86_64 is the public RC target." : "", !checks.python ? "Install Python 3 for overlay and local speech diagnostics." : "", !checks.x11 ? "X11 DISPLAY is unavailable; visible overlay is unsupported." : "", !checks.browserArtifacts ? "Browser extension artifacts are not prepared." : ""].filter(Boolean);
   if (!mcp.handshake) warnings.push(mcp.reason ?? "mcp_handshake_unavailable");
   return { ok: config.ok, command: "doctor", data: { version: AGENTHOST_VERSION, checks, config: config.ok ? "valid" : config.error, mcp, process: await status(), paths: { agentHostHome: "[agenthost-home]", config: "[config]", mcpEntry: "[installed-mcp-runtime]" } }, warnings };
 }
 async function browser(command: string, flags: ReturnType<typeof parseFlags>): Promise<Output> {
   if (command === "setup") {
-    const packaged = path.join(runtimeRoot(), "browser-extension", "source"); await safeMkdir(extensionDir);
-    if (existsSync(packaged)) for (const family of ["firefox", "chromium"]) { const destination = path.join(extensionDir, family); await safeMkdir(destination); for (const file of ["background.js", "popup.html", "popup.js", "popup.css"]) await cp(path.join(packaged, file), path.join(destination, file), { force: true }).catch(() => undefined); await cp(path.join(packaged, `manifest.${family}.json`), path.join(destination, "manifest.json"), { force: true }); }
-    return { ok: true, command: "browser setup", data: { extensionDir: "[browser-extension]", firefox: "Load temporary add-on from firefox/manifest.json", chromium: "Load unpacked extension directory chromium/", manual: true, packagedArtifacts: existsSync(path.join(runtimeRoot(), "browser-extension", "artifacts")) } };
+    const requestedValue = flags.values.get("browser");
+    const requested = requestedValue === undefined
+      ? undefined
+      : requestedValue === "firefox" || requestedValue === "chromium"
+        ? requestedValue
+        : undefined;
+    if (requestedValue !== undefined && requested === undefined) {
+      return fail("browser setup", "browser_unsupported");
+    }
+    const packaged = path.join(runtimeRoot(), "browser-extension", "source");
+    await safeMkdir(extensionDir);
+    const artifactAvailability = new Map<SupportedBrowserFamily, boolean>();
+    for (const family of ["firefox", "chromium"] as const) {
+      const destination = path.join(extensionDir, family);
+      if (existsSync(packaged)) {
+        await safeMkdir(destination);
+        for (const file of ["background.js", "popup.html", "popup.js", "popup.css"]) {
+          await cp(path.join(packaged, file), path.join(destination, file), { force: true }).catch(() => undefined);
+        }
+        await cp(path.join(packaged, `manifest.${family}.json`), path.join(destination, "manifest.json"), { force: true }).catch(() => undefined);
+      }
+      artifactAvailability.set(family, existsSync(path.join(destination, "manifest.json")));
+    }
+    const probes = await detectLinuxBrowsers(process.env);
+    const inventory: BrowserInventoryEntry[] = probes.map((probe) => ({
+      family: probe.family,
+      supported: true,
+      installed: probe.installed,
+      executableAvailable: probe.executableAvailable,
+      ...(probe.executableName === undefined ? {} : { executableName: probe.executableName }),
+      running: probe.running,
+      expectedExtensionId: expectedExtensionId(probe.family),
+      extensionArtifactAvailable: artifactAvailability.get(probe.family) === true,
+      extensionConnectionState: "unknown",
+      pairedDeviceState: "unknown",
+      protocolCompatible: true,
+      runtimeCompatible: true,
+      reconnectReady: false,
+      lastHealthStatus: probe.installed ? "degraded" : "unavailable",
+      ...(!probe.installed ? { safeFailureCode: "browser_not_detected" as const } : {}),
+      recommendedNextAction: !probe.installed
+        ? browserSetupRecovery("browser_not_detected").action
+        : "Load approved extension artifact and begin local enrollment."
+    }));
+    const selection = selectBrowserFromInventory(inventory, requested);
+    let selectedBrowser = selection.selected;
+    if (selectedBrowser === undefined && selection.failureCode === "browser_selection_required" && requested === undefined && process.stdin.isTTY && process.stdout.isTTY) {
+      const installed = inventory.filter((item) => item.installed && item.executableAvailable);
+      const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const choices = installed.map((item) => item.family).join("/");
+        const answer = await prompt.question(`Select browser (${choices}): `);
+        const choice = answer.trim();
+        if (choice === "firefox" || choice === "chromium") selectedBrowser = choice;
+      } finally {
+        prompt.close();
+      }
+    }
+    if (selectedBrowser === undefined) {
+      return {
+        ok: false,
+        command: "browser setup",
+        error: selection.failureCode ?? "browser_not_detected",
+        data: { inventory, tokenReturned: false, ...(selection.failureCode === "browser_selection_required" ? { next: "Rerun with --browser firefox or --browser chromium." } : {}) }
+      };
+    }
+    const family = selectedBrowser;
+    const instructions = family === "firefox"
+      ? ["Open about:debugging#/runtime/this-firefox.", "Load Temporary Add-on from prepared firefox/manifest.json.", "Open extension popup and choose Pair with AgentHost."]
+      : ["Open chrome://extensions.", "Enable Developer mode and load prepared chromium directory.", "Open extension popup and choose Pair with AgentHost."];
+    if (!flags.flags.has("apply")) {
+      return {
+        ok: true,
+        command: "browser setup",
+        data: {
+          preview: true,
+          selectedBrowser: family,
+          inventory,
+          instructions,
+          extensionDir: "[browser-extension]",
+          pairingMode: "browser_side_approval",
+          tokenReturned: false,
+          next: "Rerun with --apply; use --approve in non-interactive terminals."
+        }
+      };
+    }
+    const config = await configObject();
+    const bridgeValue = config.browserBridge !== null && typeof config.browserBridge === "object"
+      ? config.browserBridge as Json
+      : {};
+    config.schemaVersion = AGENTHOST_CONFIG_SCHEMA_VERSION;
+    config.browserBridge = {
+      ...bridgeValue,
+      enabled: true,
+      port: Number.isInteger(bridgeValue.port) ? bridgeValue.port : 43117
+    };
+    await safeWrite(publicConfig, `${JSON.stringify(config, null, 2)}\n`);
+    const loaded = await loadAgentHostConfig({
+      env: { ...process.env, AGENTHOST_CONFIG: publicConfig }
+    });
+    const bridgeConfig = loaded.browserBridge;
+    if (bridgeConfig === undefined) return fail("browser setup", "bridge_unavailable");
+    const server = new BrowserBridgeServer(bridgeConfig, AGENTHOST_VERSION);
+    const setupStore = new BrowserSetupStore(agentHome, `cli-${process.pid}`);
+    await setupStore.ensureStructure();
+    let setupRecord: BrowserSetupRecord = await setupStore.create(family);
+    setupRecord = await setupStore.transition(setupRecord.setupId, "browser_selected");
+    setupRecord = await setupStore.transition(setupRecord.setupId, "checking_extension");
+    setupRecord = await setupStore.transition(setupRecord.setupId, "enrollment_created");
+    setupRecord = await setupStore.transition(setupRecord.setupId, "waiting_for_extension");
+    try {
+      try {
+        await server.start();
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        await setupStore.transition(setupRecord.setupId, "failed", {
+          failureCode: code === "EADDRINUSE" ? "bridge_port_conflict" : "bridge_unavailable"
+        });
+        return fail("browser setup", code === "EADDRINUSE" ? "bridge_port_conflict" : "bridge_unavailable");
+      }
+      const enrollment = server.beginEnrollment(family);
+      if (!process.stdout.isTTY && !flags.flags.has("approve")) {
+        return {
+          ok: false,
+          command: "browser setup",
+          error: "browser_approval_required",
+          data: {
+            selectedBrowser: family,
+            setupState: enrollment.state,
+            instructions,
+            tokenReturned: false,
+            next: "Rerun interactively or add --approve after reviewing selected browser."
+          }
+        };
+      }
+      const waitMs = Math.max(5_000, Math.min(10 * 60_000, Number(flags.values.get("wait-ms") ?? 120_000)));
+      const deadline = Date.now() + waitMs;
+      let approved = false;
+      while (Date.now() < deadline) {
+        const state = server.enrollmentStatus(enrollment.enrollmentId);
+        if (state.state === "waiting_for_approval" && !approved) {
+          setupRecord = await setupStore.transition(setupRecord.setupId, "waiting_for_approval", {
+            ...(state.extensionIdentitySuffix === undefined ? {} : {
+              extensionIdentitySuffix: state.extensionIdentitySuffix
+            }),
+            recommendedNextAction: "Review extension identity, then explicitly approve enrollment."
+          });
+          let allow = flags.flags.has("approve");
+          if (!allow && process.stdin.isTTY && process.stdout.isTTY) {
+            const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+            try {
+              const answer = await prompt.question(
+                `Approve ${family} extension …${state.extensionIdentitySuffix ?? "unknown"}? [y/N] `
+              );
+              allow = answer.trim().toLowerCase() === "y";
+            } finally {
+              prompt.close();
+            }
+          }
+          if (!allow) {
+            server.cancelEnrollment(enrollment.enrollmentId);
+            await setupStore.cancel(setupRecord.setupId);
+            return fail("browser setup", "setup_cancelled");
+          }
+          if (typeof state.approvalFingerprint !== "string") {
+            return fail("browser setup", "enrollment_expired");
+          }
+          await server.approveEnrollment(enrollment.enrollmentId, state.approvalFingerprint);
+          setupRecord = await setupStore.transition(setupRecord.setupId, "pairing");
+          approved = true;
+        }
+        if (server.status().connected) {
+          if (setupRecord.state === "waiting_for_extension") {
+            setupRecord = await setupStore.transition(setupRecord.setupId, "extension_connected");
+            setupRecord = await setupStore.transition(setupRecord.setupId, "pairing");
+          }
+          setupRecord = await setupStore.transition(setupRecord.setupId, "paired");
+          setupRecord = await setupStore.transition(setupRecord.setupId, "verifying_reconnect");
+          await server.close();
+          await server.start();
+          const reconnectDeadline = Date.now() + Math.min(30_000, waitMs);
+          while (Date.now() < reconnectDeadline && !server.status().connected) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+          if (!server.status().connected) {
+            await setupStore.transition(setupRecord.setupId, "needs_repair", {
+              failureCode: "reconnect_timeout"
+            });
+            return fail("browser setup", "reconnect_timeout");
+          }
+          setupRecord = await setupStore.transition(setupRecord.setupId, "ready", {
+            reconnectVerified: true,
+            recommendedNextAction: "Browser Bridge is ready."
+          });
+          return {
+            ok: true,
+            command: "browser setup",
+            data: {
+              selectedBrowser: family,
+              setupId: setupRecord.setupId,
+              state: "ready",
+              reconnectVerified: true,
+              extensionIdentitySuffix: state.extensionIdentitySuffix,
+              bridgeHost: "127.0.0.1",
+              bridgePort: bridgeConfig.port,
+              tokenReturned: false
+            }
+          };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await setupStore.transition(setupRecord.setupId, approved ? "needs_repair" : "failed", {
+        failureCode: approved ? "reconnect_timeout" : "extension_not_installed"
+      });
+      return fail("browser setup", approved ? "reconnect_timeout" : "extension_not_installed");
+    } finally {
+      await server.close().catch(() => undefined);
+    }
   }
   if (command === "reset") { if (!flags.flags.has("yes")) return fail("browser reset", "confirmation_required_use_--yes"); await rm(path.join(agentHome, "browser", "pairing-token"), { force: true }); await rm(path.join(agentHome, "browser", "paired-devices.json"), { force: true }); return { ok: true, command: "browser reset", data: { reset: true, tokenReturned: false } }; }
-  const tokenFile = path.join(agentHome, "browser", "pairing-token"); return { ok: true, command: "browser status", data: { enabled: process.env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1", port: Number(process.env.AGENTHOST_BROWSER_BRIDGE_PORT ?? 43117), extensionPrepared: existsSync(extensionDir), tokenExists: existsSync(tokenFile), paired: existsSync(path.join(agentHome, "browser", "paired-devices.json")) } };
+  const tokenFile = path.join(agentHome, "browser", "pairing-token");
+  const persisted = await configObject().catch(() => ({} as Json));
+  const bridge = persisted.browserBridge !== null && typeof persisted.browserBridge === "object"
+    ? persisted.browserBridge as Json
+    : {};
+  const paired = existsSync(path.join(agentHome, "browser", "paired-devices.json"));
+  return { ok: true, command: "browser status", data: { enabled: bridge.enabled === true || process.env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1", port: Number.isInteger(bridge.port) ? bridge.port : Number(process.env.AGENTHOST_BROWSER_BRIDGE_PORT ?? 43117), extensionPrepared: existsSync(extensionDir) || packagedBrowserArtifactsAvailable(), tokenExists: existsSync(tokenFile), paired, connection: "not_probed", state: paired ? "persisted_pairing" : "unpaired", next: paired ? "Use browser.verify_pairing through the running MCP session for live connection state." : "Load the extension and pair it with AgentHost." } };
 }
 async function codex(action: string, flags: ReturnType<typeof parseFlags>): Promise<Output> {
   const dir = process.env.CODEX_HOME ?? path.join(home, ".codex"); const file = path.join(dir, "config.toml"); if (action === "status") { const text = await readFile(file, "utf8").catch(() => ""); return { ok: true, command: "integrations codex status", data: { configured: text.includes("[mcp_servers.agenthost]"), configPath: existsSync(file) ? "[codex-config]" : null, usesRepositoryPath: /packages[\\/]mcp-server[\\/]dist/.test(text) } }; }

@@ -11,7 +11,7 @@ export const VISUAL_SURFACE_TYPES = [
 export type VisualSurfaceType = typeof VISUAL_SURFACE_TYPES[number];
 export type VisualSurfaceState = "draft" | "visible" | "updating" | "waiting" | "blocked" | "completed" | "failed" | "hidden";
 export type VisualSurfacePriority = "low" | "normal" | "high" | "critical";
-export type VisualSurfaceSource = "runtime_activity" | "assistance" | "control_surface" | "template_preview" | "renderer_diagnostics" | "route_status";
+export type VisualSurfaceSource = "runtime_activity" | "assistance" | "control_surface" | "template_preview" | "renderer_diagnostics" | "route_status" | "browser_setup";
 export type VisualSurfaceEventIntent = "continue" | "pause" | "resume" | "cancel" | "acknowledge" | "show_details" | "hide" | "retry_visual_render" | "inspect_diagnostics" | "open_control_room" | "review_prepared_action";
 
 export interface VisualSurfaceProgress { completed: number; total: number; percent: number; }
@@ -89,7 +89,7 @@ export function validateVisualSurface(surface: VisualSurfaceProtocolEnvelope, no
   if (surface.schemaVersion !== VISUAL_SURFACE_SCHEMA_VERSION) errors.push("visual_surface_schema_unsupported");
   if (!SAFE_ID.test(surface.surfaceId) || !SAFE_ID.test(surface.ownerSessionId)) errors.push("visual_surface_id_invalid");
   if (!VISUAL_SURFACE_TYPES.includes(surface.type)) errors.push("visual_surface_type_unsupported");
-  if (!["runtime_activity", "assistance", "control_surface", "template_preview", "renderer_diagnostics", "route_status"].includes(surface.source)) errors.push("visual_surface_source_invalid");
+  if (!["runtime_activity", "assistance", "control_surface", "template_preview", "renderer_diagnostics", "route_status", "browser_setup"].includes(surface.source)) errors.push("visual_surface_source_invalid");
   if (!["draft", "visible", "updating", "waiting", "blocked", "completed", "failed", "hidden"].includes(surface.state)) errors.push("visual_surface_state_invalid");
   if (!["low", "normal", "high", "critical"].includes(surface.priority)) errors.push("visual_surface_priority_invalid");
   if (!["click_through", "bounded_interactive"].includes(surface.interactionMode)) errors.push("visual_surface_interaction_invalid");

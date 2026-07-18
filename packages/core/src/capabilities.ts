@@ -1,5 +1,6 @@
 import {
   AUTOMATION_STRATEGIES,
+  TOOL_EXECUTION_CLASSES,
   type AppCapability,
   type AutomationStrategy,
   type CapabilityRegistrySnapshot,
@@ -7,9 +8,55 @@ import {
   type ToolExecutionMetadata
 } from "./types.js";
 
+const TOOL_SOURCES = new Set(["base", "optional_adapter"]);
+const TOOL_AVAILABILITIES = new Set(["available", "unavailable"]);
+
+function validateRequiredGrantIds(ids: string[] | undefined, toolName: string): void {
+  if (ids === undefined) return;
+  if (!Array.isArray(ids) || ids.length > 20) throw new Error(`Invalid required grant metadata for ${toolName}`);
+  const seen = new Set<string>();
+  for (const grantId of ids) {
+    if (typeof grantId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(grantId) || seen.has(grantId)) {
+      throw new Error(`Invalid required grant metadata for ${toolName}`);
+    }
+    seen.add(grantId);
+  }
+}
+
+/**
+ * Runtime validation shared by the core registry boundary.  MCP metadata
+ * validation remains stricter about tool-definition shape, but a capability
+ * registry must never accept a missing or contradictory execution contract.
+ */
+export function validateToolExecutionMetadata(metadata: ToolExecutionMetadata, toolName: string): void {
+  if (metadata === undefined || metadata === null || typeof metadata !== "object") {
+    throw new Error(`Missing execution metadata for ${toolName}`);
+  }
+  if (!TOOL_EXECUTION_CLASSES.includes(metadata.executionClass)) {
+    throw new Error(`Unknown execution class for ${toolName}`);
+  }
+  if (typeof metadata.externalEffect !== "boolean"
+    || typeof metadata.requiresDryRun !== "boolean"
+    || typeof metadata.requiresConfirmationToken !== "boolean"
+    || typeof metadata.requiresExactTarget !== "boolean") {
+    throw new Error(`Invalid execution metadata for ${toolName}`);
+  }
+  if (!TOOL_SOURCES.has(metadata.source) || !TOOL_AVAILABILITIES.has(metadata.availability)) {
+    throw new Error(`Invalid execution metadata source or availability for ${toolName}`);
+  }
+  const inert = metadata.executionClass !== "state_changing";
+  if (inert && (metadata.externalEffect || metadata.requiresDryRun || metadata.requiresConfirmationToken || metadata.requiresExactTarget)) {
+    throw new Error(`Contradictory execution metadata for ${toolName}`);
+  }
+  if (metadata.executionClass === "state_changing" && (!metadata.externalEffect || !metadata.requiresDryRun)) {
+    throw new Error(`State-changing execution metadata is incomplete for ${toolName}`);
+  }
+  validateRequiredGrantIds(metadata.requiredGrantIds, toolName);
+}
+
 function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
   if (name.startsWith("strategy.")) {
-    const executionClass = name === "strategy.health" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.verify_outcome" || name === "strategy.route_preview" ? "read_only" : "metadata_only";
+    const executionClass = name === "strategy.health" || name === "strategy.verify_outcome" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.route_preview" || name === "strategy.goal_plan_preview" || name === "strategy.capability_graph" || name === "strategy.failure_memory" ? "read_only" : "metadata_only";
     return { executionClass, externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
   }
   if (name === "overlay.assistance_step_preview" || name === "overlay.assistance_session_explain" || name === "overlay.assistance_template_validate" || name === "overlay.assistance_template_preview" || name === "overlay.assistance_template_get" || name === "overlay.assistance_template_list") return { executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
@@ -21,8 +68,12 @@ function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
   else if (name === "speech.transmission_prepare") metadata = "metadata_only";
   else if (name.startsWith("speech.")) metadata = "read_only";
   else if (name === "forge.check_sandbox_support" || name === "system.check_dependency") metadata = "diagnostic";
+  else if (name === "browser.setup_status" || name === "browser.setup_verify") metadata = "diagnostic";
+  else if (name.startsWith("browser.setup_")) metadata = "state_changing";
   else if (/^forge\.(run_sandboxed_tool|dispatch_generated_tool)$/.test(name)) metadata = "state_changing";
   else if (name.startsWith("workflow.") || name.startsWith("scheduler.") || name.startsWith("forge.")) metadata = "metadata_only";
+  else if (name.startsWith("guide.")) metadata = "metadata_only";
+  else if (name === "file.ensure_dir") metadata = "state_changing";
   else if (visual) metadata = "visual_only";
   else if (/(^|\.)(open|write|delete|click|type|focus|hotkey|scroll|drag|mouse|invoke|set_value|run_|send|upload)/.test(name)) metadata = "state_changing";
   const stateChanging = metadata === "state_changing";
@@ -40,27 +91,54 @@ function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
 export class CapabilityRegistry implements CapabilityRegistrySnapshot {
   readonly #tools = new Map<string, ToolCapability>();
   readonly #appCapabilities = new Map<string, AppCapability>();
+  readonly #allowBootstrapMetadata: boolean;
+
+  constructor(options: { allowBootstrapMetadata?: boolean } = {}) {
+    // Bootstrap inference is intentionally opt-in and only used by the
+    // static fallback catalog. Loaded production MCP definitions must carry
+    // explicit metadata through materializeToolDefinitions().
+    this.#allowBootstrapMetadata = options.allowBootstrapMetadata === true;
+  }
 
   registerTool(capability: ToolCapability): void {
     if (this.#tools.has(capability.name)) {
       throw new Error(`Tool capability is already registered: ${capability.name}`);
     }
 
-    this.#tools.set(capability.name, { ...capability, execution: capability.execution ?? bootstrapExecutionMetadata(capability.name) });
+    const execution = capability.execution === undefined
+      ? this.#allowBootstrapMetadata
+        ? bootstrapExecutionMetadata(capability.name)
+        : undefined
+      : capability.execution;
+    if (execution === undefined) throw new Error(`Missing execution metadata for ${capability.name}`);
+    validateRequiredGrantIds(capability.requiredGrantIds, capability.name);
+    validateToolExecutionMetadata(execution, capability.name);
+    this.#tools.set(capability.name, {
+      ...capability,
+      ...(capability.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...capability.requiredGrantIds] }),
+      execution: { ...execution, ...(execution.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...execution.requiredGrantIds] }) }
+    });
   }
 
   syncTools(capabilities: ToolCapability[]): void {
     const names = new Set<string>();
+    const normalized: ToolCapability[] = [];
     for (const capability of capabilities) {
       if (names.has(capability.name)) {
         throw new Error(`Tool capability is duplicated in loaded tool set: ${capability.name}`);
       }
       names.add(capability.name);
+      if (capability.execution === undefined) throw new Error(`Missing execution metadata for ${capability.name}`);
+      validateRequiredGrantIds(capability.requiredGrantIds, capability.name);
+      validateToolExecutionMetadata(capability.execution, capability.name);
+      normalized.push({
+        ...capability,
+        ...(capability.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...capability.requiredGrantIds] }),
+        execution: { ...capability.execution, ...(capability.execution.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...capability.execution.requiredGrantIds] }) }
+      });
     }
     this.#tools.clear();
-    for (const capability of capabilities) {
-      this.#tools.set(capability.name, { ...capability });
-    }
+    for (const capability of normalized) this.#tools.set(capability.name, capability);
   }
 
   registerAppCapability(capability: AppCapability): void {
@@ -85,7 +163,7 @@ export class CapabilityRegistry implements CapabilityRegistrySnapshot {
 }
 
 export function createBaseCapabilityRegistry(): CapabilityRegistry {
-  const registry = new CapabilityRegistry();
+  const registry = new CapabilityRegistry({ allowBootstrapMetadata: true });
 
   for (const capability of [
     { name: "strategy.list", riskLevel: "observe" as const, description: "Lists persistent structural capability strategies." },
@@ -102,6 +180,9 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "strategy.disable", riskLevel: "low" as const, description: "Disables strategy metadata." },
     { name: "strategy.archive", riskLevel: "low" as const, description: "Archives terminal strategy metadata." },
     { name: "strategy.route_preview", riskLevel: "observe" as const, description: "Previews bounded action-level route selection without executing a route." },
+    { name: "strategy.goal_plan_preview", riskLevel: "observe" as const, description: "Previews a bounded redacted goal, plan, route, checkpoint, decision level, and visual surface without executing a plan." },
+    { name: "strategy.capability_graph", riskLevel: "observe" as const, description: "Returns a bounded structural capability graph without executing probes." },
+    { name: "strategy.failure_memory", riskLevel: "observe" as const, description: "Lists bounded verified route evidence without private task data." },
     { name: "speech.list_providers", riskLevel: "observe" as const, description: "Lists detected local offline speech providers." },
     { name: "speech.get_capabilities", riskLevel: "observe" as const, description: "Reports local speech and routing capability health." },
     { name: "speech.list_voices", riskLevel: "observe" as const, description: "Lists local speech voices and languages." },

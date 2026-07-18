@@ -79,6 +79,8 @@ export interface AgentHostToolDefinition<
     isDryRun(input: TInput): boolean;
   };
   execution?: ToolExecutionMetadata;
+  /** Structural grant prerequisites for planning projections only. */
+  requiredGrantIds?: string[];
   /** Explicit delegation binding for wrappers that consume a token for one
    * underlying fixed tool (for example Forge dispatch). */
   confirmationTool?(input: TInput): string;
@@ -195,7 +197,11 @@ function centralSafetyActionType(definition: AnyAgentHostToolDefinition, executi
   if (name.startsWith("shell.")) return "shell_command";
   if (name === "app.open") return "app_launch";
   if (name.startsWith("file.")) return name.includes("delete") ? "file_delete" : "file_write";
-  if (name === "browser.generate_pairing_token" || name === "browser.reset_pairing") return "inspect";
+  if (name === "browser.generate_pairing_token"
+    || name === "browser.reset_pairing"
+    || name === "browser.setup_begin"
+    || name === "browser.setup_approve"
+    || name === "browser.setup_cancel") return "inspect";
   if (name.startsWith("browser.")) return "browser_action";
   if (name.includes("set_value")) return "accessibility_set_value";
   if (name.includes("invoke_action")) return "accessibility_action";

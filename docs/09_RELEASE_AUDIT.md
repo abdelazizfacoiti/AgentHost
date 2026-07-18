@@ -8,7 +8,7 @@ R6 adds no product capability. It audits and hardens R5 packaging, installation,
 
 - Linux x86_64 release target: `0.1.0`.
 - `npm run build`: pass.
-- `npm test`: pass; 75 suites, 402 tests.
+- `npm test`: pass; 87 suites, 492 tests (current tree).
 - `npm run lint`: pass.
 - `npm run smoke:mcp`: pass.
 - Release build, scan, manifest verification, archive checksum, and deterministic rebuild: required gates.
@@ -22,7 +22,7 @@ release/agenthost-v0.1.0-linux-x64.tar.gz.sha256
 release/SHA256SUMS
 ```
 
-Record final archive SHA-256 from `release/agenthost-v0.1.0-linux-x64.tar.gz.sha256` after last rebuild.
+Record final archive SHA-256 from `release/agenthost-v0.1.0-linux-x64.tar.gz.sha256` after the last rebuild.
 
 Archive installation requires the adjacent sidecar or explicit `--sha256`. Directory installation verifies `version.json` file hashes. Release scan rejects secrets, runtime state, private media, absolute checkout links, Python caches, and unsafe symlinks.
 
@@ -51,7 +51,7 @@ Run from a normal desktop terminal with disposable homes. Never modify real Code
 | Browser | Firefox temporary unsigned development install; Chromium unpacked development install; public signing/store publication external and pending |
 | Speech | Local providers only; availability depends on host packages |
 | Control Room | Disabled by default, loopback-only, authenticated, read-only |
-| License | Repository currently has no `LICENSE` file; redistribution requires explicit license decision |
+| License | Apache-2.0 `LICENSE`, `NOTICE`, and generated `THIRD_PARTY_NOTICES` are required and included in release verification |
 
 ## Storage and privacy inventory
 

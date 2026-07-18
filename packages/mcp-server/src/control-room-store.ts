@@ -61,8 +61,11 @@ export interface ControlRoomSources {
   scheduler?: { listJobs(): Promise<any[]> };
   overlay?: { diagnostics(): Promise<any> };
   browserBridge?: { status(): Record<string, unknown> };
+  browserSetup?: { summary(): Promise<Record<string, unknown>> };
   strategies?: { summary(): Promise<Record<string, unknown>> };
   routes?: { summary(): Record<string, unknown> };
+  planning?: { summary(): Record<string, unknown> };
+  capabilityGraph?: { summary(): Record<string, unknown> };
   speech?: { capabilities?(): Promise<Record<string, unknown>>; projection?(ownerSessionId: string): Promise<Record<string, unknown>> };
   runtimeActivity?: { projection(): Promise<RuntimeActivityProjection> };
 }
@@ -184,6 +187,8 @@ export class ControlRoomStore {
     try { renderer = this.#sources.overlay === undefined ? undefined : await this.#sources.overlay.diagnostics(); } catch { renderer = { rendererStatus: "unavailable" }; }
     let browser: Record<string, unknown> | undefined;
     try { browser = this.#sources.browserBridge?.status(); } catch { browser = { state: "unavailable" }; }
+    let browserSetup: Record<string, unknown> | undefined;
+    try { browserSetup = await this.#sources.browserSetup?.summary(); } catch { browserSetup = { status: "unavailable", redacted: true }; }
     let strategies: Record<string, unknown> | undefined;
     try { strategies = this.#sources.strategies === undefined ? undefined : await this.#sources.strategies.summary(); } catch { strategies = { redacted: true, status: "unavailable" }; }
     let speech: Record<string, unknown> | undefined;
@@ -197,7 +202,9 @@ export class ControlRoomStore {
       }
     } catch { runtimeActivity = { status: "unavailable", redacted: true }; }
     const routes = this.#sources.routes?.summary();
-    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(strategies === undefined ? {} : { strategies }), ...(routes === undefined ? {} : { routes }), ...(speech === undefined ? {} : { speech }), ...(runtimeActivity === undefined ? {} : { runtimeActivity }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only.", "Route projections contain families, reason codes, and bounded status only.", "Speech projections contain provider, device, artifact, and routing metadata only."] };
+    const planning = this.#sources.planning?.summary();
+    const capabilityGraph = this.#sources.capabilityGraph?.summary();
+    return { service: "available", ...(renderer === undefined ? {} : { renderer }), ...(browser === undefined ? {} : { browser }), ...(browserSetup === undefined ? {} : { browserSetup }), ...(strategies === undefined ? {} : { strategies }), ...(routes === undefined ? {} : { routes }), ...(planning === undefined ? {} : { planning }), ...(capabilityGraph === undefined ? {} : { capabilityGraph }), ...(speech === undefined ? {} : { speech }), ...(runtimeActivity === undefined ? {} : { runtimeActivity }), stores: { activity: "available", workflows: this.#sources.workflowTrace === undefined ? "unavailable" : "available", forge: this.#sources.forge === undefined ? "unavailable" : "available", scheduler: this.#sources.scheduler === undefined ? "unavailable" : "available" }, limitations: ["Read-only reporting.", "No raw page text, screenshots, secrets, or filesystem paths are exposed.", "Scheduler and generated runtime records remain non-executable.", "Strategy projections contain structural metadata only.", "Route projections contain families, reason codes, and bounded status only.", "Planning projections contain bounded goal, plan, route, checkpoint, and visual-surface metadata only; it never executes a plan.", "Capability graph contains bounded structural nodes and expiry only.", "Browser setup projections contain safe state and recovery codes only.", "Speech projections contain provider, device, artifact, and routing metadata only."] };
   }
 
   async #buildTasks(from?: string, to?: string): Promise<ControlRoomTaskProjection[]> {

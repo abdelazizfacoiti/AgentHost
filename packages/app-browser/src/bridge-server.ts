@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { chmod, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -10,12 +10,15 @@ import {
   extensionVersionCompatible
 } from "./version-compatibility.js";
 import type { BridgeBrowserInfo, BrowserCommand } from "./types.js";
+import { expectedExtensionId } from "./extension-identity.js";
+import type { SupportedBrowserFamily } from "./setup.js";
 
 const MAX_BODY = 256 * 1024;
 const COMMAND_TIMEOUT_MS = 10_000;
 const SESSION_MS = 5 * 60_000;
 const BOOTSTRAP_TOKEN_MS = 10 * 60_000;
 const MAX_COMMANDS = 64;
+const ENROLLMENT_MS = 10 * 60_000;
 
 export type BrowserSetupState =
   | "bridge_disabled"
@@ -27,6 +30,9 @@ export type BrowserSetupState =
   | "token_expired"
   | "pairing_revoked"
   | "version_mismatch"
+  | "protocol_mismatch"
+  | "extension_identity_mismatch"
+  | "origin_rejected"
   | "device_state_corrupt"
   | "browser_busy"
   | "port_mismatch"
@@ -48,10 +54,26 @@ type ExtensionIdentity = {
 
 type Session = {
   token: string;
+  connectionId: string;
+  connectedAt: number;
   deviceId: string;
   identity: ExtensionIdentity;
   exactOrigin: string;
   lastSeen: number;
+};
+
+type BrowserEnrollment = {
+  enrollmentId: string;
+  browserFamily: SupportedBrowserFamily;
+  requestToken?: string;
+  identity?: ExtensionIdentity;
+  exactOrigin?: string;
+  state: "waiting_for_extension" | "waiting_for_approval" | "approved" | "paired" | "cancelled";
+  createdAt: number;
+  approvedAt?: number;
+  delivered: boolean;
+  pendingSession?: Session;
+  sessionResponse?: Record<string, unknown>;
 };
 
 function json(response: ServerResponse, status: number, value: unknown): void {
@@ -125,6 +147,9 @@ export class BrowserBridgeServer {
   #extensionSeenAt: number | undefined;
   #lastError: BrowserSetupState | undefined;
   #deviceCount = 0;
+  #deviceCounts: Record<SupportedBrowserFamily, number> = { firefox: 0, chromium: 0 };
+  #lastObservedBrowserFamily: SupportedBrowserFamily | undefined;
+  #enrollment: BrowserEnrollment | undefined;
   readonly #pairings: BrowserPairingStore;
 
   constructor(readonly config: BrowserBridgeConfig, readonly agentHostVersion = "0.1.0") {
@@ -135,20 +160,42 @@ export class BrowserBridgeServer {
     if (!this.config.enabled || this.#server !== undefined) return;
     await mkdir(path.dirname(this.config.pairingTokenFile), { recursive: true, mode: 0o700 });
     await this.initializePersistentState();
-    this.#server = createServer((request, response) => void this.#handle(request, response));
-    await new Promise<void>((resolve, reject) => {
-      this.#server!.once("error", reject);
-      this.#server!.listen(this.config.port, "127.0.0.1", resolve);
-    });
+    const server = createServer((request, response) => void this.#handle(request, response));
+    this.#server = server;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(this.config.port, "127.0.0.1", resolve);
+      });
+    } catch (error) {
+      const code = error !== null && typeof error === "object" && "code" in error
+        && typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : undefined;
+      this.#lastError = code === "EADDRINUSE" ? "port_mismatch" : "bridge_unavailable";
+      this.#server = undefined;
+      server.removeAllListeners();
+      try {
+        server.close();
+      } catch {
+        // Failed-to-bind servers have no active listener to clean up.
+      }
+    }
   }
 
   async initializePersistentState(): Promise<void> {
     await this.#loadBootstrapToken();
     try {
-      this.#deviceCount = (await this.#pairings.list()).filter((device) => device.revokedAt === undefined).length;
+      const devices = (await this.#pairings.list()).filter((device) => device.revokedAt === undefined);
+      this.#deviceCount = devices.length;
+      this.#deviceCounts = {
+        firefox: devices.filter((device) => device.browserFamily === "firefox").length,
+        chromium: devices.filter((device) => device.browserFamily === "chromium").length
+      };
     } catch {
       this.#lastError = "device_state_corrupt";
       this.#deviceCount = 0;
+      this.#deviceCounts = { firefox: 0, chromium: 0 };
     }
   }
 
@@ -165,15 +212,20 @@ export class BrowserBridgeServer {
     const port = typeof address === "object" && address !== null ? address.port : this.config.port;
     let state: BrowserSetupState;
     if (!this.config.enabled) state = "bridge_disabled";
-    else if (this.#server === undefined) state = "bridge_unavailable";
     else if (this.#lastError !== undefined && [
       "device_state_corrupt",
       "version_mismatch",
+      "protocol_mismatch",
+      "extension_identity_mismatch",
+      "origin_rejected",
       "browser_busy",
       "pairing_revoked",
       "token_expired",
-      "token_invalid"
+      "token_invalid",
+      "port_mismatch",
+      "bridge_unavailable"
     ].includes(this.#lastError)) state = this.#lastError;
+    else if (this.#server === undefined) state = "bridge_unavailable";
     else if (connected) state = "paired";
     else if (this.#extensionSeenAt === undefined) state = "extension_not_seen";
     else state = "unpaired";
@@ -186,25 +238,138 @@ export class BrowserBridgeServer {
       extensionSeen: this.#extensionSeenAt !== undefined,
       paired: this.#deviceCount > 0,
       enrolledDeviceCount: this.#deviceCount,
+      enrolledDeviceCounts: { ...this.#deviceCounts },
       connected,
       state,
       compatibility: browserCompatibilitySummary(this.agentHostVersion),
       ...(this.#extensionSeenAt === undefined ? {} : { extensionLastSeenAt: new Date(this.#extensionSeenAt).toISOString() }),
+      ...(this.#lastObservedBrowserFamily === undefined ? {} : {
+        lastObservedBrowserFamily: this.#lastObservedBrowserFamily
+      }),
       ...(this.#session === undefined ? {} : {
         browser: this.#session.identity.browser,
         extensionVersion: this.#session.identity.extensionVersion,
         protocolVersion: this.#session.identity.protocolVersion,
         deviceIdSuffix: this.#session.deviceId.slice(-8),
+        connectionId: this.#session.connectionId,
+        connectedAt: new Date(this.#session.connectedAt).toISOString(),
         lastSeenAt: new Date(this.#session.lastSeen).toISOString()
       }),
       ...(this.#lastError === undefined ? {} : { lastError: this.#lastError }),
+      ...(this.#enrollment === undefined ? {} : {
+        enrollment: {
+          enrollmentId: this.#enrollment.enrollmentId,
+          browserFamily: this.#enrollment.browserFamily,
+          state: this.#enrollment.state,
+          expiresAt: new Date(this.#enrollment.createdAt + ENROLLMENT_MS).toISOString()
+        }
+      }),
       reason: this.#reason(state)
     };
+  }
+
+  beginEnrollment(browserFamily: SupportedBrowserFamily): {
+    enrollmentId: string;
+    browserFamily: SupportedBrowserFamily;
+    state: BrowserEnrollment["state"];
+    expiresAt: string;
+  } {
+    if (!this.config.enabled) {
+      throw new Error("bridge_unavailable");
+    }
+    if (this.#valid()) throw new Error("browser_busy");
+    if (this.#enrollment !== undefined
+      && this.#enrollment.state !== "cancelled"
+      && this.#enrollment.state !== "paired"
+      && Date.now() - this.#enrollment.createdAt < ENROLLMENT_MS) {
+      throw new Error("browser_busy");
+    }
+    this.#enrollment = {
+      enrollmentId: `browser_enrollment_${randomBytes(16).toString("hex")}`,
+      browserFamily,
+      state: "waiting_for_extension",
+      createdAt: Date.now(),
+      delivered: false
+    };
+    return this.enrollmentStatus(this.#enrollment.enrollmentId);
+  }
+
+  enrollmentStatus(enrollmentId: string): {
+    enrollmentId: string;
+    browserFamily: SupportedBrowserFamily;
+    state: BrowserEnrollment["state"];
+    expiresAt: string;
+    extensionIdentitySuffix?: string;
+    approvalFingerprint?: string;
+  } {
+    const enrollment = this.#activeEnrollment(enrollmentId);
+    return {
+      enrollmentId: enrollment.enrollmentId,
+      browserFamily: enrollment.browserFamily,
+      state: enrollment.state,
+      expiresAt: new Date(enrollment.createdAt + ENROLLMENT_MS).toISOString(),
+      ...(enrollment.identity === undefined
+        ? {}
+        : {
+            extensionIdentitySuffix: enrollment.identity.extensionId.slice(-12),
+            approvalFingerprint: this.#approvalFingerprint(enrollment)
+          })
+    };
+  }
+
+  async approveEnrollment(
+    enrollmentId: string,
+    expectedApprovalFingerprint: string
+  ): Promise<ReturnType<BrowserBridgeServer["enrollmentStatus"]>> {
+    const enrollment = this.#activeEnrollment(enrollmentId);
+    if (enrollment.state !== "waiting_for_approval"
+      || enrollment.identity === undefined
+      || enrollment.exactOrigin === undefined) {
+      throw new Error("browser_enrollment_not_approvable");
+    }
+    if (!equal(expectedApprovalFingerprint, this.#approvalFingerprint(enrollment))) {
+      throw new Error("browser_enrollment_fingerprint_mismatch");
+    }
+    const enrolled = await this.#pairings.enroll({
+      browserFamily: enrollment.identity.browser.family,
+      extensionId: enrollment.identity.extensionId,
+      exactOrigin: enrollment.exactOrigin,
+      extensionVersion: enrollment.identity.extensionVersion,
+      protocolVersion: enrollment.identity.protocolVersion
+    });
+    this.#deviceCount += 1;
+    this.#deviceCounts[enrollment.identity.browser.family] += 1;
+    const pendingSession: Session = {
+      token: randomBytes(32).toString("base64url"),
+      connectionId: `browser_connection_${randomBytes(12).toString("hex")}`,
+      connectedAt: Date.now(),
+      deviceId: enrolled.device.deviceId,
+      identity: enrollment.identity,
+      exactOrigin: enrollment.exactOrigin,
+      lastSeen: Date.now()
+    };
+    enrollment.state = "approved";
+    enrollment.approvedAt = Date.now();
+    enrollment.pendingSession = pendingSession;
+    enrollment.sessionResponse = this.#sessionResponse(pendingSession, {
+      refreshSecret: enrolled.refreshSecret
+    });
+    this.#lastError = undefined;
+    return this.enrollmentStatus(enrollmentId);
+  }
+
+  cancelEnrollment(enrollmentId: string): void {
+    const enrollment = this.#activeEnrollment(enrollmentId);
+    enrollment.state = "cancelled";
+    delete enrollment.requestToken;
+    delete enrollment.pendingSession;
+    delete enrollment.sessionResponse;
   }
 
   async generatePairingToken(): Promise<{ token: string; created: boolean }> {
     await this.#pairings.revokeAll();
     this.#deviceCount = 0;
+    this.#deviceCounts = { firefox: 0, chromium: 0 };
     this.#clearSession("unpaired");
     this.#bootstrapToken = pairingToken();
     this.#bootstrapCreatedAt = Date.now();
@@ -215,9 +380,11 @@ export class BrowserBridgeServer {
   async resetPairing(): Promise<void> {
     await this.#pairings.revokeAll();
     this.#deviceCount = 0;
+    this.#deviceCounts = { firefox: 0, chromium: 0 };
     this.#bootstrapToken = "";
     this.#bootstrapCreatedAt = 0;
     this.#clearSession("unpaired");
+    this.#enrollment = undefined;
     await unlink(this.config.pairingTokenFile).catch(() => undefined);
   }
 
@@ -286,6 +453,9 @@ export class BrowserBridgeServer {
       token_expired: "Browser session expired; paired extension must reconnect.",
       pairing_revoked: "Browser device pairing was revoked.",
       version_mismatch: "Browser extension and AgentHost bridge versions are incompatible.",
+      protocol_mismatch: "Browser extension protocol is incompatible.",
+      extension_identity_mismatch: "Browser extension identity does not match the approved artifact.",
+      origin_rejected: "Browser extension origin failed exact validation.",
       device_state_corrupt: "Persistent browser pairing state is invalid; reset pairing.",
       browser_busy: "Another paired browser session is active.",
       port_mismatch: "Extension port does not reach AgentHost.",
@@ -304,6 +474,121 @@ export class BrowserBridgeServer {
     return identity.protocolVersion === BROWSER_BRIDGE_PROTOCOL_VERSION && extensionVersionCompatible(identity.extensionVersion);
   }
 
+  #identityAllowed(identity: ExtensionIdentity, exactOrigin: string): boolean {
+    if (identity.extensionId !== expectedExtensionId(identity.browser.family)) return false;
+    return identity.browser.family === "firefox"
+      ? exactOrigin.startsWith("moz-extension://")
+      : exactOrigin === `chrome-extension://${identity.extensionId}`;
+  }
+
+  #approvalFingerprint(enrollment: BrowserEnrollment): string {
+    if (enrollment.identity === undefined || enrollment.exactOrigin === undefined) {
+      throw new Error("browser_enrollment_identity_unavailable");
+    }
+    return createHash("sha256").update([
+      "agenthost-browser-enrollment-v1",
+      enrollment.enrollmentId,
+      enrollment.browserFamily,
+      enrollment.identity.extensionId,
+      enrollment.identity.extensionVersion,
+      String(enrollment.identity.protocolVersion),
+      enrollment.exactOrigin
+    ].join("\0"), "utf8").digest("hex").slice(0, 24);
+  }
+
+  #activeEnrollment(enrollmentId: string): BrowserEnrollment {
+    const enrollment = this.#enrollment;
+    if (enrollment === undefined
+      || enrollment.enrollmentId !== enrollmentId
+      || enrollment.state === "cancelled"
+      || Date.now() - enrollment.createdAt >= ENROLLMENT_MS) {
+      throw new Error("enrollment_expired");
+    }
+    return enrollment;
+  }
+
+  async #requestEnrollment(
+    input: Record<string, unknown>,
+    exactOrigin: string
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const enrollment = this.#enrollment;
+    if (enrollment === undefined || Date.now() - enrollment.createdAt >= ENROLLMENT_MS) {
+      return { status: 410, body: { error: "enrollment_expired" } };
+    }
+    const identity = parseIdentity(input);
+    if (identity === undefined) return { status: 400, body: { error: "browser_response_invalid" } };
+    this.#lastObservedBrowserFamily = identity.browser.family;
+    if (identity.browser.family !== enrollment.browserFamily) {
+      return { status: 409, body: { error: "browser_selection_mismatch" } };
+    }
+    if (!this.#identityAllowed(identity, exactOrigin)) {
+      this.#lastError = "extension_identity_mismatch";
+      return { status: 403, body: { error: "extension_identity_mismatch" } };
+    }
+    if (identity.protocolVersion !== BROWSER_BRIDGE_PROTOCOL_VERSION) {
+      this.#lastError = "protocol_mismatch";
+      return { status: 409, body: { error: "protocol_mismatch", compatibility: browserCompatibilitySummary(this.agentHostVersion) } };
+    }
+    if (!extensionVersionCompatible(identity.extensionVersion)) {
+      this.#lastError = "version_mismatch";
+      return { status: 409, body: { error: "extension_version_mismatch", compatibility: browserCompatibilitySummary(this.agentHostVersion) } };
+    }
+    if (enrollment.identity !== undefined || enrollment.exactOrigin !== undefined) {
+      const same = enrollment.identity?.browser.family === identity.browser.family
+        && enrollment.identity.extensionId === identity.extensionId
+        && enrollment.identity.extensionVersion === identity.extensionVersion
+        && enrollment.identity.protocolVersion === identity.protocolVersion
+        && enrollment.exactOrigin === exactOrigin;
+      if (!same) return { status: 409, body: { error: "browser_busy" } };
+    } else {
+      enrollment.identity = identity;
+      enrollment.exactOrigin = exactOrigin;
+    }
+    enrollment.requestToken ??= randomBytes(32).toString("base64url");
+    enrollment.state = "waiting_for_approval";
+    this.#extensionSeenAt = Date.now();
+    return {
+      status: 202,
+      body: {
+        enrollmentId: enrollment.enrollmentId,
+        requestToken: enrollment.requestToken,
+        approvalFingerprint: this.#approvalFingerprint(enrollment),
+        state: enrollment.state,
+        expiresAt: new Date(enrollment.createdAt + ENROLLMENT_MS).toISOString()
+      }
+    };
+  }
+
+  async #pollEnrollment(
+    input: Record<string, unknown>,
+    exactOrigin: string
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const enrollment = this.#enrollment;
+    if (enrollment === undefined || Date.now() - enrollment.createdAt >= ENROLLMENT_MS) {
+      return { status: 410, body: { error: "enrollment_expired" } };
+    }
+    if (typeof input.requestToken !== "string"
+      || enrollment.requestToken === undefined
+      || !equal(input.requestToken, enrollment.requestToken)
+      || exactOrigin !== enrollment.exactOrigin) {
+      return { status: 403, body: { error: "origin_rejected" } };
+    }
+    if (enrollment.state !== "approved"
+      || enrollment.sessionResponse === undefined
+      || enrollment.pendingSession === undefined) {
+      return { status: 202, body: { state: enrollment.state } };
+    }
+    if (enrollment.delivered) return { status: 409, body: { error: "enrollment_already_delivered" } };
+    enrollment.delivered = true;
+    enrollment.state = "paired";
+    const response = enrollment.sessionResponse;
+    this.#session = enrollment.pendingSession;
+    delete enrollment.sessionResponse;
+    delete enrollment.pendingSession;
+    delete enrollment.requestToken;
+    return { status: 200, body: response };
+  }
+
   #sessionResponse(session: Session, enrollment?: { refreshSecret: string }) {
     return {
       sessionToken: session.token,
@@ -315,12 +600,18 @@ export class BrowserBridgeServer {
   }
 
   async protocolRequest(
-    route: "/v1/pair" | "/v1/reconnect",
+    route: "/v1/pair" | "/v1/reconnect" | "/v1/enrollment/request" | "/v1/enrollment/status",
     input: Record<string, unknown>,
     exactOrigin: string
   ): Promise<{ status: number; body: Record<string, unknown> }> {
     if (normalizeExtensionOrigin(exactOrigin) !== exactOrigin) return { status: 403, body: { error: "invalid_origin" } };
     this.#extensionSeenAt = Date.now();
+    if (route === "/v1/enrollment/request") {
+      return await this.#requestEnrollment(input, exactOrigin);
+    }
+    if (route === "/v1/enrollment/status") {
+      return await this.#pollEnrollment(input, exactOrigin);
+    }
     if (route === "/v1/pair") {
       if (!this.#bootstrapValid()) {
         this.#lastError = "token_expired";
@@ -332,8 +623,10 @@ export class BrowserBridgeServer {
       }
       const identity = parseIdentity(input);
       if (identity === undefined) return { status: 400, body: { error: "browser_response_invalid" } };
-      if (identity.browser.family === "chromium" && exactOrigin !== `chrome-extension://${identity.extensionId}`) {
-        return { status: 403, body: { error: "invalid_origin" } };
+      this.#lastObservedBrowserFamily = identity.browser.family;
+      if (!this.#identityAllowed(identity, exactOrigin)) {
+        this.#lastError = "extension_identity_mismatch";
+        return { status: 403, body: { error: "extension_identity_mismatch" } };
       }
       if (!this.#compatible(identity)) {
         this.#lastError = "version_mismatch";
@@ -352,8 +645,14 @@ export class BrowserBridgeServer {
       });
       await this.#consumeBootstrapToken();
       this.#deviceCount = 1;
+      this.#deviceCounts = {
+        firefox: identity.browser.family === "firefox" ? 1 : 0,
+        chromium: identity.browser.family === "chromium" ? 1 : 0
+      };
       this.#session = {
         token: randomBytes(32).toString("base64url"),
+        connectionId: `browser_connection_${randomBytes(12).toString("hex")}`,
+        connectedAt: Date.now(),
         deviceId: enrolled.device.deviceId,
         identity,
         exactOrigin,
@@ -367,12 +666,14 @@ export class BrowserBridgeServer {
     if (identity === undefined || typeof input.deviceId !== "string" || typeof input.refreshSecret !== "string") {
       return { status: 400, body: { error: "browser_response_invalid" } };
     }
+    this.#lastObservedBrowserFamily = identity.browser.family;
     if (!this.#compatible(identity)) {
       this.#lastError = "version_mismatch";
       return { status: 409, body: { error: "version_mismatch", compatibility: browserCompatibilitySummary(this.agentHostVersion) } };
     }
-    if (identity.browser.family === "chromium" && exactOrigin !== `chrome-extension://${identity.extensionId}`) {
-      return { status: 403, body: { error: "invalid_origin" } };
+    if (!this.#identityAllowed(identity, exactOrigin)) {
+      this.#lastError = "extension_identity_mismatch";
+      return { status: 403, body: { error: "extension_identity_mismatch" } };
     }
     if (this.#valid() && this.#session!.deviceId !== input.deviceId) {
       this.#lastError = "browser_busy";
@@ -393,6 +694,8 @@ export class BrowserBridgeServer {
     }
     this.#session = {
       token: randomBytes(32).toString("base64url"),
+      connectionId: `browser_connection_${randomBytes(12).toString("hex")}`,
+      connectedAt: Date.now(),
       deviceId: device.deviceId,
       identity,
       exactOrigin,
@@ -434,6 +737,18 @@ export class BrowserBridgeServer {
       if (request.method === "POST" && url === "/v1/reconnect") {
         const input = await body(request);
         const result = await this.protocolRequest("/v1/reconnect", input, exactOrigin);
+        return json(response, result.status, result.body);
+      }
+
+      if (request.method === "POST" && url === "/v1/enrollment/request") {
+        const input = await body(request);
+        const result = await this.protocolRequest("/v1/enrollment/request", input, exactOrigin);
+        return json(response, result.status, result.body);
+      }
+
+      if (request.method === "POST" && url === "/v1/enrollment/status") {
+        const input = await body(request);
+        const result = await this.protocolRequest("/v1/enrollment/status", input, exactOrigin);
         return json(response, result.status, result.body);
       }
 

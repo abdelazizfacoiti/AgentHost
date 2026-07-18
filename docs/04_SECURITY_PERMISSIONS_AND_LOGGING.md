@@ -91,6 +91,15 @@ Blender is the reference optional adapter, not a core feature. When explicitly e
 
 Strategy records are installation-local, schema-versioned, bounded, atomic, and mode `0600`. They contain structural goal/capability/health/verification metadata only. Validators reject secrets, credentials, private content, screenshots/OCR/page/file content, transient browser/accessibility/vision/overlay/window IDs, coordinates, arbitrary code/shell, callbacks, expressions, dynamic tool names, hidden retries, and unbounded loops. Profile, grant, compatibility, protected-context, and live prerequisite checks run again at selection. Selection is advisory and cannot execute or authorize actions. Local strategies require explicit review plus two independently verified signed receipts; stale or failing strategies degrade and fail closed. Audit logs contain IDs/status/counts/failure codes only, never strategy inputs or receipt signatures.
 
+Goal planning is likewise advisory. Goal summaries, plan revisions, step categories,
+route families, decision levels, and visual-surface choices are bounded and
+redacted. Stable goals survive replanning, but stale targets, changed effects,
+changed recipients, declined confirmation, and policy changes invalidate the
+affected plan and require fresh checks. Capability graph caches have explicit TTL
+and invalidation; live incompatibility overrides history. Failure memory excludes
+policy blocks and cancellations from route-quality evidence and stores no raw
+prompts, URLs, content, coordinates, or target IDs.
+
 ## Overlay and renderer safety
 
 Overlay targets are fresh, owner/session-bound, sensitivity-checked, and TTL-limited. Widgets accept only allowlisted intent events. Events update overlay/session state only and never invoke another tool. The GTK child uses authenticated bounded JSONL IPC, filtered environment, handshake validation, crash detection, bounded restart, and headless fallback.
@@ -113,7 +122,7 @@ Visual-flow templates are owner-scoped local metadata. Only existing visual prim
 
 ### Demo and target-recovery safety
 
-The A3 demo uses public fixture text and validated local screen point only. Operator prompts gate start, target binding, continue, retry, and completion. No target-app tool, grant, confirmation token, or autonomous loop is reachable from launcher. `overlay.assistance_target_refresh` validates current-step ownership, kind, bounds, sensitivity, and TTL; two explicit refreshes maximum. Stale target or renderer epoch invalidates trust and requires explicit recovery. Headless/Wayland fallback reports limitation instead of claiming unsupported coordinates. Demo diagnostics omit private content, screenshots, fingerprints, tokens, and unrelated paths.
+The A3 demo uses authoritative redacted runtime activity only; internal visual fixtures remain test-only. No target-app tool, grant, confirmation token, or autonomous loop is reachable from launcher. `overlay.assistance_target_refresh` validates current-step ownership, kind, bounds, sensitivity, and TTL; two explicit refreshes maximum. Stale target or renderer epoch invalidates trust and requires explicit recovery. Headless/Wayland fallback reports limitation instead of claiming unsupported coordinates. Demo diagnostics omit private content, screenshots, fingerprints, tokens, and unrelated paths.
 
 ## Scheduler governance safety
 

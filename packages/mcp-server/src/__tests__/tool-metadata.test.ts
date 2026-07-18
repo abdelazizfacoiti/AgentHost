@@ -14,6 +14,8 @@ describe("registered tool execution metadata", () => {
     expect(tools.find((tool) => tool.name === "overlay.show_pointer")?.execution).toMatchObject({ executionClass: "visual_only", externalEffect: false });
     expect(tools.find((tool) => tool.name === "forge.run_sandboxed_tool")?.execution).toMatchObject({ executionClass: "state_changing", requiresDryRun: true });
     expect(() => validateToolExecutionMetadata({ executionClass: "read_only", externalEffect: true, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" }, "bad.tool")).toThrow();
+    expect(() => validateToolExecutionMetadata({ executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available", requiredGrantIds: ["bad id"] }, "bad.grant")).toThrow();
+    expect(() => materializeToolDefinitions([{ name: "system.bad.grants", description: "bad", riskLevel: "observe", inputSchema: {} as never, mcpInputSchema: {}, inputSummary: "bad", requiredGrantIds: ["duplicate", "duplicate"], handler: async () => ({}) as never }])).toThrow(/required grant/);
     expect(() => materializeToolDefinitions([{ name: "unknown.tool", description: "unknown", riskLevel: "low", inputSchema: {} as never, mcpInputSchema: {}, inputSummary: "unknown", handler: async () => ({}) as never }])).toThrow(/classification/);
   });
 
@@ -44,5 +46,8 @@ describe("registered tool execution metadata", () => {
     expect(capabilities.filter((tool) => tool.name.startsWith("overlay.control_surface_")).every((tool) => tool.execution?.executionClass === "visual_only" && tool.execution.externalEffect === false)).toBe(true);
     expect(capabilities.some((tool) => tool.name === "overlay.assistance_step_preview" && tool.execution?.executionClass === "read_only")).toBe(true);
     expect(capabilities.some((tool) => tool.name === "overlay.assistance_template_instantiate" && tool.execution?.executionClass === "metadata_only")).toBe(true);
+    expect(capabilities.find((tool) => tool.name === "strategy.goal_plan_preview")?.execution).toMatchObject({ executionClass: "read_only", externalEffect: false });
+    expect(capabilities.find((tool) => tool.name === "strategy.capability_graph")?.execution).toMatchObject({ executionClass: "read_only", externalEffect: false });
+    expect(capabilities.find((tool) => tool.name === "strategy.failure_memory")?.execution).toMatchObject({ executionClass: "read_only", externalEffect: false });
   });
 });

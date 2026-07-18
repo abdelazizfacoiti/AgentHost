@@ -19,6 +19,7 @@ import { CapabilityStrategyStore } from "./capability-strategy-store.js";
 import type { OverlayManager } from "@agenthost/app-overlay";
 import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 import type { SpeechService } from "./speech-service.js";
+import type { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
 
 type Binding = { selection: CapabilityStrategySelection; strategy?: CapabilityStrategyDefinition; destination?: string; assistanceSessionId?: string; createdAt: number };
 type Verification = { verificationId: string; selectionId: string; strategyId: string; checkpoint: CapabilityStrategyDefinition["verificationCheckpoints"][number]; status: "verified_success" | "verified_failure"; toolFamily: CapabilityStrategyOutcome["toolFamily"]; expiresAt: number };
@@ -35,6 +36,14 @@ function strategyFamily(tool: string): CapabilityStrategyOutcome["toolFamily"] {
   if (tool.startsWith("adapter.") || tool.startsWith("app.")) return "adapter";
   return "guide";
 }
+function routeFamily(toolFamily: CapabilityStrategyOutcome["toolFamily"]): "browser_bridge" | "native_adapter" | "accessibility" | "local_ocr" | "screenshot_vision" | "desktop_input" | "guide_only" {
+  if (toolFamily === "browser") return "browser_bridge";
+  if (toolFamily === "adapter") return "native_adapter";
+  if (toolFamily === "accessibility") return "accessibility";
+  if (toolFamily === "vision") return "local_ocr";
+  if (toolFamily === "desktop") return "desktop_input";
+  return toolFamily === "overlay" ? "guide_only" : "guide_only";
+}
 
 export interface StrategyServiceContext {
   sessionId: string;
@@ -47,6 +56,7 @@ export interface StrategyServiceContext {
   overlayAssistance?: Pick<OverlayAssistanceStore, "explain">;
   speech?: Pick<SpeechService, "capabilities">;
   receipts?: Pick<ToolReceiptManager, "verify">;
+  failureMemory?: Pick<SafeFailureMemoryStore, "record">;
 }
 
 export class CapabilityStrategyService {
@@ -149,6 +159,14 @@ export class CapabilityStrategyService {
     if (receipt.receipt.preview || receipt.receipt.executionStatus === "preview") throw new Error("strategy_receipt_preview_only");
     if (strategyFamily(receipt.receipt.tool) !== verification.toolFamily && verification.toolFamily !== "guide") throw new Error("strategy_receipt_family_mismatch");
     const result = await this.#store.updateOutcome({ strategyId: binding.strategy.strategyId, selectionId: input.selectionId, status: verification.status, toolFamily: verification.toolFamily, verification: verification.checkpoint, ...(verification.status === "verified_failure" ? { failureCode: "verification_failed" as const } : {}) });
+    await context.failureMemory?.record({
+      goalCategory: binding.strategy.goalCategory,
+      routeFamily: routeFamily(verification.toolFamily),
+      failureCode: verification.status === "verified_failure" ? "verification_failed" : "verified_success",
+      compatibilityFingerprint: receipt.receipt.targetFingerprint ?? receipt.receipt.tool,
+      outcome: verification.status,
+      invalidationVersion: "strategy-v1"
+    });
     this.#verifications.delete(input.verificationId);
     return result.outcome;
   }

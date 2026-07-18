@@ -383,6 +383,8 @@ export interface ToolCapability {
   strategy?: AutomationStrategy;
   inputSchema?: unknown;
   generated?: boolean;
+  /** Structural grant prerequisites; does not grant permission. */
+  requiredGrantIds?: string[];
   execution?: ToolExecutionMetadata;
 }
 
@@ -398,6 +400,8 @@ export interface ToolExecutionMetadata {
   requiresExactTarget: boolean;
   source: ToolSource;
   availability: ToolAvailability;
+  /** Structural grant prerequisites; does not grant permission. */
+  requiredGrantIds?: string[];
 }
 
 export interface OptionalAdapterExecutionPolicy {
@@ -630,10 +634,14 @@ export interface ControlRoomHealthProjection {
   service: "available" | "unavailable";
   renderer?: Record<string, unknown>;
   browser?: Record<string, unknown>;
+  browserSetup?: Record<string, unknown>;
   stores: { activity: "available" | "unavailable"; workflows: "available" | "unavailable"; forge: "available" | "unavailable"; scheduler: "available" | "unavailable" };
   speech?: Record<string, unknown>;
   runtimeActivity?: Record<string, unknown>;
   strategies?: Record<string, unknown>;
+  routes?: Record<string, unknown>;
+  planning?: Record<string, unknown>;
+  capabilityGraph?: Record<string, unknown>;
   limitations: string[];
 }
 

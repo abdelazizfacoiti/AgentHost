@@ -1,0 +1,23 @@
+AgentHost Third-Party Notices
+
+This file is generated from package-lock.json production dependency entries.
+AgentHost does not modify third-party license terms. Complete license texts
+remain alongside bundled packages under node_modules.
+
+Bundled npm production dependencies:
+
+BSD-2-Clause:
+  json-schema-typed
+
+BSD-3-Clause:
+  fast-uri, qs
+
+ISC:
+  inherits, isexe, once, setprototypeof, which, wrappy, zod-to-json-schema
+
+MIT:
+  @hono/node-server, @modelcontextprotocol/sdk, accepts, ajv, ajv-formats, body-parser, bytes, call-bind-apply-helpers, call-bound, content-disposition, content-type, cookie, cookie-signature, cors, cross-spawn, debug, depd, dunder-proto, ee-first, encodeurl, es-define-property, es-errors, es-object-atoms, escape-html, etag, eventsource, eventsource-parser, express, express-rate-limit, fast-deep-equal, finalhandler, forwarded, fresh, function-bind, get-intrinsic, get-proto, gopd, has-symbols, hasown, hono, http-errors, iconv-lite, ip-address, ipaddr.js, is-promise, jose, json-schema-traverse, math-intrinsics, media-typer, merge-descriptors, mime-db, mime-types, ms, negotiator, object-assign, object-inspect, on-finished, parseurl, path-key, path-to-regexp, pkce-challenge, proxy-addr, range-parser, raw-body, require-from-string, router, safer-buffer, send, serve-static, shebang-command, shebang-regex, side-channel, side-channel-list, side-channel-map, side-channel-weakmap, statuses, toidentifier, type-is, unpipe, vary, zod
+
+Optional system programs such as GTK3/PyGObject, xdotool, Tesseract,
+Bubblewrap, eSpeak NG, Piper, and Speech Dispatcher are not bundled by
+AgentHost. Their licenses and installation remain the operator's responsibility.

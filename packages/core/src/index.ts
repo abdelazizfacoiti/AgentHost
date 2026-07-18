@@ -35,3 +35,5 @@ export * from "./capability-routing.js";
 export * from "./speech.js";
 export * from "./runtime-activity.js";
 export * from "./release.js";
+export * from "./goal-planning.js";
+export * from "./capability-graph.js";

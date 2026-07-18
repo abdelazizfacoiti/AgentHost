@@ -8,14 +8,15 @@ Provider names are examples only. Demo is provider-agnostic.
 
 ## Build Week additions
 
-Milestone A3 turns A1 operator control surface and A2 read-only assistance/template foundation into deterministic local Visual Copilot walkthrough:
+Milestone A3 provides an authoritative local Visual Copilot runtime smoke over
+the existing renderer and activity stores. Internal deterministic fixtures stay
+in tests; the public launcher does not present a synthetic walkthrough.
 
-- public source-controlled fixture;
-- explicit operator start and events;
-- safe local screen-point grounding;
-- stale-target warning and bounded explicit recovery;
-- renderer health/fallback diagnostics;
-- visible terminal completion.
+- real redacted runtime activity;
+- renderer-health and visibility acknowledgement;
+- authoritative progress and terminal state;
+- bounded renderer diagnostics and cleanup;
+- honest visible/headless reporting.
 
 No browser, desktop, accessibility, file, shell, Forge, workflow, scheduler, send, submit, upload, delete, pay, or buy action occurs.
 

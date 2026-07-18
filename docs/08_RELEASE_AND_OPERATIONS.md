@@ -74,7 +74,7 @@ Updates require an operator-provided archive, checksum verification, preflight, 
 
 ## Release contents and scanning
 
-The archive contains compiled runtime, production dependencies, renderer assets, extension source/artifacts, version manifest, documentation, and per-file hashes. The release directory also contains archive `SHA256SUMS` sidecars. This repository currently has no `LICENSE` file; public redistribution remains subject to an explicit license decision. The artifact excludes runtime state, logs, screenshots, OCR/page text, audio, pairing/reconnect state, Control Room tokens, confirmations, credentials, caches, temporary files, development tests/maps, absolute checkout links, and dangling development symlinks.
+The archive contains compiled runtime, production dependencies, renderer assets, extension source/artifacts, version manifest, documentation, legal files, and per-file hashes. The release directory also contains archive `SHA256SUMS` sidecars. The project is Apache-2.0 licensed; `LICENSE`, `NOTICE`, and generated `THIRD_PARTY_NOTICES` are copied and verified. The artifact excludes runtime state, logs, screenshots, OCR/page text, audio, pairing/reconnect state, Control Room tokens, confirmations, credentials, caches, temporary files, development tests/maps, absolute checkout links, and dangling development symlinks.
 
 `release:scan` fails on credential-like material, token formats, current-user absolute paths, private media/log artifacts, oversized files, or unsafe release contents. `release:verify` validates manifest fingerprints.
 

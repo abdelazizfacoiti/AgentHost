@@ -229,6 +229,25 @@ function createMockBlenderAdapter(): { adapter: AppAdapter; calls: () => number 
       displayName: "Blender",
       appIds: ["blender"],
       supportedPlatforms: ["linux"],
+      optionalExecutionPolicy: {
+        enabledByDefault: false,
+        stability: "experimental",
+        execution: {
+          executionClass: "state_changing",
+          externalEffect: true,
+          requiresDryRun: true,
+          requiresConfirmationToken: true,
+          requiresExactTarget: true,
+          source: "optional_adapter",
+          availability: "available"
+        },
+        fingerprinting: "required",
+        subprocess: { required: true, shell: false, commandAllowlist: ["blender"] },
+        environment: { allowlist: ["PATH", "LANG", "LC_ALL", "TMPDIR"], inherit: false },
+        limits: { maxRuntimeMs: 60_000, maxOutputBytes: 64 * 1024 },
+        filesystem: { allowedOutputRoots: ["$AGENTHOST_HOME/outputs/blender"], broadFilesystem: false },
+        audit: { redacted: true, rawInput: false, rawOutput: false }
+      },
       matchesApp: (input) => input.appName?.toLowerCase() === "blender" || input.appId === "blender",
       getCapabilities: () => [
         {
@@ -287,7 +306,16 @@ function createContext(profile: "strict" | "dev", withAdapter: boolean): AgentHo
     name: "blender.run_python",
     riskLevel: "medium",
     strategy: "app_adapter",
-    description: "Mock Blender tool capability."
+    description: "Mock Blender tool capability.",
+    execution: {
+      executionClass: "state_changing",
+      externalEffect: true,
+      requiresDryRun: true,
+      requiresConfirmationToken: true,
+      requiresExactTarget: true,
+      source: "optional_adapter",
+      availability: "available"
+    }
   });
 
   return {

@@ -52,12 +52,16 @@ import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 import type { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
 import type { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
 import type { ControlRoomStore } from "./control-room-store.js";
+import type { GoalPlanningService } from "./goal-planning-service.js";
 import type { CapabilityStrategyStore } from "./capability-strategy-store.js";
 import type { CapabilityStrategyService } from "./capability-strategy-service.js";
 import type { AdaptiveActionRouter } from "./adaptive-action-router.js";
 import type { SpeechService } from "./speech-service.js";
 import type { RuntimeActivityService } from "./runtime-activity-service.js";
 import type { RuntimeActivityOverlayController } from "./runtime-activity-overlay.js";
+import type { BrowserSetupService } from "./browser-setup-service.js";
+import type { CapabilityGraphService } from "./capability-graph-service.js";
+import type { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -166,11 +170,15 @@ export interface AgentHostMcpContext {
   scheduler?: SchedulerStore;
   browser?: BrowserBridgeAdapter;
   browserBridge?: BrowserBridgeServer;
+  browserSetup?: BrowserSetupService;
+  capabilityGraph?: CapabilityGraphService;
+  failureMemory?: SafeFailureMemoryStore;
   overlay?: OverlayManager;
   overlayAssistance?: OverlayAssistanceStore;
   overlayAssistanceTemplates?: OverlayAssistanceTemplateStore;
   overlayControlSurface?: OverlayControlSurfaceStore;
   controlRoom?: ControlRoomStore;
+  goalPlanning?: GoalPlanningService;
   strategyStore?: CapabilityStrategyStore;
   strategyService?: CapabilityStrategyService;
   routeRouter?: AdaptiveActionRouter;

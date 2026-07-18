@@ -22,13 +22,60 @@ function createMockAdapter(overrides: Partial<AppAdapter> = {}): AppAdapter {
     async execute(): Promise<never> {
       throw new Error("Mock adapter execution must not be called in Phase 5.");
     },
+    optionalExecutionPolicy: {
+      enabledByDefault: false,
+      stability: "experimental",
+      execution: {
+        executionClass: "state_changing",
+        externalEffect: true,
+        requiresDryRun: true,
+        requiresConfirmationToken: true,
+        requiresExactTarget: true,
+        source: "optional_adapter",
+        availability: "available"
+      },
+      fingerprinting: "required",
+      subprocess: { required: false, shell: false, commandAllowlist: [] },
+      environment: { allowlist: [], inherit: false },
+      limits: { maxRuntimeMs: 5_000, maxOutputBytes: 64 * 1024 },
+      filesystem: { allowedOutputRoots: ["$AGENTHOST_HOME/outputs"], broadFilesystem: false },
+      audit: { redacted: true, rawInput: false, rawOutput: false }
+    },
     ...overrides
   };
 }
 
 describe("AdapterRegistry", () => {
   it("rejects optional adapters without explicit execution policy", () => {
-    expect(() => validateOptionalAdapterExecutionPolicy(createMockAdapter())).toThrow(/execution policy/);
+    const missingPolicy = createMockAdapter();
+    delete missingPolicy.optionalExecutionPolicy;
+    expect(() => validateOptionalAdapterExecutionPolicy(missingPolicy)).toThrow(/execution policy/);
+    const missingPolicyForRegistry = createMockAdapter();
+    delete missingPolicyForRegistry.optionalExecutionPolicy;
+    expect(() => new AdapterRegistry({ platform: "linux" }).register(missingPolicyForRegistry)).toThrow(/execution policy/);
+  });
+
+  it("rejects unsafe optional-adapter environment, roots, and limits", () => {
+    const unsafeEnvironment = createMockAdapter();
+    unsafeEnvironment.optionalExecutionPolicy = {
+      ...unsafeEnvironment.optionalExecutionPolicy!,
+      environment: { allowlist: ["API_KEY"], inherit: false }
+    };
+    expect(() => validateOptionalAdapterExecutionPolicy(unsafeEnvironment)).toThrow(/environment/);
+
+    const unsafeRoot = createMockAdapter();
+    unsafeRoot.optionalExecutionPolicy = {
+      ...unsafeRoot.optionalExecutionPolicy!,
+      filesystem: { allowedOutputRoots: ["/tmp"], broadFilesystem: false }
+    };
+    expect(() => validateOptionalAdapterExecutionPolicy(unsafeRoot)).toThrow(/output roots/);
+
+    const unsafeLimits = createMockAdapter();
+    unsafeLimits.optionalExecutionPolicy = {
+      ...unsafeLimits.optionalExecutionPolicy!,
+      limits: { maxRuntimeMs: 300_001, maxOutputBytes: 64 * 1024 }
+    };
+    expect(() => validateOptionalAdapterExecutionPolicy(unsafeLimits)).toThrow(/limits/);
   });
 
   it("registers and lists supported adapters", () => {

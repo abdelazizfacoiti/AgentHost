@@ -52,7 +52,11 @@ Headless/disabled renderers plus optional GTK3/X11 renderer child. Renderer comm
 
 ### Adaptive route boundary
 
-`adaptive-action-router.ts` provides advisory action-level candidates over loaded route families. It performs bounded health observation, deterministic safety/verification-aware scoring, explicit fallback budgeting, and verified-only metric lookup through `route-metrics-store.ts`. It never invokes a browser, desktop, accessibility, OCR, vision, adapter, guide, or other MCP tool.
+`adaptive-action-router.ts` provides advisory action-level candidates over loaded route families. It performs bounded read-only health observation, deterministic safety/verification-aware scoring, explicit fallback budgeting, and verified-only metric lookup through `route-metrics-store.ts`. It never invokes browser, desktop, accessibility, OCR, vision, adapter, guide, or other target-action tools.
+
+### Goal-planning and capability graph boundary
+
+`goal-planning.ts` defines the app-agnostic goal/plan/step/route/checkpoint/outcome contracts and deterministic decision levels, plan comparison, replan invalidation, and visual-surface selection. `goal-planning-service.ts` keeps only one redacted advisory projection for Control Room; it does not persist prompts, execute steps, or create confirmations. `capability-graph.ts` and `capability-graph-service.ts` build a bounded TTL/fingerprint graph from the loaded registry and adapter metadata, with optional bounded live route-health overrides from read-only routing inspection. `safe-failure-memory-store.ts` persists only hashed categories, route families, safe codes, compatibility fingerprints, verified outcomes, bounded latency, and expiry.
 
 ### Runtime activity boundary
 
@@ -61,6 +65,13 @@ Headless/disabled renderers plus optional GTK3/X11 renderer child. Renderer comm
 ### Optional adapters
 
 `packages/app-blender` is the current experimental reference adapter. Optional external-process adapters are loaded only when explicitly enabled and must declare the generic execution policy.
+
+Core goal-planning contracts are advisory and app-agnostic. They validate a
+bounded goal/plan/step/route/checkpoint/outcome model and deterministic
+safety-first selection, but they do not persist raw task content, invoke tools,
+create confirmations, or run a loop. `GoalPlanningService` exposes this model
+through `strategy.goal_plan_preview` and a bounded Control Room projection; it
+remains advisory only.
 
 ## Live tool assembly and capability parity
 
@@ -103,7 +114,7 @@ GTK3/X11 supports transparent/topmost/click-through overlays and bounded widgets
 
 `overlay.assistance_target_refresh` is visual-only recovery boundary. It accepts no owner identity, validates only current step through existing target resolver, enforces TTL/bounds/sensitivity, and permits at most two explicit refreshes per step. Target-bound steps opt into required-target blocking; static unbound primitives retain existing behavior. Missing or stale required targets fail before renderer invocation. Renderer epoch changes invalidate overlay IDs; operator must explicitly re-show/retry. Recovery state derives from preview/explanation metadata.
 
-`npm run demo:visual-copilot` runs production assistance/control-surface stores against public fixture in isolated demo home. Prompts gate start, target binding, events, retry, and completion. It performs no target-app operation. Visible mode requires GTK3/PyGObject on X11; renderer or geometry limitations are reported and the launcher exits safely. Cairo is optional because bounded GTK-widget rendering is used when its PyGObject bridge is absent. `xdotool` is needed only for geometry probing. `--headless` is a capability check, not a simulated visible flow.
+`npm run demo:visual-copilot` runs production runtime-activity and renderer stores in an isolated demo home. It creates one authoritative redacted activity and performs no target-app operation; internal visual fixtures remain test-only. Visible mode requires GTK3/PyGObject on X11; renderer or geometry limitations are reported and the launcher exits safely. Cairo is optional because bounded GTK-widget rendering is used when its PyGObject bridge is absent. `xdotool` is needed only for geometry probing. `--headless` is a lifecycle check, not a simulated visible flow.
 
 ## Forge runtime boundary
 

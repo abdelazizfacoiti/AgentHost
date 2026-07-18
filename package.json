@@ -2,6 +2,7 @@
   "name": "agenthost",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "A universal local MCP server that gives AI agents safe, permissioned access to local computer capabilities.",
   "workspaces": [
@@ -25,8 +26,10 @@
     "browser:extension:verify": "node scripts/build-browser-extension.mjs",
     "browser:setup": "node scripts/prepare-browser-extension.mjs --setup",
     "release:build": "node scripts/build-release.mjs",
+    "release:notices": "node scripts/generate-third-party-notices.mjs",
     "release:scan": "node scripts/scan-release.mjs",
     "release:verify": "node scripts/verify-release.mjs",
+    "benchmark:routing": "node scripts/benchmark-routing.mjs",
     "release:install": "node scripts/install-release.mjs",
     "agenthost": "node packages/agenthost-cli/dist/index.js",
     "demo:overlay": "node scripts/demo-overlay.mjs",

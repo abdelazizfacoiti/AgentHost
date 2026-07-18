@@ -54,6 +54,7 @@ npm run build
 npm test
 npm run lint
 npm run smoke:mcp
+npm run benchmark:routing
 ```
 
 The MCP server uses stdio and keeps normal diagnostics off stdout. Audit logs default to:
@@ -117,6 +118,8 @@ Unsigned artifacts are not public-installable. Exact signing/publishing procedur
 Paste enrollment token once, keep configured port, and verify with `browser.verify_pairing`. Extension stores device-scoped reconnect credential locally; AgentHost stores only its hash. Pairing survives normal browser/AgentHost restarts, remains origin/identity/version bound, and can be revoked or rotated. Use `browser.setup_status` and `browser.diagnose_bridge` for recovery. Pairing/session credentials are never logged.
 
 Full state checks and recovery: [Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md).
+
+Canonical documentation index: [docs/INDEX.md](docs/INDEX.md). Privacy/support and manual verification boundary: [docs/11_PRIVACY_AND_SUPPORT.md](docs/11_PRIVACY_AND_SUPPORT.md). Planning/routing benchmark: [docs/10_PERFORMANCE_AND_BENCHMARKS.md](docs/10_PERFORMANCE_AND_BENCHMARKS.md).
 
 If the extension is unavailable, AgentHost may recommend accessibility, local OCR/vision, pointer fallback, or guide mode. It never executes a fallback silently.
 
@@ -196,15 +199,14 @@ See [Implementation Roadmap v2](docs/05_IMPLEMENTATION_ROADMAP_AND_CODEX_PROMPTS
 
 ## MCP configuration example
 
-After building, point Codex at the compiled server:
+Installed release uses the CLI entry point; Codex does not need repository source paths:
 
 ```json
 {
   "mcpServers": {
     "agenthost": {
-      "command": "node",
-      "args": ["/absolute/path/to/agenthost/packages/mcp-server/dist/index.js"],
-      "env": { "AGENTHOST_HOME": "/absolute/path/to/.agenthost" }
+      "command": "agenthost",
+      "args": ["start"]
     }
   }
 }
@@ -228,3 +230,7 @@ AGENTHOST_CONTROL_ROOM_ENABLED=1 npm run start:mcp
 ```
 
 AgentHost prints loopback URL with one session token to stderr. Control Room binds only to `127.0.0.1` (default port `43118`), stores token with restrictive permissions, and exposes no public or remote endpoint. Disable by omitting flag/config. `npm run control-room` is local helper that enables same mode.
+
+## License
+
+AgentHost is licensed under Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE), and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Optional host programs such as GTK3, Tesseract, eSpeak NG, and Bubblewrap remain separately licensed and are not bundled by AgentHost.
