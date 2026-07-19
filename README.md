@@ -69,6 +69,24 @@ For local development, set `AGENTHOST_HOME` to an isolated directory:
 AGENTHOST_HOME=.agenthost npm run start:mcp
 ```
 
+### Local demo profile
+
+The normal default profile is `strict`. For a local demo, start a fresh MCP
+process explicitly with `demo-unlocked-local`:
+
+```bash
+AGENTHOST_PROFILE=demo-unlocked-local npm run start:mcp
+```
+
+The visual demo launcher selects this profile automatically. It removes
+ordinary local/normal-app friction and grants bounded communication-page reads
+for demonstrations, but it is not an unrestricted or unsafe mode: protected
+credential/security and financial contexts, secrets, destructive shell, broad
+filesystem access, external sends/uploads, and security/authentication bypasses
+remain blocked. State-changing tools still use their dry-run and confirmation
+contracts. Restart the MCP process after changing the profile; verify the
+active value with `policy.get_profile` before testing browser content.
+
 ## Linux release candidate (R5/R6)
 
 R5 packages existing AgentHost capabilities for rootless Linux x86_64 use. Build and verify archive from a built checkout:
@@ -182,7 +200,7 @@ Optional adapters are disabled by default and must declare the generic execution
 
 ## Safety model
 
-The central runner validates execution metadata, schema, policy, grants, protected contexts, dry-run requirements, and the non-consuming confirmation envelope. Domain handlers revalidate exact targets and consume confirmation once. Receipts provide provenance only. Checkpoints observe semantic state only. Logs omit secrets, tokens, private content, screenshots, raw OCR, and hidden environment values.
+The central runner validates explicit execution metadata (never name inference), schema, policy, grants, protected contexts, dry-run requirements, and the non-consuming confirmation envelope. Domain handlers revalidate exact targets and consume confirmation once. Receipts provide provenance only. Checkpoints observe semantic state only. Audit directories use `0700` and JSONL files use `0600`; logs omit secrets, tokens, private content, screenshots, raw OCR, and hidden environment values.
 
 ## Roadmap v2
 

@@ -34,13 +34,16 @@ V2-B adds `strategy.route_preview`, an advisory action-level router over loaded 
 
 R5 adds an honest Linux x86_64 release-candidate surface around existing capabilities: rootless archive installation, `agenthost` CLI, resumable setup, redacted doctor diagnostics, Codex MCP integration with preview/backup/rollback, controlled lifecycle, browser/overlay/Control Room/speech onboarding, and deterministic release scans. Packaging adds no execution capability and keeps host dependencies explicit.
 
-The default loaded registry currently contains 239 tools with validated execution metadata (optional adapters are conditional):
+The default loaded registry currently contains 247 tools with validated explicit execution metadata (optional adapters are conditional):
 
-- 58 `read_only`
-- 6 `diagnostic`
+- 62 `read_only`
+- 7 `diagnostic`
 - 116 `metadata_only`
-- 29 `state_changing`
+- 32 `state_changing`
 - 30 `visual_only`
+- 0 `inert` (class reserved for future explicit definitions)
+
+Missing or contradictory execution metadata fails registration; tool names never infer execution class.
 
 R2 adds persistent installation-level capability strategies. `strategy.select` ranks only compatible active records after live capability, profile, grant, adapter, and Browser Bridge health checks. It returns bounded advisory steps and fallbacks; it never executes an underlying tool. Built-in strategies are trusted structural metadata. Local proposals require review plus two independently verified signed-receipt outcomes before activation. Strategy records persist no task content, secrets, screenshots, OCR, transient IDs, shell, code, or dynamic tool names.
 

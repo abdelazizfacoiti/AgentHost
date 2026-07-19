@@ -8,7 +8,7 @@ R6 adds no product capability. It audits and hardens R5 packaging, installation,
 
 - Linux x86_64 release target: `0.1.0`.
 - `npm run build`: pass.
-- `npm test`: pass; 87 suites, 492 tests (current tree).
+- `npm test`: pass; 87 suites, 495 tests (current tree; two reconciliation tests added).
 - `npm run lint`: pass.
 - `npm run smoke:mcp`: pass.
 - Release build, scan, manifest verification, archive checksum, and deterministic rebuild: required gates.

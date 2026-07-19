@@ -3,6 +3,7 @@ import { evaluateSafety, toolFailure, type ToolResult } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
 import type { AgentHostToolDefinition } from "../tool-runner.js";
+import type { ToolExecutionMetadata } from "@agenthost/core";
 import { createSafetyEvaluationContext } from "../grants.js";
 import { acceptedConfirmation, buildPreviewResult, confirmationRequired, rejectedConfirmation } from "./preview.js";
 
@@ -30,6 +31,16 @@ const blenderInputSchema = z
   });
 
 type BlenderToolInput = z.infer<typeof blenderInputSchema>;
+
+const blenderExecution: ToolExecutionMetadata = {
+  executionClass: "state_changing",
+  externalEffect: true,
+  requiresDryRun: true,
+  requiresConfirmationToken: true,
+  requiresExactTarget: true,
+  source: "optional_adapter",
+  availability: "available"
+};
 
 export const BLENDER_RUN_PYTHON_TOOL = {
   name: "blender.run_python",
@@ -117,8 +128,8 @@ export function createBlenderTools(): AgentHostToolDefinition<BlenderToolInput, 
         additionalProperties: false
       },
       inputSummary: "Run Blender Python",
+      execution: blenderExecution,
       preview: { isDryRun: (input) => input.dryRun === true },
-      allowLegacyPreflightWithoutConfirmation: true,
       safety: {
         actionType: "file_write",
         getInput: (input) => {

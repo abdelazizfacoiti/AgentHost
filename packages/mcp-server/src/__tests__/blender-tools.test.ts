@@ -348,6 +348,7 @@ describe("blender MCP tools", () => {
 
     expect(tool?.name).toBe("blender.run_python");
     expect(tool?.safety?.actionType).toBe("file_write");
+    expect(tool?.execution).toMatchObject({ executionClass: "state_changing", source: "optional_adapter", requiresExactTarget: true });
   });
 
   it("returns a clean error when the Blender adapter is not registered", async () => {
@@ -355,7 +356,7 @@ describe("blender MCP tools", () => {
     const result = await callTool(context, "blender.run_python", { demo: "coffee_cup" });
 
     expect(result.ok).toBe(false);
-    expect(result.error?.code).toBe("blender_adapter_unavailable");
+    expect(result.error?.code).toBe("dry_run_required");
     expect(context.calls()).toBe(0);
   });
 

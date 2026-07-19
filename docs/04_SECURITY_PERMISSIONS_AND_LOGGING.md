@@ -27,7 +27,7 @@ Every loaded tool has validated execution metadata. Missing or contradictory met
 4. verifies the session/tool/input confirmation envelope without consuming it;
 5. invokes the handler only after acceptance.
 
-The handler remains responsible for current target resolution, exact target/input checks, app-specific sensitivity, path/backend constraints, and the single consuming confirmation operation. Receipts are issued after the result. Narrow legacy preflight paths are explicit and tested; there is no implicit safety opt-out.
+The handler remains responsible for current target resolution, exact target/input checks, app-specific sensitivity, path/backend constraints, and the single consuming confirmation operation. Receipts are issued after the result. No legacy preflight bypass remains; dry-run, envelope validation, exact-target revalidation, and one handler-side token consume are mandatory.
 
 Confirmation tokens are short-lived, session-bound, input-fingerprint-bound, risk-bound, single-use, and never logged raw. Confirmation verifies intent; it does not bypass policy, grants, protected contexts, or handler checks.
 
@@ -39,7 +39,7 @@ Screenshot suppression is coordinator-wide and serialized: all dynamic surfaces 
 
 ## Profiles and grants
 
-Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. Demo mode only reduces friction for approved local/demo roots and normal apps; hard safety blocks remain.
+Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. The default is `strict`; demos must explicitly launch with `AGENTHOST_PROFILE=demo-unlocked-local` (or set that profile in the local config) and restart the MCP process. Demo mode removes ordinary local/normal-app friction and grants bounded communication-page reads, but it is not unrestricted: hard safety blocks for credentials/security, financial contexts, secrets, destructive shell, broad filesystem access, external sends/uploads, and authentication/security bypasses remain. State-changing tools retain dry-run and confirmation requirements.
 
 Persistent grant config is strict and round-trips these runtime fields without synthesizing permissions:
 
@@ -132,7 +132,7 @@ Jobs, activation, manual-run contracts, preflights, acknowledgements, requests, 
 
 Default writable roots are `~/.agenthost/` and approved AgentHost output roots. Protected paths include system roots, home-wide private data, SSH/GnuPG/keyrings, browser profiles, credentials, and secrets.
 
-JSONL audit entries contain tool, risk, profile, policy/grant decision, safe IDs, sanitized origin/app, counts, sizes, truncation, backend, receipt ID, and error code. They never contain pairing/session/confirmation tokens, receipt signatures, passwords, secrets, raw OCR/page text, screenshots, private messages, hidden environment values, or full sensitive paths.
+JSONL audit entries contain tool, risk, profile, policy/grant decision, safe IDs, sanitized origin/app, counts, sizes, truncation, backend, receipt ID, and error code. AgentHost creates audit directories with mode `0700` and JSONL files with mode `0600`, repairing broader configured log-file modes before append. They never contain pairing/session/confirmation tokens, receipt signatures, passwords, secrets, raw OCR/page text, screenshots, private messages, hidden environment values, or full sensitive paths.
 
 ## Control Room security
 

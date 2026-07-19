@@ -85,12 +85,6 @@ export interface AgentHostToolDefinition<
    * underlying fixed tool (for example Forge dispatch). */
   confirmationTool?(input: TInput): string;
   confirmationInput?(input: TInput): unknown;
-  /** Named compatibility path for wrappers whose handler performs a
-   * non-executing eligibility preflight before returning its own dry-run error. */
-  allowLegacyPreflightWithoutConfirmation?: boolean;
-  /** Narrow companion for handlers that must resolve a live target before
-   * returning their domain-specific protected-context decision. */
-  allowLegacyPreflightOnSafetyBlock?: boolean;
   handler(
     input: TInput,
     context: TContext,
@@ -300,7 +294,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
             const grantRequiresConfirmation = stateChanging && safetyDecision?.grantDecision.requiresConfirmationToken === true;
             const requiresConfirmation = (stateChanging && execution.requiresConfirmationToken) || grantRequiresConfirmation;
 
-            if (!isDryRun && safetyDecision !== undefined && (!safetyDecision.allowed || safetyDecision.guideOnly) && !definition.allowLegacyPreflightOnSafetyBlock) {
+            if (!isDryRun && safetyDecision !== undefined && (!safetyDecision.allowed || safetyDecision.guideOnly)) {
               result = centralFailure({
                 definition: definition as AgentHostToolDefinition<unknown, TData>,
                 code: safetyDecision.blocked || safetyDecision.guideOnly ? "safety_blocked" : "approval_required",
@@ -309,14 +303,14 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
                   : "Tool execution requires approval before it can run.",
                 safetyDecision
               });
-            } else if (!isDryRun && (execution.requiresDryRun || grantRequiresDryRun) && !hasConfirmationToken(parsed.data) && !definition.allowLegacyPreflightWithoutConfirmation) {
+            } else if (!isDryRun && (execution.requiresDryRun || grantRequiresDryRun) && !hasConfirmationToken(parsed.data)) {
               result = centralFailure({
                 definition: definition as AgentHostToolDefinition<unknown, TData>,
                 code: "dry_run_required",
                 message: "A successful dry-run and its confirmation token are required before execution.",
                 ...(safetyDecision === undefined ? {} : { safetyDecision })
               });
-            } else if (requiresConfirmation && !isDryRun && !hasConfirmationToken(parsed.data) && !definition.allowLegacyPreflightWithoutConfirmation) {
+            } else if (requiresConfirmation && !isDryRun && !hasConfirmationToken(parsed.data)) {
               result = centralFailure({
                 definition: definition as AgentHostToolDefinition<unknown, TData>,
                 code: "confirmation_required",

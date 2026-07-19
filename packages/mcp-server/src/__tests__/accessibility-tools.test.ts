@@ -350,14 +350,15 @@ describe("accessibility MCP tools", () => {
 
   it("returns unsupported invoke results cleanly and logs the call", async () => {
     const context = createContext();
-    const result = await callTool(context, "accessibility.invoke_action", { query: "Save", actionName: "click" });
+    const result = await callTool(context, "accessibility.invoke_action", { query: "Save", actionName: "click", dryRun: true });
 
     expect(result).toMatchObject({
       ok: true,
+      preview: true,
       data: {
         supported: false,
         backend: "wayland",
-        performed: false
+        wouldExecute: false
       }
     });
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
@@ -400,15 +401,15 @@ describe("accessibility MCP tools", () => {
 
   it("returns unsupported set_value results cleanly and logs the call", async () => {
     const context = createContext();
-    const result = await callTool(context, "accessibility.set_value", { query: "Name", value: "hello" });
+    const result = await callTool(context, "accessibility.set_value", { query: "Name", value: "hello", dryRun: true });
 
     expect(result).toMatchObject({
       ok: true,
+      preview: true,
       data: {
         supported: false,
         backend: "wayland",
-        changed: false,
-        redactedValue: true
+        wouldExecute: false
       }
     });
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
@@ -447,14 +448,15 @@ describe("accessibility MCP tools", () => {
 
   it("returns unsupported focus results cleanly and logs the call", async () => {
     const context = createContext();
-    const result = await callTool(context, "accessibility.focus_element", { query: "Save" });
+    const result = await callTool(context, "accessibility.focus_element", { query: "Save", dryRun: true });
 
     expect(result).toMatchObject({
       ok: true,
+      preview: true,
       data: {
         supported: false,
         backend: "wayland",
-        focused: false
+        wouldExecute: false
       }
     });
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
@@ -472,14 +474,15 @@ describe("accessibility MCP tools", () => {
         reason: "The requested accessibility target matched multiple elements."
       }
     });
-    const result = await callTool(context, "accessibility.invoke_action", { query: "Save", actionName: "click" });
+    const result = await callTool(context, "accessibility.invoke_action", { query: "Save", actionName: "click", dryRun: true });
 
     expect(result).toMatchObject({
       ok: true,
+      preview: true,
       data: {
         supported: true,
         ambiguous: true,
-        performed: false
+        wouldExecute: false
       }
     });
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
@@ -500,10 +503,9 @@ describe("accessibility MCP tools", () => {
         })
       }
     });
-    const result = await callTool(context, "accessibility.focus_element", { query: "Vault" });
+    const result = await callTool(context, "accessibility.focus_element", { query: "Vault", dryRun: true });
 
-    expect(result.ok).toBe(false);
-    expect(result.error?.code).toBe("safety_blocked");
+    expect(result).toMatchObject({ ok: true, preview: true, data: { wouldExecute: false, wouldBeBlocked: true } });
     expect(context.calls).toEqual(["accessibility.inspect_element"]);
   });
 

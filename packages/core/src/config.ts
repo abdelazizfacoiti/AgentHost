@@ -227,7 +227,6 @@ function normalizeGrantMatch(match: z.infer<typeof capabilityGrantSchema>["match
     ...(match.dataSensitivities === undefined ? {} : { dataSensitivities: match.dataSensitivities }),
     ...(match.fileRoots === undefined ? {} : { fileRoots: match.fileRoots }),
     ...(match.commandAllowlist === undefined ? {} : { commandAllowlist: match.commandAllowlist }),
-    ...(match.networkDomains === undefined ? {} : { networkDomains: match.networkDomains }),
     ...(match.oauthScopes === undefined ? {} : { oauthScopes: match.oauthScopes }),
     ...(match.generatedToolIds === undefined ? {} : { generatedToolIds: match.generatedToolIds }),
     ...(match.registrationIds === undefined ? {} : { registrationIds: match.registrationIds }),

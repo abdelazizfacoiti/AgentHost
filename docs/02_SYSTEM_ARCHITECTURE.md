@@ -94,7 +94,7 @@ Generated Forge tool names never enter this set. Only the fixed Forge control to
 9. Execute through the original backend.
 10. Attach a verifiable receipt and write a redacted audit record.
 
-Central verification does not replace domain checks. Confirmation envelopes do not consume tokens; handlers consume once. Narrow legacy preflight compatibility paths are explicit, named, and tested. Receipts prove provenance, not permission. Checkpoints observe semantic state and execute no action.
+Central verification does not replace domain checks. Confirmation envelopes do not consume tokens; handlers consume once. No legacy preflight bypass remains. Receipts prove provenance, not permission. Checkpoints observe semantic state and execute no action.
 
 ## Browser trust boundary
 

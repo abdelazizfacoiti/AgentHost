@@ -349,7 +349,6 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     preview: {
       isDryRun: (input) => input.dryRun === true
     },
-    allowLegacyPreflightWithoutConfirmation: true,
     async handler(input, context, runtime): Promise<ToolResult<AccessibilityInvokeActionResult | ActionPreviewResult>> {
       const inspected = await context.linux.inspectAccessibilityElement(inspectFromAction(input));
 
@@ -556,7 +555,6 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     preview: {
       isDryRun: (input) => input.dryRun === true
     },
-    allowLegacyPreflightWithoutConfirmation: true,
     async handler(input, context, runtime): Promise<ToolResult<AccessibilitySetValueResult | ActionPreviewResult>> {
       const inspected = await context.linux.inspectAccessibilityElement(inspectFromAction(input));
 
@@ -765,7 +763,6 @@ export function createAccessibilityTools(): AnyAgentHostToolDefinition<AgentHost
     preview: {
       isDryRun: (input) => input.dryRun === true
     },
-    allowLegacyPreflightWithoutConfirmation: true,
     async handler(input, context, runtime): Promise<ToolResult<AccessibilityFocusElementResult | ActionPreviewResult>> {
       const inspected = await context.linux.inspectAccessibilityElement(inspectFromAction(input));
 

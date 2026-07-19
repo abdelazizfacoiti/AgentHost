@@ -38,38 +38,10 @@ For unsupported or sensitive apps, prefer guide mode.
 
 ## Current milestone
 
-If no milestone is specified, assume we are working on:
+Current release-hardening boundary: **P1 Safety Reconciliation + R6 Closure**.
+Implement only explicitly approved safety, metadata, parity, logging, and release-documentation work. Verify source and tests before claiming completion.
 
-```text
-Phase 0 + Phase 1 only
-```
-
-That means:
-
-- TypeScript monorepo
-- npm workspaces
-- MCP server skeleton
-- `system.get_info`
-- `system.list_capabilities`
-- app-agnostic core types
-- `ToolResult`
-- `AutomationStrategy`
-- `AppCapability`
-- `AppAdapter`
-- capability registry
-- config loader
-- JSONL logger
-- basic policy profile structure
-
-Do not implement:
-
-- Blender
-- GUI clicking/type
-- browser automation
-- email sending
-- Windows/macOS
-- skill recording
-- autonomous background operation
+Existing browser, desktop, accessibility, Forge, speech, overlay, workflow, scheduler-governance, Control Room, and optional-adapter features remain governed by their current safety contracts. Do not infer permission from this file.
 
 ## Architecture rules
 

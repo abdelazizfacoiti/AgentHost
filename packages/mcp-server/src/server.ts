@@ -101,7 +101,7 @@ import { VisionEvidenceStore } from "./vision-evidence.js";
 import { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 import { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
 import { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
-import { materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
+import { applyProductionExecutionMetadata, materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
 import { ControlRoomStore } from "./control-room-store.js";
 import { CapabilityStrategyStore } from "./capability-strategy-store.js";
 import { CapabilityStrategyService } from "./capability-strategy-service.js";
@@ -363,7 +363,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createPolicyTools()
   ];
 
-  const loadedTools = materializeToolDefinitions(tools);
+  const loadedTools = materializeToolDefinitions(applyProductionExecutionMetadata(tools));
   registry.syncTools(toolCapabilities(loadedTools));
 
   let controlRoomServer: { start(): Promise<{ url: string }>; close(): Promise<void> } | undefined;

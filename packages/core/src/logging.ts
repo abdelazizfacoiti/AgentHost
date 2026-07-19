@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir } from "node:fs/promises";
+import { chmod, mkdir, open } from "node:fs/promises";
 import path from "node:path";
 import { redactForLog } from "./safety/redaction.js";
 import type { AuditLogEntry, AuditLogger, ToolResult } from "./types.js";
@@ -32,8 +32,21 @@ export class JsonlAuditLogger implements AuditLogger {
   constructor(readonly logFile: string) {}
 
   async log(entry: AuditLogEntry): Promise<void> {
-    await mkdir(path.dirname(this.logFile), { recursive: true });
-    await appendFile(this.logFile, `${JSON.stringify(entry)}\n`, "utf8");
+    const directory = path.dirname(this.logFile);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await chmod(directory, 0o700);
+    try {
+      await chmod(this.logFile, 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const handle = await open(this.logFile, "a", 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(entry)}\n`, "utf8");
+      await chmod(this.logFile, 0o600);
+    } finally {
+      await handle.close();
+    }
   }
 }
 

@@ -32,7 +32,10 @@ async function main() {
     ...process.env,
     AGENTHOST_HOME: demoHome,
     AGENTHOST_OVERLAY_MODE: mode,
-    AGENTHOST_PROFILE: "dev"
+    // Demos use the broad local-demo profile so ordinary local/browser reads
+    // do not inherit the conservative default profile. The profile still
+    // preserves hard safety blocks and confirmation requirements.
+    AGENTHOST_PROFILE: "demo-unlocked-local"
   };
   const config = await loadAgentHostConfig({ env, homeDir: os.homedir() });
   const runtime = await createAgentHostMcpServer({ config });

@@ -347,7 +347,7 @@ describe("desktop MCP tools", () => {
       }
     });
 
-    expect(context.calls).toEqual(["desktop.get_active_window", "desktop.get_active_window"]);
+    expect(context.calls).toEqual([]);
   });
 
   it("previews a desktop click by validating the active window without clicking", async () => {

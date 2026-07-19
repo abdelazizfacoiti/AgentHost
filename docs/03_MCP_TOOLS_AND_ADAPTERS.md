@@ -1,6 +1,6 @@
 # AgentHost MCP Tools and Adapter Specification
 
-All callable tools return `ToolResult`. MCP transport is stdio. The browser bridge and overlay child are separate local channels, not public MCP transports.
+All callable tools return `ToolResult`. MCP transport is stdio. The browser bridge and overlay child are separate local channels, not public MCP transports. Every loaded tool carries explicit execution metadata; missing or contradictory declarations fail registration, and MCP `tools/list` and `system.list_capabilities` are projected from the same loaded set.
 
 The public Linux CLI starts this same stdio runtime from an installed release. Codex integration registers `agenthost start`, never a repository path; packaging commands do not add MCP tools or bypass tool safety.
 

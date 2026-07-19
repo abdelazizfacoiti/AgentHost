@@ -405,8 +405,6 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return appName === undefined ? {} : { appName };
       }
     },
-    allowLegacyPreflightWithoutConfirmation: true,
-    allowLegacyPreflightOnSafetyBlock: true,
     preview: {
       isDryRun: (input) => input.dryRun === true
     },
@@ -599,8 +597,6 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return safetyInput;
       }
     },
-    allowLegacyPreflightWithoutConfirmation: true,
-    allowLegacyPreflightOnSafetyBlock: true,
     preview: {
       isDryRun: (input) => input.dryRun === true
     },

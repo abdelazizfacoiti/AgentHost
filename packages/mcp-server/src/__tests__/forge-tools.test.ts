@@ -1904,13 +1904,13 @@ describe("forge MCP tools", () => {
       getTool("forge.run_sandboxed_tool"),
       {
         registrationId: runtimeReady.registrationId,
-        toolName: runtimeReady.manifest.tools[0]!.name
+        toolName: runtimeReady.manifest.tools[0]!.name,
+        dryRun: true
       },
       context
     );
 
-    expect(result.ok).toBe(false);
-    expect(result.error?.code).toBe("runtime_ineligible");
+    expect(result).toMatchObject({ ok: true, preview: true, data: { eligibility: { eligible: false } } });
   });
 
   it("run_sandboxed_tool stores a metadata-only runtime run after confirmation", async () => {
@@ -2019,9 +2019,8 @@ describe("forge MCP tools", () => {
     const revokePreview = await runTool(getTool("forge.revoke_registration"), { registrationId: runtimeReady.registrationId, dryRun: true }, context);
     const revokeToken = (revokePreview.data as { confirmationToken: string }).confirmationToken;
     await runTool(getTool("forge.revoke_registration"), { registrationId: runtimeReady.registrationId, confirmationToken: revokeToken }, context);
-    const result = await runTool(getTool("forge.dispatch_generated_tool"), { registrationId: runtimeReady.registrationId, toolName: runtimeSafeManifest.tools[0]!.name, input: {} }, context);
-    expect(result.ok).toBe(false);
-    expect(result.error?.code).toBe("runtime_ineligible");
+    const result = await runTool(getTool("forge.dispatch_generated_tool"), { registrationId: runtimeReady.registrationId, toolName: runtimeSafeManifest.tools[0]!.name, input: {}, dryRun: true }, context);
+    expect(result).toMatchObject({ ok: true, preview: true, data: { eligibility: { eligible: false } } });
   });
 
   it("get/list runtime runs return stored metadata-only summaries", async () => {
