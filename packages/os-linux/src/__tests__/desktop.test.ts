@@ -10,10 +10,16 @@ import {
   getLinuxDesktopCapabilities,
   listLinuxWindows,
   sendLinuxHotkey,
-  typeLinuxText
+  typeLinuxText,
+  xdotoolHotkeyArguments
 } from "../index.js";
 
 describe("Linux desktop helpers", () => {
+  it("passes hotkey chords to xdotool as one key sequence", () => {
+    expect(xdotoolHotkeyArguments(["CTRL", "L"])).toEqual(["key", "CTRL+L"]);
+    expect(xdotoolHotkeyArguments(["CTRL+SHIFT", "P"])).toEqual(["key", "CTRL+SHIFT+P"]);
+  });
+
   it("returns unsupported when no display session is available", async () => {
     await expect(getLinuxActiveWindow({ env: { PATH: "" } })).resolves.toMatchObject({
       supported: false,

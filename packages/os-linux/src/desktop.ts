@@ -598,6 +598,15 @@ async function verifyX11ActionContext(
   };
 }
 
+/**
+ * xdotool expects a hotkey chord as one key-sequence argument, for example
+ * `ctrl+l`. Passing the keys as separate arguments (`CTRL`, `L`) releases the
+ * modifier before sending the letter, which turns Ctrl+L into a literal L.
+ */
+export function xdotoolHotkeyArguments(keys: string[]): string[] {
+  return ["key", keys.join("+")];
+}
+
 export async function sendLinuxHotkey(
   input: LinuxDesktopHotkeyInput,
   context: LinuxDesktopContext = {}
@@ -615,7 +624,7 @@ export async function sendLinuxHotkey(
     };
   }
 
-  const result = await runDesktopCommand(verification.xdotoolPath, ["key", ...input.keys], context);
+  const result = await runDesktopCommand(verification.xdotoolPath, xdotoolHotkeyArguments(input.keys), context);
 
   return {
     supported: result.exitCode === 0,
