@@ -119,6 +119,7 @@ import { BrowserSetupService } from "./browser-setup-service.js";
 import { CapabilityGraphService } from "./capability-graph-service.js";
 import { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
 import { GoalPlanningService } from "./goal-planning-service.js";
+import { BridgeProbeCache } from "./decision-cache.js";
 
 const SERVER_VERSION = AGENTHOST_VERSION;
 
@@ -208,6 +209,9 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const failureMemory = new SafeFailureMemoryStore(config.agentHostDir);
   await failureMemory.ensureStructure();
   const goalPlanning = new GoalPlanningService();
+  // Shared bridge probe cache: deduplicates browser.detect() calls that fire
+  // concurrently from route_preview + strategy.select within the same agent turn.
+  const bridgeProbeCache = new BridgeProbeCache(1_500);
   const speechStore = new SpeechStore(config.agentHostDir);
   await speechStore.ensureStructure();
   const scheduler = new SchedulerStore(config.agentHostDir);
@@ -324,6 +328,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     capabilityGraph,
     failureMemory,
     goalPlanning,
+    bridgeProbeCache,
     linux
   };
   const tools = [

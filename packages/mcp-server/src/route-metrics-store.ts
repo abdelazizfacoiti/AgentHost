@@ -134,6 +134,9 @@ export class RouteMetricsStore {
   readonly #file: string;
   #records = new Map<string, CapabilityRouteMetricRecord>();
   #loaded = false;
+  // Memoised list snapshot — rebuilt only when the map is mutated so that
+  // frequent list() calls (once per route preview) pay zero allocation cost.
+  #snapshot: CapabilityRouteMetricRecord[] | undefined;
   constructor(agentHostDir: string) { this.#file = path.join(agentHostDir, "strategies", "routes", "metrics.json"); }
   async ensureStructure(): Promise<void> {
     await mkdir(path.dirname(this.#file), { recursive: true, mode: 0o700 });
@@ -151,14 +154,20 @@ export class RouteMetricsStore {
       }
     } catch { /* first run/corrupt data stays fail-closed */ }
     this.#loaded = true;
+    this.#snapshot = undefined; // rebuild on next list()
     if (migrated) await this.#save();
   }
   async list(options: { includeExpired?: boolean } = {}): Promise<CapabilityRouteMetricRecord[]> {
     if (!this.#loaded) await this.ensureStructure();
-    const records = [...this.#records.values()].map((record) => Date.parse(record.expiresAt ?? "") <= Date.now()
-      ? { ...record, status: "expired" as const }
-      : record);
-    return records.filter((record) => options.includeExpired === true || record.status !== "expired").slice(-MAX_RECORDS);
+    // Rebuild snapshot only when the map has been mutated (snapshot === undefined).
+    if (this.#snapshot === undefined) {
+      this.#snapshot = [...this.#records.values()].map((record) =>
+        Date.parse(record.expiresAt ?? "") <= Date.now() ? { ...record, status: "expired" as const } : record
+      );
+    }
+    return options.includeExpired === true
+      ? this.#snapshot.slice(-MAX_RECORDS)
+      : this.#snapshot.filter((record) => record.status !== "expired").slice(-MAX_RECORDS);
   }
   async record(input: { routeFamily: CapabilityRouteFamily; goalCategory: string; appFamily?: string; compatibilityFingerprint: string; outcome: "verified_success" | "verified_failure"; failureCode?: string; probeMs?: number; executionMs?: number; verificationMs?: number; compatibilityVersion: string }): Promise<CapabilityRouteMetricRecord> {
     if (!CAPABILITY_ROUTE_FAMILIES.includes(input.routeFamily)) throw new Error("route_family_invalid");
@@ -206,7 +215,7 @@ export class RouteMetricsStore {
       status: input.outcome === "verified_failure" && (prior?.consecutiveVerifiedFailures ?? 0) >= 2 ? "degraded" : "active",
       redacted: true
     };
-    this.#records.set(key, next); while (this.#records.size > MAX_RECORDS) this.#records.delete(this.#records.keys().next().value as string); await this.#save(); return next;
+    this.#records.set(key, next); while (this.#records.size > MAX_RECORDS) this.#records.delete(this.#records.keys().next().value as string); this.#snapshot = undefined; await this.#save(); return next;
   }
   key(record: CapabilityRouteMetricRecord): string { return `${record.routeFamily}:${record.goalCategoryFingerprint}:${record.appFamilyFingerprint ?? ""}:${record.compatibilityFingerprint}`; }
   async #save(): Promise<void> { const temp = `${this.#file}.${randomUUID()}.tmp`; await writeFile(temp, `${JSON.stringify([...this.#records.values()].slice(-MAX_RECORDS), null, 2)}\n`, { mode: 0o600 }); await chmod(temp, 0o600); await rename(temp, this.#file); }

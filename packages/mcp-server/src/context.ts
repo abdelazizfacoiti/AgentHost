@@ -62,6 +62,7 @@ import type { RuntimeActivityOverlayController } from "./runtime-activity-overla
 import type { BrowserSetupService } from "./browser-setup-service.js";
 import type { CapabilityGraphService } from "./capability-graph-service.js";
 import type { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
+import type { BridgeProbeCache } from "./decision-cache.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -185,5 +186,7 @@ export interface AgentHostMcpContext {
   speech?: SpeechService;
   runtimeActivity?: RuntimeActivityService;
   runtimeActivityOverlay?: RuntimeActivityOverlayController;
+  /** Shared bridge probe cache — deduplicates browser.detect() across concurrent callers. */
+  bridgeProbeCache?: BridgeProbeCache;
   linux: LinuxAutomation;
 }

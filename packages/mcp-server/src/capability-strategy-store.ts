@@ -121,6 +121,10 @@ export class CapabilityStrategyStore {
   readonly #reviews: string;
   readonly #outcomes: string;
   readonly #selections: string;
+  // Short-lived in-memory list cache — avoids repeated readdir+readFile on
+  // every strategy.select / strategy.health call within the same agent turn.
+  #listCache: { value: CapabilityStrategyDefinition[]; expiresAt: number } | undefined;
+  static readonly #LIST_CACHE_TTL_MS = 5_000;
   constructor(agentHostDir: string) {
     this.#root = path.join(agentHostDir, ROOT);
     this.#definitions = path.join(this.#root, "definitions");
@@ -147,16 +151,32 @@ export class CapabilityStrategyStore {
     }
   }
   async list(input: { status?: CapabilityStrategyStatus; goalCategory?: CapabilityStrategyGoal; limit?: number } = {}): Promise<CapabilityStrategyDefinition[]> {
-    const entries = await readdir(this.#definitions, { withFileTypes: true }).catch(() => []);
-    const values: CapabilityStrategyDefinition[] = [];
-    for (const entry of entries.filter((item) => item.isFile() && item.name.endsWith(".json")).slice(0, MAX_RECORDS)) {
-      try {
-        const value = await readJson<CapabilityStrategyDefinition>(path.join(this.#definitions, entry.name));
-        validateCapabilityStrategy(value);
-        if ((input.status === undefined || value.status === input.status) && (input.goalCategory === undefined || value.goalCategory === input.goalCategory)) values.push(value);
-      } catch { /* Corrupt records are ignored and surfaced by health diagnostics. */ }
+    // Use cached full list when no filtering is applied or when cache is valid.
+    // Filtered calls still benefit from the cache by filtering in memory.
+    const now = Date.now();
+    let allValues: CapabilityStrategyDefinition[];
+    if (this.#listCache !== undefined && now <= this.#listCache.expiresAt) {
+      allValues = this.#listCache.value;
+    } else {
+      const entries = await readdir(this.#definitions, { withFileTypes: true }).catch(() => []);
+      allValues = [];
+      await Promise.all(
+        entries.filter((item) => item.isFile() && item.name.endsWith(".json")).slice(0, MAX_RECORDS).map(async (entry) => {
+          try {
+            const value = await readJson<CapabilityStrategyDefinition>(path.join(this.#definitions, entry.name));
+            validateCapabilityStrategy(value);
+            allValues.push(value);
+          } catch { /* Corrupt records are ignored and surfaced by health diagnostics. */ }
+        })
+      );
+      allValues.sort((a, b) => a.strategyId.localeCompare(b.strategyId));
+      this.#listCache = { value: allValues, expiresAt: now + CapabilityStrategyStore.#LIST_CACHE_TTL_MS };
     }
-    return values.sort((a, b) => a.strategyId.localeCompare(b.strategyId)).slice(0, Math.min(input.limit ?? 100, 100));
+    const filtered = allValues.filter((value) =>
+      (input.status === undefined || value.status === input.status) &&
+      (input.goalCategory === undefined || value.goalCategory === input.goalCategory)
+    );
+    return filtered.slice(0, Math.min(input.limit ?? 100, 100));
   }
   async get(strategyId: string): Promise<CapabilityStrategyDefinition> {
     const value = await readJson<CapabilityStrategyDefinition>(this.#definitionPath(strategyId));
@@ -167,6 +187,7 @@ export class CapabilityStrategyStore {
     validateCapabilityStrategy(strategy);
     if (strategy.source !== "reviewed_local" || strategy.status !== "proposed" || strategy.successCount !== 0 || strategy.failureCount !== 0) throw new Error("strategy_proposal_invalid");
     await saveJson(this.#definitionPath(strategy.strategyId), strategy);
+    this.#listCache = undefined;
     return strategy;
   }
   async review(strategyId: string, decision: "approve" | "reject"): Promise<CapabilityStrategyReview> {
@@ -177,6 +198,7 @@ export class CapabilityStrategyStore {
     const next: CapabilityStrategyDefinition = { ...strategy, status: decision === "approve" ? "reviewed" : "disabled", reviewId: review.reviewId, updatedAt: now };
     await saveJson(this.#definitionPath(strategyId), next);
     await saveJson(this.#reviewPath(review.reviewId), review);
+    this.#listCache = undefined;
     return review;
   }
   async activate(strategyId: string): Promise<CapabilityStrategyDefinition> {
@@ -185,6 +207,7 @@ export class CapabilityStrategyStore {
     const next = { ...strategy, status: "active" as const, updatedAt: timestamp() };
     validateCapabilityStrategy(next);
     await saveJson(this.#definitionPath(strategyId), next);
+    this.#listCache = undefined;
     return next;
   }
   async updateOutcome(input: Omit<CapabilityStrategyOutcome, "outcomeId" | "createdAt" | "redacted">): Promise<{ strategy: CapabilityStrategyDefinition; outcome: CapabilityStrategyOutcome }> {
@@ -203,11 +226,12 @@ export class CapabilityStrategyStore {
     const next: CapabilityStrategyDefinition = { ...strategy, successCount, failureCount, consecutiveFailureCount, confidence: strategyConfidence(successCount, failureCount), lastUsedAt: now, lastVerifiedAt: now, ...(input.failureCode === undefined ? {} : { lastFailureCode: input.failureCode }), status: shouldDegradeStrategy({ ...strategy, successCount, failureCount, consecutiveFailureCount, confidence: strategyConfidence(successCount, failureCount) }) ? "degraded" : strategy.status, updatedAt: now };
     await saveJson(this.#definitionPath(strategy.strategyId), next);
     await saveJson(path.join(this.#outcomes, `${safeId(outcome.outcomeId)}.json`), outcome);
+    this.#listCache = undefined;
     return { strategy: next, outcome };
   }
-  async disable(strategyId: string): Promise<CapabilityStrategyDefinition> { return this.#setStatus(strategyId, "disabled"); }
-  async degrade(strategyId: string): Promise<CapabilityStrategyDefinition> { return this.#setStatus(strategyId, "degraded"); }
-  async archive(strategyId: string): Promise<CapabilityStrategyDefinition> { const strategy = await this.get(strategyId); if (strategy.status === "active" || strategy.status === "proposed" || strategy.status === "reviewed") throw new Error("strategy_archive_requires_terminal"); return this.#setStatus(strategyId, "archived"); }
+  async disable(strategyId: string): Promise<CapabilityStrategyDefinition> { this.#listCache = undefined; return this.#setStatus(strategyId, "disabled"); }
+  async degrade(strategyId: string): Promise<CapabilityStrategyDefinition> { this.#listCache = undefined; return this.#setStatus(strategyId, "degraded"); }
+  async archive(strategyId: string): Promise<CapabilityStrategyDefinition> { const strategy = await this.get(strategyId); if (strategy.status === "active" || strategy.status === "proposed" || strategy.status === "reviewed") throw new Error("strategy_archive_requires_terminal"); this.#listCache = undefined; return this.#setStatus(strategyId, "archived"); }
   async saveSelection(selection: CapabilityStrategySelection): Promise<void> { await saveJson(path.join(this.#selections, `${safeId(selection.selectionId)}.json`), selection); const entries = await readdir(this.#selections).catch(() => []); for (const item of entries.sort().slice(0, Math.max(0, entries.length - MAX_SELECTIONS))) await rename(path.join(this.#selections, item), `${path.join(this.#selections, item)}.archived`).catch(() => undefined); }
   async summary(): Promise<import("@agenthost/core").CapabilityStrategySummary> {
     const values = await this.list({ limit: MAX_RECORDS });

@@ -127,6 +127,7 @@ export function createGoalPlanningTools(): AnyAgentHostToolDefinition<AgentHostM
             profile: context.policy.name,
             ...(context.browser === undefined ? {} : { browser: context.browser }),
             ...(context.browserBridge === undefined ? {} : { browserBridge: context.browserBridge }),
+            ...(context.bridgeProbeCache === undefined ? {} : { bridgeProbeCache: context.bridgeProbeCache }),
             ...(context.failureMemory === undefined ? {} : { failureMemory: { list: (options) => context.failureMemory!.list(options) } })
           }, {
             goalCategory: normalized.goalCategory,

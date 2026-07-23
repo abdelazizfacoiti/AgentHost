@@ -3,6 +3,7 @@ import { compareCapabilityRoutes, scoreCapabilityRoute, type CapabilityRouteCand
 import type { AdapterRegistrySnapshot, CapabilityRegistrySnapshot, PolicyProfileName, RiskLevel } from "@agenthost/core";
 import type { BrowserBridgeAdapter } from "@agenthost/app-browser";
 import { routeMetricFingerprint, RouteMetricsStore } from "./route-metrics-store.js";
+import { BridgeProbeCache, DecisionCache } from "./decision-cache.js";
 
 export interface AdaptiveActionRouterContext {
   registry: CapabilityRegistrySnapshot;
@@ -10,6 +11,8 @@ export interface AdaptiveActionRouterContext {
   profile: PolicyProfileName;
   browser?: BrowserBridgeAdapter;
   browserBridge?: { status(): Record<string, unknown> };
+  /** Optional shared cache to deduplicate browser.detect() across concurrent callers. */
+  bridgeProbeCache?: BridgeProbeCache;
   failureMemory?: {
     list(options?: { goalCategory?: string; appFamily?: string }): Promise<Array<{
       routeFamily: CapabilityRouteFamily;
@@ -65,9 +68,14 @@ export class RouteProbeScheduler {
 
 export class AdaptiveActionRouter {
   readonly #metrics: RouteMetricsStore;
+  readonly #decisionCache = new DecisionCache<CapabilityRouteSelection>({ ttlMs: 1_000, maxEntries: 32 });
   #last: CapabilityRouteSelection | undefined;
   constructor(metrics: RouteMetricsStore) { this.#metrics = metrics; }
   async preview(context: AdaptiveActionRouterContext, input: RoutePreviewInput): Promise<CapabilityRouteSelection> {
+    const cacheKey = `${input.goalCategory}|${input.appFamily ?? ""}|${input.riskLevel ?? ""}|${input.protectedContext ?? false}|${input.contextTokens ?? 0}|${input.requiresConfirmation ?? false}`;
+    const cached = this.#decisionCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+    
     const probeStartedAt = Date.now();
     const candidates = await this.#candidates(context, input);
     const ranked = candidates.map((candidate) => { scoreCapabilityRoute(candidate); return candidate; }).sort(compareCapabilityRoutes);
@@ -126,6 +134,7 @@ export class AdaptiveActionRouter {
       compatibilityFingerprint: routeMetricFingerprint(`${input.goalCategory}|${input.appFamily ?? ""}|${selected?.routeFamily ?? "none"}`)
     };
     this.#last = result;
+    this.#decisionCache.set(cacheKey, result);
     return result;
   }
   summary(): Record<string, unknown> { const value = this.#last; return value === undefined ? { status: "idle", routeSelection: undefined, redacted: true } : { status: "selected", routeSelection: { selectedRoute: value.selectedRoute, reasonCode: value.reasonCode, fallbackBudget: value.fallbackBudget, alternatives: value.alternatives, ...(value.probeSummary === undefined ? {} : { probeSummary: value.probeSummary }), ...(value.latencyClass === undefined ? {} : { latencyClass: value.latencyClass }), ...(value.verificationStatus === undefined ? {} : { verificationStatus: value.verificationStatus }), ...(value.metricStatus === undefined ? {} : { metricStatus: value.metricStatus }), createdAt: value.createdAt, redacted: true }, redacted: true }; }
@@ -137,18 +146,23 @@ export class AdaptiveActionRouter {
     let browserUnavailableReason = "browser_bridge_unavailable";
     if (hasBrowser && context.browser !== undefined) {
       try {
-        const state = await boundedProbe(context.browser.detect(), 500);
+        // Use shared BridgeProbeCache when available to avoid firing a new
+        // 500ms probe when the result is already fresh (e.g. from a concurrent
+        // strategy.select call in the same agent turn).
+        const probeResult = context.bridgeProbeCache !== undefined
+          ? await context.bridgeProbeCache.get(() => boundedProbe(context.browser!.detect(), 500))
+          : await boundedProbe(context.browser.detect(), 500);
         const bridgeState = String(context.browserBridge?.status().state ?? "");
-        hasBrowser = state.enabled === true
-          && state.paired === true
-          && state.connected === true
+        hasBrowser = probeResult.enabled === true
+          && probeResult.paired === true
+          && probeResult.connected === true
           && (bridgeState === "" || bridgeState === "paired");
         if (!hasBrowser) {
           browserUnavailableReason = bridgeState === "version_mismatch" || bridgeState === "protocol_mismatch"
             ? "browser_extension_incompatible"
             : bridgeState === "pairing_revoked"
               ? "browser_pairing_revoked"
-              : state.paired === false
+              : probeResult.paired === false
                 ? "browser_pairing_incomplete"
                 : "browser_extension_disconnected";
         }

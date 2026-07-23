@@ -20,6 +20,7 @@ import type { OverlayManager } from "@agenthost/app-overlay";
 import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 import type { SpeechService } from "./speech-service.js";
 import type { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
+import type { BridgeProbeCache } from "./decision-cache.js";
 
 type Binding = { selection: CapabilityStrategySelection; strategy?: CapabilityStrategyDefinition; destination?: string; assistanceSessionId?: string; createdAt: number };
 type Verification = { verificationId: string; selectionId: string; strategyId: string; checkpoint: CapabilityStrategyDefinition["verificationCheckpoints"][number]; status: "verified_success" | "verified_failure"; toolFamily: CapabilityStrategyOutcome["toolFamily"]; expiresAt: number };
@@ -57,6 +58,8 @@ export interface StrategyServiceContext {
   speech?: Pick<SpeechService, "capabilities">;
   receipts?: Pick<ToolReceiptManager, "verify">;
   failureMemory?: Pick<SafeFailureMemoryStore, "record">;
+  /** Optional shared cache to deduplicate browser.detect() across concurrent callers. */
+  bridgeProbeCache?: BridgeProbeCache;
 }
 
 export class CapabilityStrategyService {
@@ -75,12 +78,19 @@ export class CapabilityStrategyService {
     let bridge: CapabilityStrategyHealth["browserBridge"];
     if (strategy?.prerequisiteChecks.includes("browser_bridge_paired") || strategy?.prerequisiteChecks.includes("browser_extension_compatible")) {
       try {
-        const detected = context.browser === undefined ? { enabled: false, connected: false, paired: false, reason: "Browser bridge unavailable." } : await context.browser.detect();
+        // Use shared BridgeProbeCache when available to avoid double-probing
+        // the bridge when health() runs concurrently with route preview.
+        const detected = context.browser === undefined
+          ? { enabled: false, connected: false, paired: false, reason: "Browser bridge unavailable." }
+          : context.bridgeProbeCache !== undefined
+            ? await context.bridgeProbeCache.get(() => context.browser!.detect())
+            : await context.browser.detect();
         const raw = context.browserBridge?.status();
         const compatible = detected.connected && (raw?.state === undefined || raw.state === "paired");
-        bridge = { enabled: detected.enabled, paired: detected.paired, connected: detected.connected, compatible, reason: detected.reason };
-        checks.push({ check: "browser_bridge_paired", status: compatible ? "passed" : "failed", reason: detected.reason });
-        if (strategy?.prerequisiteChecks.includes("browser_extension_compatible")) checks.push({ check: "browser_extension_compatible", status: compatible ? "passed" : "failed", reason: detected.reason });
+        const detectedReason = detected.reason ?? (compatible ? "Bridge paired." : "Bridge unavailable.");
+        bridge = { enabled: detected.enabled, paired: detected.paired, connected: detected.connected, compatible, reason: detectedReason };
+        checks.push({ check: "browser_bridge_paired", status: compatible ? "passed" : "failed", reason: detectedReason });
+        if (strategy?.prerequisiteChecks.includes("browser_extension_compatible")) checks.push({ check: "browser_extension_compatible", status: compatible ? "passed" : "failed", reason: detectedReason });
       } catch { bridge = { enabled: false, paired: false, connected: false, compatible: false, reason: "Browser bridge health unavailable." }; checks.push({ check: "browser_bridge_paired", status: "unknown", reason: "Browser bridge health unavailable." }); }
     }
     for (const check of strategy?.prerequisiteChecks ?? []) {
