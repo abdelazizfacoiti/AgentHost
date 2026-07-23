@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createBaseCapabilityRegistry, getPolicyProfile, toolFailure, toolSuccess, type AuditLogger, type CapabilityRegistrySnapshot } from "@agenthost/core";
+import { createBaseCapabilityRegistry, createGovernedActionEffect, fingerprintActionBinding, getPolicyProfile, toolFailure, toolSuccess, type AuditLogger, type CapabilityGrant, type CapabilityRegistrySnapshot } from "@agenthost/core";
 import { z } from "zod";
 import { ConfirmationManager } from "../confirmation.js";
 import { GrantStore } from "../grants.js";
 import { runTool, type AgentHostToolDefinition, type ToolExecutionContext } from "../tool-runner.js";
+import { buildPreviewResult } from "../tools/preview.js";
 
 const inputSchema = z.object({
   dryRun: z.boolean().optional(),
@@ -42,7 +43,7 @@ function stateTool(handler: AgentHostToolDefinition<z.infer<typeof inputSchema>,
     preview: { isDryRun: (input) => input.dryRun === true },
     execution: {
       executionClass: "state_changing",
-      externalEffect: true,
+      externalEffect: false,
       requiresDryRun: true,
       requiresConfirmationToken: true,
       requiresExactTarget: false,
@@ -137,5 +138,81 @@ describe("central tool-runner execution baseline", () => {
     expect(confirmationManager.verifyEnvelope(preview.confirmationToken, {
       sessionId: current.sessionId, tool: "file.write", input: { value: "x" }, riskLevel: "medium"
     }).reason).toMatch(/already used/i);
+  });
+
+  it("rejects unresolved exact effects before handler execution", async () => {
+    let calls = 0;
+    const definition = {
+      ...stateTool(async () => { calls += 1; return toolSuccess({ tool: "file.write", riskLevel: "medium", data: {} }); }),
+      execution: { ...stateTool(async () => toolSuccess({ tool: "file.write", riskLevel: "medium", data: {} })).execution!, requiresExactTarget: true },
+      resolveEffect: () => createGovernedActionEffect({
+        ownerSessionId: "central-enforcement-test",
+        operationFamily: "file",
+        operation: "write",
+        executionClass: "state_changing",
+        bindings: {}
+      })
+    };
+    const result = await runTool(definition, { dryRun: true, value: "x" }, context());
+    expect(result.error?.code).toBe("action_target_missing");
+    expect(calls).toBe(0);
+  });
+
+  it("allows one exact confirmed external effect through a governed mock route", async () => {
+    const current = context();
+    const confirmationManager = new ConfirmationManager();
+    current.confirmations = confirmationManager;
+    const target = fingerprintActionBinding("recipient:bounded");
+    const content = fingerprintActionBinding("content:bounded");
+    const grant: CapabilityGrant = {
+      id: "grant.communication.bounded",
+      scope: "session",
+      effect: "allow",
+      match: {
+        operationFamilies: ["communication"],
+        operations: ["send"],
+        targetFingerprints: [target],
+        contentFingerprints: [content],
+        appSensitivities: ["communication"],
+        ownerSessionIds: [current.sessionId]
+      },
+      requirements: { requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget: true }
+    };
+    current.grants = new GrantStore({ persistentGrants: [grant] });
+    const definition: AgentHostToolDefinition<z.infer<typeof inputSchema>, unknown> = {
+      name: "communication.send_governed",
+      description: "Test-only governed communication route.",
+      riskLevel: "high",
+      inputSchema,
+      mcpInputSchema: { type: "object" },
+      inputSummary: "Governed communication test",
+      safety: { actionType: "communication_send", getInput: () => ({ externalEffect: true, communicative: true, dataSensitivity: "sensitive" }) },
+      execution: {
+        executionClass: "state_changing", externalEffect: true, requiresDryRun: true,
+        requiresConfirmationToken: true, requiresExactTarget: true, source: "base", availability: "available",
+        operationFamily: "communication", operation: "send", reversibility: "external", sensitivity: "communication",
+        requiredBindings: ["target", "content"], confirmationLevel: "standard", verificationKind: "receipt", cleanupKind: "none"
+      },
+      preview: { isDryRun: (input) => input.dryRun === true },
+      resolveEffect: (_input, ctx) => createGovernedActionEffect({
+        ownerSessionId: ctx.sessionId, operationFamily: "communication", operation: "send", executionClass: "state_changing",
+        externalEffect: true, sensitivity: "communication", reversibility: "external", confirmationLevel: "standard",
+        verificationKind: "receipt", bindings: { target, content }
+      }),
+      handler: async (input, ctx, runtime) => {
+        const exactTarget = { target, content };
+        if (runtime?.isDryRun) return buildPreviewResult({ tool: "communication.send_governed", riskLevel: "high", safety: runtime.safetyDecision!, effectFingerprint: runtime.effectFingerprint, targetSummary: "Bounded communication effect", target: { kind: "app", summary: "Exact governed mock recipient" }, confirmation: { manager: confirmationManager, sessionId: ctx.sessionId, input, target: exactTarget, explanation: "Confirm exact bounded communication effect.", riskLevel: "high", appSensitivity: "communication" }, wouldExecute: true });
+        const verified = confirmationManager.verifyAndConsume(input.confirmationToken ?? "", { sessionId: ctx.sessionId, tool: "communication.send_governed", input, target: exactTarget, riskLevel: "high", ...(runtime?.effectFingerprint === undefined ? {} : { effectFingerprint: runtime.effectFingerprint }) });
+        return verified.ok
+          ? toolSuccess({ tool: "communication.send_governed", riskLevel: "high", data: { route: "mock", executed: true }, verification: { required: true, verified: true, kind: "receipt", summary: "Mock route receipt verified.", independent: true } })
+          : toolFailure({ tool: "communication.send_governed", riskLevel: "high", error: { code: "confirmation_rejected", message: verified.reason } });
+      }
+    };
+    const preview = await runTool(definition, { value: "bounded", dryRun: true }, current);
+    expect(preview.ok).toBe(true);
+    const token = (preview.data as { confirmationToken?: string }).confirmationToken;
+    expect(token).toEqual(expect.any(String));
+    const result = await runTool(definition, { value: "bounded", confirmationToken: token }, current);
+    expect(result).toMatchObject({ ok: true, data: { route: "mock", executed: true }, verification: { verified: true } });
   });
 });

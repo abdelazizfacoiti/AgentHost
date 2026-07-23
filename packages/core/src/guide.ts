@@ -159,7 +159,9 @@ function summaryFor(input: GuideCreateStepsInput, kind: GuideWorkflowKind, sensi
 }
 
 function canAutomateLater(kind: GuideWorkflowKind, sensitivity: AppSensitivity): boolean {
-  return kind !== "unsafe_action" && !SENSITIVE_APP_CATEGORIES.has(sensitivity);
+  // Sensitivity raises governance requirements; it does not permanently deny
+  // supported effects. Credential/security remains non-automatable.
+  return kind !== "unsafe_action" && sensitivity !== "credential_or_security";
 }
 
 function strategySuggestion(input: GuideCreateStepsInput): GuideToolSuggestion | undefined {

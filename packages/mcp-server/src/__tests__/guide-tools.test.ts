@@ -270,7 +270,7 @@ describe("guide MCP tools", () => {
     expect(result.data).toMatchObject({
       appSensitivity: "communication",
       workflowKind: "sensitive_app",
-      canAutomateLater: false
+      canAutomateLater: true
     });
     expect(JSON.stringify(result.data)).toContain("Review Before Sending");
   });

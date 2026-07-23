@@ -129,7 +129,16 @@ const capabilityGrantSchema = z
         generatedToolIds: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
         registrationIds: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
         runtimeToolNames: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
-        runtimeCapabilities: z.array(runtimeCapabilitySchema).max(20).optional()
+        runtimeCapabilities: z.array(runtimeCapabilitySchema).max(20).optional(),
+        operationFamilies: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+        operations: z.array(z.string().trim().min(1).max(160)).max(50).optional(),
+        targetFingerprints: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(50).optional(),
+        recipientFingerprints: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(50).optional(),
+        contentFingerprints: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(50).optional(),
+        artifactFingerprints: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(50).optional(),
+        channels: z.array(z.string().trim().min(1).max(160)).max(50).optional(),
+        routes: z.array(z.string().trim().min(1).max(160)).max(50).optional(),
+        ownerSessionIds: z.array(z.string().trim().min(1).max(160)).max(20).optional()
       })
       .strict(),
     requirements: z
@@ -227,11 +236,21 @@ function normalizeGrantMatch(match: z.infer<typeof capabilityGrantSchema>["match
     ...(match.dataSensitivities === undefined ? {} : { dataSensitivities: match.dataSensitivities }),
     ...(match.fileRoots === undefined ? {} : { fileRoots: match.fileRoots }),
     ...(match.commandAllowlist === undefined ? {} : { commandAllowlist: match.commandAllowlist }),
+    ...(match.networkDomains === undefined ? {} : { networkDomains: match.networkDomains }),
     ...(match.oauthScopes === undefined ? {} : { oauthScopes: match.oauthScopes }),
     ...(match.generatedToolIds === undefined ? {} : { generatedToolIds: match.generatedToolIds }),
     ...(match.registrationIds === undefined ? {} : { registrationIds: match.registrationIds }),
     ...(match.runtimeToolNames === undefined ? {} : { runtimeToolNames: match.runtimeToolNames }),
-    ...(match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: match.runtimeCapabilities })
+    ...(match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: match.runtimeCapabilities }),
+    ...(match.operationFamilies === undefined ? {} : { operationFamilies: match.operationFamilies }),
+    ...(match.operations === undefined ? {} : { operations: match.operations }),
+    ...(match.targetFingerprints === undefined ? {} : { targetFingerprints: match.targetFingerprints }),
+    ...(match.recipientFingerprints === undefined ? {} : { recipientFingerprints: match.recipientFingerprints }),
+    ...(match.contentFingerprints === undefined ? {} : { contentFingerprints: match.contentFingerprints }),
+    ...(match.artifactFingerprints === undefined ? {} : { artifactFingerprints: match.artifactFingerprints }),
+    ...(match.channels === undefined ? {} : { channels: match.channels }),
+    ...(match.routes === undefined ? {} : { routes: match.routes }),
+    ...(match.ownerSessionIds === undefined ? {} : { ownerSessionIds: match.ownerSessionIds })
   };
 }
 

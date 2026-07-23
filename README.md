@@ -202,6 +202,10 @@ Optional adapters are disabled by default and must declare the generic execution
 
 The central runner validates explicit execution metadata (never name inference), schema, policy, grants, protected contexts, dry-run requirements, and the non-consuming confirmation envelope. Domain handlers revalidate exact targets and consume confirmation once. Receipts provide provenance only. Checkpoints observe semantic state only. Audit directories use `0700` and JSONL files use `0600`; logs omit secrets, tokens, private content, screenshots, raw OCR, and hidden environment values.
 
+### Universal governed actions
+
+AgentHost governs exact effects, not broad category names. A requested communication, browser action, file mutation, upload, submission, speech transmission, or configuration change is first resolved to bounded operation/target/content/route fingerprints. Read-only and bounded local effects can proceed under profile policy; external, destructive, or sensitive effects require matching scoped grants, fresh exact confirmation, and an available verification contract. Material changes invalidate authorization. Credential/security contexts, secrets, unsafe shell patterns, prohibited effects, unresolved targets, unsupported routes, and unverifiable effects remain blocked or guide-only with precise recovery codes.
+
 ## Roadmap v2
 
 Future work uses milestones, not new numbered phases:

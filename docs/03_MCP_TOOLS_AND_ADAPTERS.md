@@ -90,7 +90,7 @@ secrets through status or logs; pairing approval remains explicit.
 
 Actions: `browser.open_url`, `browser.click_element`, `browser.fill_text`, `browser.focus_element`.
 
-The bridge is disabled by default, loopback-only, paired, fixed-command, bounded, and redacted. Actions require short-lived opaque tab/page-bound `elementId` references; direct selectors cannot execute actions. Navigation/action calls use dry-run and confirmation. Password, secret, login, CAPTCHA, MFA, payment, send, submit, upload, delete, and other protected operations are blocked or guide-only. Communication reads require grants; financial/credential/admin content is protected.
+The bridge is disabled by default, loopback-only, paired, fixed-command, bounded, and redacted. Actions require short-lived opaque tab/page-bound `elementId` references; direct selectors cannot execute actions. Navigation/action calls use dry-run and confirmation. Password, secret, login, CAPTCHA, MFA, and credential/security operations remain protected. Send, submit, upload, delete, and payment effects are governed by exact target/content/route bindings when a supported route exists; otherwise they return `action_unsupported` or guide-only. Communication reads require grants; financial/credential/admin content is protected.
 
 ### Vision and screenshot handoff
 

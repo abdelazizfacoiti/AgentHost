@@ -126,11 +126,12 @@ export class GoalPlanningService {
     const createdAt = timestamp.toISOString();
     const expiresAt = new Date(timestamp.getTime() + 15 * 60_000).toISOString();
     const requestedEffect = input.requestedEffect ?? "observe";
-    const visualOnly = context.routeSelection?.selectedRoute === "guide_only";
-    const effect: GoalEffect = visualOnly ? "visual_assistance" : requestedEffect;
+    // Guide/preview route must not rewrite user-requested effect. It is a
+    // recovery route for the same goal, not permission to change its effect.
+    const effect: GoalEffect = requestedEffect;
     const stepTotal = Math.max(1, Math.min(12, Math.floor(input.stepCount || 1)));
     const allowedEffects: GoalEffect[] = [...new Set<GoalEffect>([...(input.allowedEffects ?? [effect]), "visual_assistance"] )];
-    const prohibitedEffects: GoalEffect[] = [...new Set<GoalEffect>(input.prohibitedEffects ?? ["communication_send", "external_submit", "upload", "delete", "payment"] )];
+    const prohibitedEffects: GoalEffect[] = [...new Set<GoalEffect>(input.prohibitedEffects ?? [])];
     const constraints = [...new Set(input.constraints ?? ["local_only", "operator_present", "no_background", "no_retry"])];
     if (effect === "observe" && !constraints.includes("read_only")) constraints.push("read_only");
     const requiredConfirmations = input.requiredConfirmations ?? (effect === "observe" || effect === "visual_assistance" ? ["none"] : ["before_state_change"]);
@@ -279,7 +280,10 @@ function routeDefinitionFor(family: CapabilityRouteFamily, effect: GoalEffect): 
   executionClass: PlanStep["expectedExecutionClass"];
   effect: GoalEffect;
 } {
-  if (family === "guide_only") return { capability: "guide", operation: "wait_for_operator", grounding: "operator_observation", completionCondition: "operator_acknowledges", checkpointKind: "operator_acknowledgement", executionClass: "visual_only", effect: "visual_assistance" };
+  if (family === "guide_only") {
+    const readOnly = effect === "observe" || effect === "inspect_private_data";
+    return { capability: "guide", operation: "wait_for_operator", grounding: "operator_observation", completionCondition: "operator_acknowledges", checkpointKind: "operator_acknowledgement", executionClass: readOnly ? "visual_only" : "state_changing", effect: readOnly ? "visual_assistance" : effect };
+  }
   const readOnly = effect === "observe" || effect === "inspect_private_data";
   if (family === "browser_bridge" || family === "structured_browser") return { capability: "browser", operation: readOnly ? "inspect_state" : "navigate", grounding: "live_browser_state", completionCondition: "checkpoint_passes", checkpointKind: "browser_state", executionClass: readOnly ? "read_only" : "state_changing", effect };
   if (family === "native_adapter") return { capability: "native_adapter", operation: readOnly ? "inspect_state" : "change_application_state", grounding: "live_application_state", completionCondition: readOnly ? "checkpoint_passes" : "state_change_verified", checkpointKind: "application_state", executionClass: readOnly ? "read_only" : "state_changing", effect };

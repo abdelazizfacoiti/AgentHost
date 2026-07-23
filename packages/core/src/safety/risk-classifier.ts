@@ -12,6 +12,7 @@ import { evaluateApprovalRequirement, isApprovalSatisfied } from "./approval.js"
 import { classifyAppSensitivity } from "./app-sensitivity.js";
 import { classifyPath } from "./path-policy.js";
 import { classifyShellCommand } from "./shell-classifier.js";
+import { actionEffectFromSafetyInput, decideGovernedAction } from "../action-policy.js";
 
 const RISK_ORDER: RiskLevel[] = ["observe", "low", "medium", "high", "blocked"];
 
@@ -78,9 +79,9 @@ function applyAppSensitivityRisk(
 
   if (appSensitivity === "financial") {
     if (input.actionType !== "observe" && input.actionType !== "inspect") {
-      reasons.push("Financial/payment apps default to guide-only for autonomous actions.");
-      matchedRules.push("app.financial.blocked");
-      return "blocked";
+      reasons.push("Financial/payment actions require a dedicated governed route, strong confirmation, and independent verification.");
+      matchedRules.push("app.financial.governed_required");
+      return maxRiskLevel(riskLevel, "high");
     }
 
     reasons.push("Financial/payment app inspection is high-risk.");
@@ -97,7 +98,9 @@ function applyAppSensitivityRisk(
       input.actionType === "gui_click" ||
       input.actionType === "accessibility_action" ||
       input.actionType === "accessibility_set_value" ||
-      input.actionType === "accessibility_focus"
+      input.actionType === "accessibility_focus" ||
+      input.actionType === "browser_action" ||
+      input.effect?.sensitivity === "communication"
     ) {
       reasons.push("Communication actions that type, send, post, or affect external recipients are high-risk.");
       matchedRules.push("app.communication.high_risk");
@@ -120,7 +123,10 @@ export function classifyRisk(
   context: SafetyEvaluationContext = {}
 ): SafetyDecision {
   let riskLevel = baseRiskForAction(input.actionType);
-  const appSensitivity = classifyAppSensitivity(input);
+  const classifiedSensitivity = classifyAppSensitivity(input);
+  const appSensitivity = input.effect?.sensitivity !== undefined && input.effect.sensitivity !== "normal"
+    ? input.effect.sensitivity
+    : classifiedSensitivity;
   const reasons: string[] = [];
   const matchedRules: string[] = [`action.${input.actionType}`];
 
@@ -180,41 +186,12 @@ export function classifyRisk(
     matchedRules.push("policy.shell.disabled");
   }
 
-  if (input.actionType === "gui_click" && !policy.allowGenericClick) {
-    riskLevel = "blocked";
-    reasons.push("Generic GUI clicking is disabled by this policy profile.");
-    matchedRules.push("policy.gui_click.disabled");
-  }
-
-  if (input.actionType === "gui_type" && !policy.allowGenericType) {
-    riskLevel = "blocked";
-    reasons.push("Generic GUI typing is disabled by this policy profile.");
-    matchedRules.push("policy.gui_type.disabled");
-  }
-
   if (input.tool === "desktop.screenshot" && !policy.allowScreenshots) {
     riskLevel = "blocked";
     reasons.push("Screenshots are disabled by this policy profile.");
     matchedRules.push("policy.screenshot.disabled");
   }
 
-  if (input.actionType === "communication_send" && !policy.allowEmailSend) {
-    riskLevel = "blocked";
-    reasons.push("Sending communications is disabled by this policy profile.");
-    matchedRules.push("policy.communication_send.disabled");
-  }
-
-  if (input.actionType === "upload" && !policy.allowUploads) {
-    riskLevel = "blocked";
-    reasons.push("Uploads are disabled by this policy profile.");
-    matchedRules.push("policy.upload.disabled");
-  }
-
-  if (input.actionType === "app_launch" && !policy.allowAppLaunch) {
-    riskLevel = maxRiskLevel(riskLevel, "high");
-    reasons.push("App launch is disabled by this policy profile.");
-    matchedRules.push("policy.app_launch.disabled");
-  }
 
   if (input.actionType === "unknown") {
     reasons.push("Unknown actions default to a conservative risk level.");
@@ -243,7 +220,13 @@ export function classifyRisk(
     matchedRules.push("app.communication.private_data_requires_grant");
   }
 
-  let approval = evaluateApprovalRequirement(riskLevel, policy, reasons);
+  // A matching scoped allow grant can make this exact effect eligible even
+  // when its category is normally high-risk. It never removes the tool's
+  // dry-run, confirmation, target, or verification requirements.
+  const exactGovernedGrant = riskLevel === "high"
+    && grantEvaluation.decision.allowedByGrantIds.length > 0
+    && (appSensitivity !== "financial" || input.effect?.bindings?.route !== undefined);
+  let approval = evaluateApprovalRequirement(riskLevel, policy, reasons, exactGovernedGrant);
 
   if (
     grantEvaluation.decision.requiresApproval &&
@@ -267,6 +250,13 @@ export function classifyRisk(
     };
   }
 
+  const actionDecision = input.effect === undefined ? undefined : decideGovernedAction({
+    effect: actionEffectFromSafetyInput(input, context.ownerSessionId ?? "unknown-session", "state_changing"),
+    safety: { allowed: !blocked, blocked, guideOnly: grantEvaluation.guideOnly, riskLevel, appSensitivity },
+    grantDecision: grantEvaluation.decision,
+    policy
+  });
+
   return {
     riskLevel,
     appSensitivity,
@@ -276,7 +266,8 @@ export function classifyRisk(
     guideOnly: grantEvaluation.guideOnly,
     reasons,
     matchedRules: [...new Set(matchedRules)],
-    grantDecision: grantEvaluation.decision
+    grantDecision: grantEvaluation.decision,
+    ...(actionDecision === undefined ? {} : { actionDecision })
   };
 }
 

@@ -155,6 +155,28 @@ function grantMatches(
     }
   }
 
+  if (match.registrationIds !== undefined && match.registrationIds.length > 0) {
+    if (input.registrationId === undefined || !match.registrationIds.includes(input.registrationId)) return false;
+  }
+  if (match.runtimeToolNames !== undefined && match.runtimeToolNames.length > 0) {
+    if (input.runtimeToolName === undefined || !match.runtimeToolNames.includes(input.runtimeToolName)) return false;
+  }
+  if (match.runtimeCapabilities !== undefined && match.runtimeCapabilities.length > 0) {
+    if (input.runtimeCapabilities === undefined || !match.runtimeCapabilities.every((capability) => input.runtimeCapabilities!.includes(capability))) return false;
+  }
+
+  const effect = input.effect;
+  const listMatch = (candidate: string | undefined, values: string[] | undefined): boolean => values === undefined || values.length === 0 ? true : candidate !== undefined && values.includes(candidate);
+  if (!listMatch(effect?.operationFamily, match.operationFamilies)) return false;
+  if (!listMatch(effect?.operation, match.operations)) return false;
+  if (!listMatch(effect?.bindings?.target, match.targetFingerprints)) return false;
+  if (!listMatch(effect?.bindings?.recipient, match.recipientFingerprints)) return false;
+  if (!listMatch(effect?.bindings?.content, match.contentFingerprints)) return false;
+  if (!listMatch(effect?.bindings?.artifact, match.artifactFingerprints)) return false;
+  if (!listMatch(effect?.bindings?.channel, match.channels)) return false;
+  if (!listMatch(effect?.bindings?.route, match.routes)) return false;
+  if (!listMatch(context.ownerSessionId, match.ownerSessionIds)) return false;
+
   if (
     grant.requirements?.allowedRoots !== undefined &&
     grant.requirements.allowedRoots.length > 0 &&
@@ -299,6 +321,20 @@ export function evaluateGrantDecision(
     guideOnlyByDefault = false;
   }
 
+  // External/destructive effects require an exact scoped allow grant. This is
+  // effect-based, not category-based: read-only and bounded local effects keep
+  // their normal profile defaults.
+  if ((input.externalEffect === true || input.destructive === true) && allowedByGrantIds.length === 0) {
+    blockedByDefault = true;
+    reasons.push("Exact external or destructive effects require a matching scoped grant.");
+    matchedRules.push("effect.exact_grant_required");
+  }
+  if (appSensitivity === "financial" && isStateChangingAction(input.actionType) && allowedByGrantIds.length === 0) {
+    blockedByDefault = true;
+    reasons.push("Financial state changes require a dedicated governed grant.");
+    matchedRules.push("app.financial.exact_grant_required");
+  }
+
   const blocked = blockedByDefault || blockedByGrant;
   const guideOnly = guideOnlyByDefault || guideOnlyByGrant;
 
@@ -359,7 +395,16 @@ export function summarizeGrant(grant: CapabilityGrant): GrantSummary {
         : { generatedToolIds: [...grant.match.generatedToolIds] }),
       ...(grant.match.registrationIds === undefined ? {} : { registrationIds: [...grant.match.registrationIds] }),
       ...(grant.match.runtimeToolNames === undefined ? {} : { runtimeToolNames: [...grant.match.runtimeToolNames] }),
-      ...(grant.match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: [...grant.match.runtimeCapabilities] })
+      ...(grant.match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: [...grant.match.runtimeCapabilities] }),
+      ...(grant.match.operationFamilies === undefined ? {} : { operationFamilies: [...grant.match.operationFamilies] }),
+      ...(grant.match.operations === undefined ? {} : { operations: [...grant.match.operations] }),
+      ...(grant.match.targetFingerprints === undefined ? {} : { targetFingerprints: [...grant.match.targetFingerprints] }),
+      ...(grant.match.recipientFingerprints === undefined ? {} : { recipientFingerprints: [...grant.match.recipientFingerprints] }),
+      ...(grant.match.contentFingerprints === undefined ? {} : { contentFingerprints: [...grant.match.contentFingerprints] }),
+      ...(grant.match.artifactFingerprints === undefined ? {} : { artifactFingerprints: [...grant.match.artifactFingerprints] }),
+      ...(grant.match.channels === undefined ? {} : { channels: [...grant.match.channels] }),
+      ...(grant.match.routes === undefined ? {} : { routes: [...grant.match.routes] }),
+      ...(grant.match.ownerSessionIds === undefined ? {} : { ownerSessionIds: [...grant.match.ownerSessionIds] })
     },
     ...(grant.requirements === undefined
       ? {}

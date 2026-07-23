@@ -22,7 +22,16 @@ function cloneGrant(grant: CapabilityGrant): CapabilityGrant {
         : { generatedToolIds: [...grant.match.generatedToolIds] }),
       ...(grant.match.registrationIds === undefined ? {} : { registrationIds: [...grant.match.registrationIds] }),
       ...(grant.match.runtimeToolNames === undefined ? {} : { runtimeToolNames: [...grant.match.runtimeToolNames] }),
-      ...(grant.match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: [...grant.match.runtimeCapabilities] })
+      ...(grant.match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: [...grant.match.runtimeCapabilities] }),
+      ...(grant.match.operationFamilies === undefined ? {} : { operationFamilies: [...grant.match.operationFamilies] }),
+      ...(grant.match.operations === undefined ? {} : { operations: [...grant.match.operations] }),
+      ...(grant.match.targetFingerprints === undefined ? {} : { targetFingerprints: [...grant.match.targetFingerprints] }),
+      ...(grant.match.recipientFingerprints === undefined ? {} : { recipientFingerprints: [...grant.match.recipientFingerprints] }),
+      ...(grant.match.contentFingerprints === undefined ? {} : { contentFingerprints: [...grant.match.contentFingerprints] }),
+      ...(grant.match.artifactFingerprints === undefined ? {} : { artifactFingerprints: [...grant.match.artifactFingerprints] }),
+      ...(grant.match.channels === undefined ? {} : { channels: [...grant.match.channels] }),
+      ...(grant.match.routes === undefined ? {} : { routes: [...grant.match.routes] }),
+      ...(grant.match.ownerSessionIds === undefined ? {} : { ownerSessionIds: [...grant.match.ownerSessionIds] })
     },
     ...(grant.requirements === undefined
       ? {}
@@ -82,10 +91,12 @@ export class GrantStore {
 }
 
 export function createSafetyEvaluationContext(context: AgentHostMcpContext): {
+  ownerSessionId: string;
   agentHostDir: string;
   grants: CapabilityGrant[];
 } {
   return {
+    ownerSessionId: context.sessionId,
     agentHostDir: context.config.agentHostDir,
     grants: context.grants.listActiveGrants()
   };

@@ -202,7 +202,7 @@ export function createBrowserSetupTools(): AnyAgentHostToolDefinition<AgentHostM
   };
   const stateChangingExecution = {
     executionClass: "state_changing",
-    externalEffect: true,
+    externalEffect: false,
     requiresDryRun: true,
     requiresConfirmationToken: true,
     requiresExactTarget: true,

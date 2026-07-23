@@ -1,11 +1,11 @@
 import type { ToolCapability, ToolExecutionMetadata } from "@agenthost/core";
 import type { AnyAgentHostToolDefinition } from "./tool-runner.js";
 
-const readOnly = (source: "base" | "optional_adapter" = "base"): ToolExecutionMetadata => ({ executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source, availability: "available" });
+const readOnly = (source: "base" | "optional_adapter" = "base"): ToolExecutionMetadata => ({ executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source, availability: "available", operationFamily: "observe", operation: "inspect", reversibility: "reversible", sensitivity: "normal", requiredBindings: [], confirmationLevel: "none", verificationKind: "none", cleanupKind: "none" });
 const diagnostic = (): ToolExecutionMetadata => ({ ...readOnly(), executionClass: "diagnostic" });
 const metadataOnly = (): ToolExecutionMetadata => ({ ...readOnly(), executionClass: "metadata_only" });
 const visualOnly = (): ToolExecutionMetadata => ({ ...readOnly(), executionClass: "visual_only" });
-const stateChanging = (requiresExactTarget = false, source: "base" | "optional_adapter" = "base"): ToolExecutionMetadata => ({ executionClass: "state_changing", externalEffect: true, requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget, source, availability: "available" });
+const stateChanging = (requiresExactTarget = false, source: "base" | "optional_adapter" = "base"): ToolExecutionMetadata => ({ executionClass: "state_changing", externalEffect: false, requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget, source, availability: "available", operationFamily: "state_change", operation: "governed_action", reversibility: "persistent", sensitivity: "normal", requiredBindings: requiresExactTarget ? ["target"] : [], confirmationLevel: "standard", verificationKind: "tool_result", cleanupKind: "none" });
 
 /*
  * Explicit production declarations. This is an allowlist, not name inference:
@@ -15,7 +15,7 @@ const TOOL_EXECUTION_DECLARATIONS: Record<string, ToolExecutionMetadata> = {};
 const declare = (names: string[], metadata: ToolExecutionMetadata): void => { for (const name of names) TOOL_EXECUTION_DECLARATIONS[name] = metadata; };
 
 declare([
-  "accessibility.find_element", "accessibility.get_tree", "accessibility.inspect_element", "adapter.detect_for_app", "adapter.get_capabilities", "adapter.list", "app.detect", "app.get_strategy", "app.list_installed", "browser.current_url", "browser.detect", "browser.diagnose_bridge", "browser.extract_text", "browser.find_element", "browser.get_active_tab", "browser.get_extension_install_instructions", "browser.get_form_state", "browser.get_page_context", "browser.get_selected_text", "browser.inventory", "browser.list_tabs", "browser.verify_pairing", "browser.wait_for_state", "checkpoint.evaluate", "checkpoint.wait_for", "desktop.get_active_window", "desktop.get_capabilities", "file.exists", "file.list", "file.read", "overlay.assistance_session_explain", "overlay.assistance_step_preview", "overlay.assistance_template_get", "overlay.assistance_template_list", "overlay.assistance_template_preview", "overlay.assistance_template_validate", "policy.explain_decision", "policy.get_profile", "policy.list_grants", "policy.list_profiles", "speech.artifact_get", "speech.devices_list", "speech.list_languages", "speech.list_providers", "speech.list_voices", "speech.playback_state", "speech.transmission_get", "strategy.capability_graph", "strategy.explain_selection", "strategy.failure_memory", "strategy.get", "strategy.goal_plan_preview", "strategy.list", "strategy.route_preview", "strategy.verify_outcome", "system.get_info", "system.list_capabilities", "vision.analyze_image", "vision.find_target", "vision.find_text", "vision.prepare_pointer_action", "window.list"
+  "accessibility.find_element", "accessibility.get_tree", "accessibility.inspect_element", "adapter.detect_for_app", "adapter.get_capabilities", "adapter.list", "app.detect", "app.get_strategy", "app.list_installed", "browser.current_url", "browser.detect", "browser.diagnose_bridge", "browser.extract_text", "browser.find_element", "browser.get_active_tab", "browser.get_extension_install_instructions", "browser.get_form_state", "browser.get_page_context", "browser.get_selected_text", "browser.inventory", "browser.list_tabs", "browser.verify_pairing", "browser.wait_for_state", "checkpoint.evaluate", "checkpoint.wait_for", "desktop.get_active_window", "desktop.get_capabilities", "desktop.screenshot", "file.exists", "file.list", "file.read", "overlay.assistance_session_explain", "overlay.assistance_step_preview", "overlay.assistance_template_get", "overlay.assistance_template_list", "overlay.assistance_template_preview", "overlay.assistance_template_validate", "policy.explain_decision", "policy.get_profile", "policy.list_grants", "policy.list_profiles", "speech.artifact_get", "speech.devices_list", "speech.list_languages", "speech.list_providers", "speech.list_voices", "speech.playback_state", "speech.transmission_get", "strategy.capability_graph", "strategy.explain_selection", "strategy.failure_memory", "strategy.get", "strategy.goal_plan_preview", "strategy.list", "strategy.route_preview", "strategy.verify_outcome", "system.get_info", "system.list_capabilities", "vision.analyze_image", "vision.find_target", "vision.find_text", "vision.prepare_pointer_action", "window.list"
 ], readOnly());
 declare(["browser.setup_status", "browser.setup_verify", "forge.check_sandbox_support", "speech.get_capabilities", "speech.routing_diagnose", "strategy.health", "system.check_dependency"], diagnostic());
 declare([
@@ -28,7 +28,7 @@ declare([
   "browser.generate_pairing_token", "browser.reset_pairing"
 ], stateChanging());
 declare([
-  "accessibility.focus_element", "accessibility.invoke_action", "accessibility.set_value", "app.open", "browser.click_element", "browser.fill_text", "browser.focus_element", "browser.open_url", "desktop.click", "desktop.double_click", "desktop.drag", "desktop.hotkey", "desktop.move_mouse", "desktop.right_click", "desktop.screenshot", "desktop.scroll", "desktop.type_text", "file.ensure_dir", "file.write", "shell.run_safe", "window.focus"
+  "accessibility.focus_element", "accessibility.invoke_action", "accessibility.set_value", "app.open", "browser.click_element", "browser.fill_text", "browser.focus_element", "browser.open_url", "desktop.click", "desktop.double_click", "desktop.drag", "desktop.hotkey", "desktop.move_mouse", "desktop.right_click", "desktop.scroll", "desktop.type_text", "file.ensure_dir", "file.write", "shell.run_safe", "window.focus"
 ], stateChanging(true));
 declare(["browser.setup_begin", "browser.setup_approve", "browser.setup_cancel"], stateChanging(true));
 declare(["speech.play", "speech.stop", "speech.synthesize", "speech.transmission_execute"], stateChanging(true));
@@ -39,15 +39,15 @@ export function applyProductionExecutionMetadata(tools: AnyAgentHostToolDefiniti
   return tools.map((definition) => {
     const declared = TOOL_EXECUTION_DECLARATIONS[definition.name];
     if (declared === undefined) throw new Error(`Missing execution classification metadata for ${definition.name}`);
-    if (definition.execution !== undefined && JSON.stringify(definition.execution) !== JSON.stringify(declared)) {
+    if (definition.execution !== undefined && JSON.stringify(normalizeEffectMetadata(definition.execution, definition.name)) !== JSON.stringify(normalizeEffectMetadata(declared, definition.name))) {
       throw new Error(`Contradictory execution metadata for ${definition.name}`);
     }
-    return { ...definition, execution: declared };
+    return { ...definition, execution: normalizeEffectMetadata(declared, definition.name) };
   });
 }
 
 export function validateToolExecutionMetadata(metadata: ToolExecutionMetadata, toolName: string): void {
-  const allowedKeys = new Set(["executionClass", "externalEffect", "requiresDryRun", "requiresConfirmationToken", "requiresExactTarget", "source", "availability", "requiredGrantIds"]);
+  const allowedKeys = new Set(["executionClass", "externalEffect", "requiresDryRun", "requiresConfirmationToken", "requiresExactTarget", "source", "availability", "operationFamily", "operation", "reversibility", "sensitivity", "requiredBindings", "confirmationLevel", "verificationKind", "cleanupKind", "requiredGrantIds"]);
   if (typeof metadata !== "object" || metadata === null || Object.keys(metadata).some((key) => !allowedKeys.has(key))) {
     throw new Error(`Unknown execution metadata field for ${toolName}`);
   }
@@ -62,15 +62,17 @@ export function validateToolExecutionMetadata(metadata: ToolExecutionMetadata, t
   if (inertClass && (metadata.externalEffect || metadata.requiresDryRun || metadata.requiresConfirmationToken || metadata.requiresExactTarget)) {
     throw new Error(`Contradictory execution metadata for ${toolName}`);
   }
-  if (metadata.executionClass === "state_changing" && !metadata.externalEffect) {
-    throw new Error(`State-changing tool must declare externalEffect for ${toolName}`);
-  }
   if (metadata.executionClass === "state_changing" && !metadata.requiresDryRun) {
     throw new Error(`State-changing tool must declare requiresDryRun for ${toolName}`);
   }
   if (metadata.executionClass === "state_changing" && !metadata.requiresConfirmationToken) {
     throw new Error(`State-changing tool must declare confirmation requirements for ${toolName}`);
   }
+  if (metadata.operationFamily !== undefined && (typeof metadata.operationFamily !== "string" || metadata.operationFamily.length === 0 || metadata.operationFamily.length > 100)) throw new Error(`Invalid operation family metadata for ${toolName}`);
+  if (metadata.operation !== undefined && (typeof metadata.operation !== "string" || metadata.operation.length === 0 || metadata.operation.length > 160)) throw new Error(`Invalid operation metadata for ${toolName}`);
+  if (metadata.reversibility !== undefined && !["reversible", "persistent", "external", "destructive", "prohibited"].includes(metadata.reversibility)) throw new Error(`Invalid reversibility metadata for ${toolName}`);
+  if (metadata.confirmationLevel !== undefined && !["none", "standard", "strong"].includes(metadata.confirmationLevel)) throw new Error(`Invalid confirmation metadata for ${toolName}`);
+  if (metadata.requiredBindings !== undefined && (!Array.isArray(metadata.requiredBindings) || metadata.requiredBindings.some((binding) => !["target", "recipient", "content", "artifact", "channel", "route"].includes(binding)))) throw new Error(`Invalid binding metadata for ${toolName}`);
   if (metadata.source !== "base" && metadata.source !== "optional_adapter") {
     throw new Error(`Unknown tool source for ${toolName}`);
   }
@@ -89,6 +91,30 @@ function validateRequiredGrantIds(ids: string[] | undefined, toolName: string): 
   }
 }
 
+function normalizeEffectMetadata(metadata: ToolExecutionMetadata, toolName = ""): ToolExecutionMetadata {
+  const stateChanging = metadata.executionClass === "state_changing";
+  const parts = toolName.split(/\.(.*)/s, 2);
+  const familyHint = parts[0] ?? "state_change";
+  const operationHint = parts[1] ?? "governed_action";
+  const speechTransmission = toolName === "speech.transmission_execute";
+  return {
+    ...metadata,
+    operationFamily: metadata.operationFamily === "state_change" || metadata.operationFamily === "observe" || metadata.operationFamily === undefined
+      ? (stateChanging ? familyHint : metadata.operationFamily ?? "observe")
+      : metadata.operationFamily,
+    operation: metadata.operation === "governed_action" || metadata.operation === "inspect" || metadata.operation === undefined
+      ? (stateChanging ? operationHint : metadata.operation ?? "inspect")
+      : metadata.operation,
+    externalEffect: speechTransmission ? true : metadata.externalEffect,
+    reversibility: speechTransmission ? "external" : metadata.reversibility ?? (stateChanging ? "persistent" : "reversible"),
+    sensitivity: speechTransmission ? "communication" : metadata.sensitivity ?? "normal",
+    requiredBindings: speechTransmission ? ["target", "artifact", "route"] : metadata.requiredBindings ?? (metadata.requiresExactTarget ? ["target"] : []),
+    confirmationLevel: speechTransmission ? "standard" : metadata.confirmationLevel ?? (stateChanging ? "standard" : "none"),
+    verificationKind: speechTransmission ? "speech_receipt" : metadata.verificationKind ?? (stateChanging ? "tool_result" : "none"),
+    cleanupKind: metadata.cleanupKind ?? "none"
+  };
+}
+
 export function materializeToolDefinitions(tools: AnyAgentHostToolDefinition[]): AnyAgentHostToolDefinition[] {
   const names = new Set<string>();
   return tools.map((definition) => {
@@ -98,7 +124,7 @@ export function materializeToolDefinitions(tools: AnyAgentHostToolDefinition[]):
     if (execution === undefined) throw new Error(`Missing execution classification metadata for ${definition.name}`);
     validateToolExecutionMetadata(execution, definition.name);
     validateRequiredGrantIds(definition.requiredGrantIds, definition.name);
-    return { ...definition, execution };
+    return { ...definition, execution: normalizeEffectMetadata(execution, definition.name) };
   });
 }
 
@@ -109,6 +135,6 @@ export function toolCapabilities(tools: AnyAgentHostToolDefinition[]): ToolCapab
     description: tool.description,
     inputSchema: tool.mcpInputSchema,
     ...(tool.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...tool.requiredGrantIds] }),
-    ...(tool.execution === undefined ? {} : { execution: tool.execution })
+    ...(tool.execution === undefined ? {} : { execution: normalizeEffectMetadata(tool.execution, tool.name) })
   }));
 }

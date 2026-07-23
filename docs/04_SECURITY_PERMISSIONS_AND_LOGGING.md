@@ -39,7 +39,7 @@ Screenshot suppression is coordinator-wide and serialized: all dynamic surfaces 
 
 ## Profiles and grants
 
-Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. The default is `strict`; demos must explicitly launch with `AGENTHOST_PROFILE=demo-unlocked-local` (or set that profile in the local config) and restart the MCP process. Demo mode removes ordinary local/normal-app friction and grants bounded communication-page reads, but it is not unrestricted: hard safety blocks for credentials/security, financial contexts, secrets, destructive shell, broad filesystem access, external sends/uploads, and authentication/security bypasses remain. State-changing tools retain dry-run and confirmation requirements.
+Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. The default is `strict`; demos must explicitly launch with `AGENTHOST_PROFILE=demo-unlocked-local` (or set that profile in the local config) and restart the MCP process. Demo mode removes ordinary local/normal-app friction and grants bounded communication-page reads, but it is not unrestricted: credential/security contexts, secrets, destructive shell, broad filesystem access, and authentication/security bypasses remain hard blocked. External sends/uploads and other meaningful effects require exact governed routes, scoped grants, fresh confirmation, and verification; an unscoped effect remains blocked. State-changing tools retain dry-run and confirmation requirements.
 
 Persistent grant config is strict and round-trips these runtime fields without synthesizing permissions:
 
@@ -127,6 +127,14 @@ The A3 demo uses authoritative redacted runtime activity only; internal visual f
 ## Scheduler governance safety
 
 Jobs, activation, manual-run contracts, preflights, acknowledgements, requests, reviews, expiry, and staleness records are metadata-only. They cannot create timers, workers, run sessions, replay sessions, files, notifications, messages, or confirmation tokens. Approval records do not authorize execution. Any future worker must revalidate policy, grants, readiness, dry-run, confirmation, receipts, checkpoints, cancellation, and stop-on-failure at run time.
+
+## Files, redaction, and audit logs
+
+## Universal governed-action policy
+
+Category names do not permanently deny supported work. Central policy resolves exact operation, target, recipient/content or artifact fingerprint, channel, route, reversibility, sensitivity, authorization, and verification before invoking a handler. Read-only effects may use explicit intent and policy; bounded reversible local effects use exact target and existing profile controls; external, destructive, and sensitive effects require a matching scoped grant plus fresh exact confirmation. Confirmation fingerprints include material effect fields and expire/consume once. Target, content, recipient, route, destination, quantity, duration, privacy, cleanup, or verification changes require fresh authorization.
+
+Credential/security and secret handling, prohibited effects, unsafe shell patterns, protected contexts, ambiguous targets, unsupported routes, and unavailable verification remain fail-closed. A denied category produces a precise `action_*` recovery code such as `action_target_ambiguous`, `action_grant_missing`, `action_binding_changed`, `action_route_unavailable`, or `action_verification_failed`; planner/route layers prefer prepare, clarify, confirm, repair, or guide when safe rather than rewriting the user’s requested effect. Visual Copilot and Control Room expose only redacted effect/authorization/verification summaries and never execute actions.
 
 ## Files, redaction, and audit logs
 

@@ -34,7 +34,7 @@ type BlenderToolInput = z.infer<typeof blenderInputSchema>;
 
 const blenderExecution: ToolExecutionMetadata = {
   executionClass: "state_changing",
-  externalEffect: true,
+  externalEffect: false,
   requiresDryRun: true,
   requiresConfirmationToken: true,
   requiresExactTarget: true,

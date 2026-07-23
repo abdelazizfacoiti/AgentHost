@@ -33,6 +33,7 @@ export * from "./overlay-assistance-templates.js";
 export * from "./capability-strategy.js";
 export * from "./capability-routing.js";
 export * from "./speech.js";
+export * from "./action-policy.js";
 export * from "./runtime-activity.js";
 export * from "./release.js";
 export * from "./goal-planning.js";

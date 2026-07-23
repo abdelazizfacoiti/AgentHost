@@ -23,6 +23,21 @@ function validateRequiredGrantIds(ids: string[] | undefined, toolName: string): 
   }
 }
 
+function normalizeExecutionMetadata(metadata: ToolExecutionMetadata): ToolExecutionMetadata {
+  const stateChanging = metadata.executionClass === "state_changing";
+  return {
+    ...metadata,
+    operationFamily: metadata.operationFamily ?? (stateChanging ? "state_change" : "observe"),
+    operation: metadata.operation ?? (stateChanging ? "governed_action" : "inspect"),
+    reversibility: metadata.reversibility ?? (stateChanging ? "persistent" : "reversible"),
+    sensitivity: metadata.sensitivity ?? "normal",
+    requiredBindings: metadata.requiredBindings ?? (metadata.requiresExactTarget ? ["target"] : []),
+    confirmationLevel: metadata.confirmationLevel ?? (stateChanging ? "standard" : "none"),
+    verificationKind: metadata.verificationKind ?? (stateChanging ? "tool_result" : "none"),
+    cleanupKind: metadata.cleanupKind ?? "none"
+  };
+}
+
 /**
  * Runtime validation shared by the core registry boundary.  MCP metadata
  * validation remains stricter about tool-definition shape, but a capability
@@ -48,9 +63,14 @@ export function validateToolExecutionMetadata(metadata: ToolExecutionMetadata, t
   if (inert && (metadata.externalEffect || metadata.requiresDryRun || metadata.requiresConfirmationToken || metadata.requiresExactTarget)) {
     throw new Error(`Contradictory execution metadata for ${toolName}`);
   }
-  if (metadata.executionClass === "state_changing" && (!metadata.externalEffect || !metadata.requiresDryRun)) {
+  if (metadata.executionClass === "state_changing" && !metadata.requiresDryRun) {
     throw new Error(`State-changing execution metadata is incomplete for ${toolName}`);
   }
+  if (metadata.operationFamily !== undefined && (typeof metadata.operationFamily !== "string" || metadata.operationFamily.length === 0 || metadata.operationFamily.length > 100)) throw new Error(`Invalid operation family metadata for ${toolName}`);
+  if (metadata.operation !== undefined && (typeof metadata.operation !== "string" || metadata.operation.length === 0 || metadata.operation.length > 160)) throw new Error(`Invalid operation metadata for ${toolName}`);
+  if (metadata.reversibility !== undefined && !["reversible", "persistent", "external", "destructive", "prohibited"].includes(metadata.reversibility)) throw new Error(`Invalid reversibility metadata for ${toolName}`);
+  if (metadata.confirmationLevel !== undefined && !["none", "standard", "strong"].includes(metadata.confirmationLevel)) throw new Error(`Invalid confirmation metadata for ${toolName}`);
+  if (metadata.requiredBindings !== undefined && (!Array.isArray(metadata.requiredBindings) || metadata.requiredBindings.some((binding) => !["target", "recipient", "content", "artifact", "channel", "route"].includes(binding)))) throw new Error(`Invalid binding metadata for ${toolName}`);
   validateRequiredGrantIds(metadata.requiredGrantIds, toolName);
 }
 
@@ -79,7 +99,7 @@ function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
   const stateChanging = metadata === "state_changing";
   return {
     executionClass: metadata,
-    externalEffect: stateChanging,
+    externalEffect: false,
     requiresDryRun: stateChanging,
     requiresConfirmationToken: stateChanging,
     requiresExactTarget: stateChanging && /browser|desktop|window|accessibility|click|type|focus|scroll|drag|mouse/.test(name),
@@ -113,10 +133,11 @@ export class CapabilityRegistry implements CapabilityRegistrySnapshot {
     if (execution === undefined) throw new Error(`Missing execution metadata for ${capability.name}`);
     validateRequiredGrantIds(capability.requiredGrantIds, capability.name);
     validateToolExecutionMetadata(execution, capability.name);
+    const normalized = normalizeExecutionMetadata(execution);
     this.#tools.set(capability.name, {
       ...capability,
       ...(capability.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...capability.requiredGrantIds] }),
-      execution: { ...execution, ...(execution.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...execution.requiredGrantIds] }) }
+      execution: { ...normalized, ...(normalized.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...normalized.requiredGrantIds] }) }
     });
   }
 
@@ -134,7 +155,7 @@ export class CapabilityRegistry implements CapabilityRegistrySnapshot {
       normalized.push({
         ...capability,
         ...(capability.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...capability.requiredGrantIds] }),
-        execution: { ...capability.execution, ...(capability.execution.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...capability.execution.requiredGrantIds] }) }
+        execution: { ...normalizeExecutionMetadata(capability.execution), ...(capability.execution.requiredGrantIds === undefined ? {} : { requiredGrantIds: [...capability.execution.requiredGrantIds] }) }
       });
     }
     this.#tools.clear();

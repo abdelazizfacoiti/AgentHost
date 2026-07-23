@@ -7,9 +7,10 @@ describe("browser element policy", () => {
     expect(isSafeCss("button:has(span)")).toBe(false);
     expect(isSafeCss("input[type=password]")).toBe(false);
   });
-  it("blocks unsafe element action classes", () => {
-    expect(actionBlocked("communication_send")).toBe(true);
-    expect(actionBlocked("form_submit")).toBe(true);
+  it("hard-blocks only protected fields/actions", () => {
+    expect(actionBlocked("communication_send")).toBe(false);
+    expect(actionBlocked("form_submit")).toBe(false);
+    expect(actionBlocked("password_input")).toBe(true);
     expect(actionBlocked("safe_navigation")).toBe(false);
   });
 });

@@ -166,6 +166,15 @@ describe("loadAgentHostConfig", () => {
           registrationIds: ["registration-1"],
           runtimeToolNames: ["inspect"],
           runtimeCapabilities: ["pure_compute", "read_runtime_input"],
+          operationFamilies: ["forge_runtime"],
+          operations: ["run_bounded_json"],
+          targetFingerprints: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          recipientFingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+          contentFingerprints: ["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],
+          artifactFingerprints: ["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"],
+          channels: ["local"],
+          routes: ["bubblewrap"],
+          ownerSessionIds: ["session_test"],
           tools: ["forge.run_sandboxed_tool"]
         },
         requirements: {
@@ -186,7 +195,16 @@ describe("loadAgentHostConfig", () => {
         generatedToolIds: ["artifact-1"],
         registrationIds: ["registration-1"],
         runtimeToolNames: ["inspect"],
-        runtimeCapabilities: ["pure_compute", "read_runtime_input"]
+        runtimeCapabilities: ["pure_compute", "read_runtime_input"],
+        operationFamilies: ["forge_runtime"],
+        operations: ["run_bounded_json"],
+        targetFingerprints: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+        recipientFingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+        contentFingerprints: ["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],
+        artifactFingerprints: ["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"],
+        channels: ["local"],
+        routes: ["bubblewrap"],
+        ownerSessionIds: ["session_test"]
       },
       requirements: {
         sandboxRoots: ["run", "temp"],
@@ -209,6 +227,8 @@ describe("loadAgentHostConfig", () => {
     await writeFile(configPath, JSON.stringify({ grants: [{ id: "bad", scope: "persistent", effect: "allow", match: { runtimeCapabilities: ["network_fetch"] } }] }), "utf8");
     await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
     await writeFile(configPath, JSON.stringify({ grants: [{ id: "bad", scope: "persistent", effect: "allow", match: { runtimeCapabilities: ["pure_compute"] }, requirements: { maxRuntimeMs: 5001 } }] }), "utf8");
+    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
+    await writeFile(configPath, JSON.stringify({ grants: [{ id: "bad", scope: "persistent", effect: "allow", match: { targetFingerprints: ["not-a-fingerprint"] } }] }), "utf8");
     await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
   });
 

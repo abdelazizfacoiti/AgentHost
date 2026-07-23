@@ -67,7 +67,7 @@ describe("evaluateSafety", () => {
     expect(send.blocked).toBe(true);
   });
 
-  it("blocks communication sending and uploads by policy", () => {
+  it("classifies communication sending and uploads by effect while requiring scoped grants", () => {
     const sendResult = evaluateSafety(
       {
         tool: "email.send",
@@ -89,13 +89,87 @@ describe("evaluateSafety", () => {
       { homeDir }
     );
 
-    expect(sendResult.riskLevel).toBe("blocked");
-    expect(sendResult.matchedRules).toContain("policy.communication_send.disabled");
-    expect(uploadResult.riskLevel).toBe("blocked");
-    expect(uploadResult.matchedRules).toContain("policy.upload.disabled");
+    expect(sendResult.riskLevel).toBe("high");
+    expect(sendResult.blocked).toBe(true);
+    expect(sendResult.matchedRules).toContain("effect.exact_grant_required");
+    expect(uploadResult.riskLevel).toBe("high");
+    expect(uploadResult.blocked).toBe(true);
   });
 
-  it("blocks financial and credential/security autonomous actions", () => {
+  it("allows one exact external effect when scoped grant and confirmation policy match", () => {
+    const result = evaluateSafety(
+      {
+        tool: "browser.click_element",
+        actionType: "browser_action",
+        appName: "Gmail",
+        externalEffect: true,
+        communicative: true,
+        effect: {
+          operationFamily: "browser_element",
+          operation: "communication_send",
+          bindings: { target: "element_hash" }
+        }
+      },
+      {
+        ...getPolicyProfile("dev"),
+        grants: [{
+          id: "grant-exact-send",
+          scope: "session",
+          effect: "allow",
+          match: {
+            tools: ["browser.click_element"],
+            actionTypes: ["browser_action"],
+            operationFamilies: ["browser_element"],
+            operations: ["communication_send"],
+            targetFingerprints: ["element_hash"]
+          },
+          requirements: { requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget: true }
+        }]
+      },
+      { homeDir, ownerSessionId: "session_test" }
+    );
+    expect(result.blocked).toBe(false);
+    expect(result.allowed).toBe(true);
+    expect(result.grantDecision.allowedByGrantIds).toEqual(["grant-exact-send"]);
+    expect(result.riskLevel).toBe("high");
+  });
+
+  it("allows a bounded reversible communication UI effect with an exact grant", () => {
+    const result = evaluateSafety(
+      {
+        tool: "browser.click_element",
+        actionType: "browser_action",
+        appName: "Demo Mail",
+        effect: {
+          operationFamily: "browser_element",
+          operation: "safe_toggle",
+          bindings: { target: "element_hash" }
+        }
+      },
+      {
+        ...getPolicyProfile("dev"),
+        grants: [{
+          id: "grant-communication-toggle",
+          scope: "session",
+          effect: "allow",
+          match: {
+            tools: ["browser.click_element"],
+            appSensitivities: ["communication"],
+            operationFamilies: ["browser_element"],
+            operations: ["safe_toggle"],
+            targetFingerprints: ["element_hash"]
+          },
+          requirements: { requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget: true }
+        }]
+      },
+      { homeDir, ownerSessionId: "session_test" }
+    );
+    expect(result.blocked).toBe(false);
+    expect(result.allowed).toBe(true);
+    expect(result.riskLevel).toBe("high");
+  });
+
+  it("governs financial actions while retaining credential/security hard blocks", () => {
     const financialResult = evaluateSafety(
       {
         tool: "browser.fill_form",
@@ -115,13 +189,14 @@ describe("evaluateSafety", () => {
       { homeDir }
     );
 
-    expect(financialResult.riskLevel).toBe("blocked");
+    expect(financialResult.riskLevel).toBe("high");
+    expect(financialResult.blocked).toBe(true);
     expect(financialResult.appSensitivity).toBe("financial");
     expect(credentialResult.riskLevel).toBe("blocked");
     expect(credentialResult.appSensitivity).toBe("credential_or_security");
   });
 
-  it("blocks generic GUI click and type when policy disables them", () => {
+  it("classifies generic GUI click and type by effect when policy lacks a grant", () => {
     const clickResult = evaluateSafety(
       {
         tool: "desktop.click",
@@ -139,10 +214,10 @@ describe("evaluateSafety", () => {
       { homeDir }
     );
 
-    expect(clickResult.riskLevel).toBe("blocked");
-    expect(clickResult.matchedRules).toContain("policy.gui_click.disabled");
-    expect(typeResult.riskLevel).toBe("blocked");
-    expect(typeResult.matchedRules).toContain("policy.gui_type.disabled");
+    expect(clickResult.riskLevel).toBe("medium");
+    expect(clickResult.blocked).toBe(true);
+    expect(typeResult.riskLevel).toBe("medium");
+    expect(typeResult.blocked).toBe(true);
   });
 
   it("keeps read-only accessibility inspection low risk", () => {

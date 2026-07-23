@@ -409,8 +409,8 @@ describe("system tools", () => {
 
     expect(handlerCalled).toBe(false);
     expect(result.ok).toBe(false);
-    expect(result.error?.code).toBe("safety_blocked");
-    expect(result.approval.status).toBe("denied");
+    expect(result.error?.code).toBe("action_target_missing");
+    expect(result.approval.status).toBe("not_required");
   });
 
   it("stops approval-required actions before execution", async () => {

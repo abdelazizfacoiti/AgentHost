@@ -12,6 +12,7 @@ export interface PreviewConfirmationToken {
   expiresAt: string;
   inputFingerprint: string;
   targetFingerprint?: string;
+  effectFingerprint?: string;
 }
 
 interface ConfirmationRecord {
@@ -19,6 +20,7 @@ interface ConfirmationRecord {
   tool: string;
   inputFingerprint: string;
   targetFingerprint?: string;
+  effectFingerprint?: string;
   riskLevel: RiskLevel;
   appSensitivity?: AppSensitivity;
   dataSensitivity?: DataSensitivity;
@@ -35,6 +37,7 @@ interface CreateConfirmationInput {
   input: unknown;
   target?: unknown;
   riskLevel: RiskLevel;
+  effectFingerprint?: string;
   appSensitivity?: AppSensitivity;
   dataSensitivity?: DataSensitivity;
   targetSummary: string;
@@ -46,6 +49,7 @@ interface VerifyConfirmationInput {
   input: unknown;
   target?: unknown;
   riskLevel: RiskLevel;
+  effectFingerprint?: string;
 }
 
 export interface ConfirmationVerificationResult {
@@ -122,6 +126,7 @@ export class ConfirmationManager {
       tool: input.tool,
       inputFingerprint,
       ...(targetFingerprint === undefined ? {} : { targetFingerprint }),
+      ...(input.effectFingerprint === undefined ? {} : { effectFingerprint: input.effectFingerprint }),
       riskLevel: input.riskLevel,
       ...(input.appSensitivity === undefined ? {} : { appSensitivity: input.appSensitivity }),
       ...(input.dataSensitivity === undefined ? {} : { dataSensitivity: input.dataSensitivity }),
@@ -137,7 +142,8 @@ export class ConfirmationManager {
       tokenId,
       expiresAt,
       inputFingerprint,
-      ...(targetFingerprint === undefined ? {} : { targetFingerprint })
+      ...(targetFingerprint === undefined ? {} : { targetFingerprint }),
+      ...(input.effectFingerprint === undefined ? {} : { effectFingerprint: input.effectFingerprint })
     };
   }
 
@@ -242,6 +248,10 @@ export class ConfirmationManager {
         reason: "Confirmation token risk level no longer matches the current action.",
         inputFingerprint
       };
+    }
+
+    if (input.effectFingerprint !== undefined && record.effectFingerprint !== undefined && record.effectFingerprint !== input.effectFingerprint) {
+      return { ok: false, tokenId: record.tokenId, reason: "Confirmation token effect binding changed.", inputFingerprint };
     }
 
     return {

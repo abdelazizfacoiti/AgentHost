@@ -1,7 +1,7 @@
 import { appendFile, chmod, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ControlRoomDashboardProjection, ControlRoomHealthProjection, ControlRoomScreenshotProjection, ControlRoomTaskProjection, ControlRoomTimelineEvent, RiskLevel, RuntimeActivityProjection } from "@agenthost/core";
+import type { ActionEffectDecisionSummary, ActionVerificationSummary, ControlRoomDashboardProjection, ControlRoomHealthProjection, ControlRoomScreenshotProjection, ControlRoomTaskProjection, ControlRoomTimelineEvent, RiskLevel, RuntimeActivityProjection } from "@agenthost/core";
 import type { ControlRoomReportProvider, ControlRoomScreenshotQuery, ControlRoomTaskQuery } from "@agenthost/app-control-room";
 
 interface ActivityRecord {
@@ -17,6 +17,8 @@ interface ActivityRecord {
   durationMs: number;
   confirmation: boolean;
   receiptId?: string;
+  actionDecision?: ActionEffectDecisionSummary;
+  verification?: ActionVerificationSummary;
 }
 interface ScreenshotRecord extends ControlRoomScreenshotProjection {}
 
@@ -104,7 +106,18 @@ export class ControlRoomStore {
   }
   async recordToolActivity(input: Omit<ActivityRecord, "eventId">): Promise<void> {
     const safeReceiptId = input.receiptId === undefined ? undefined : opaque(input.receiptId);
-    const record: ActivityRecord = { eventId: "activity_" + randomUUID(), sessionId: bounded(input.sessionId), timestamp: bounded(input.timestamp, 40), tool: bounded(input.tool), ...(input.strategy === undefined ? {} : { strategy: bounded(input.strategy) }), riskLevel: input.riskLevel, preview: input.preview === true, ok: input.ok === true, ...(input.errorCode === undefined ? {} : { errorCode: bounded(input.errorCode) }), durationMs: Number.isFinite(input.durationMs) ? Math.max(0, Math.min(86_400_000, Math.floor(input.durationMs))) : 0, confirmation: input.confirmation === true, ...(safeReceiptId === undefined ? {} : { receiptId: safeReceiptId }) };
+    const actionDecision = input.actionDecision === undefined ? undefined : {
+      decision: input.actionDecision.decision,
+      recovery: input.actionDecision.recovery,
+      ...(input.actionDecision.code === undefined ? {} : { code: bounded(input.actionDecision.code, 80) }),
+      reason: bounded(input.actionDecision.reason, 160),
+      requiresGrant: input.actionDecision.requiresGrant === true,
+      requiresConfirmation: input.actionDecision.requiresConfirmation === true,
+      requiresStrongConfirmation: input.actionDecision.requiresStrongConfirmation === true,
+      verificationRequired: input.actionDecision.verificationRequired === true
+    } satisfies ActionEffectDecisionSummary;
+    const verification = input.verification === undefined ? undefined : { required: input.verification.required === true, verified: input.verification.verified === true, kind: bounded(input.verification.kind, 80), summary: bounded(input.verification.summary, 160), independent: input.verification.independent === true } satisfies ActionVerificationSummary;
+    const record: ActivityRecord = { eventId: "activity_" + randomUUID(), sessionId: bounded(input.sessionId), timestamp: bounded(input.timestamp, 40), tool: bounded(input.tool), ...(input.strategy === undefined ? {} : { strategy: bounded(input.strategy) }), riskLevel: input.riskLevel, preview: input.preview === true, ok: input.ok === true, ...(input.errorCode === undefined ? {} : { errorCode: bounded(input.errorCode) }), durationMs: Number.isFinite(input.durationMs) ? Math.max(0, Math.min(86_400_000, Math.floor(input.durationMs))) : 0, confirmation: input.confirmation === true, ...(safeReceiptId === undefined ? {} : { receiptId: safeReceiptId }), ...(actionDecision === undefined ? {} : { actionDecision }), ...(verification === undefined ? {} : { verification }) };
     this.#activity.push(record);
     while (this.#activity.length > 10_000) this.#activity.shift();
     await appendFile(this.#activityFile, JSON.stringify(record) + "\n", "utf8");
@@ -290,7 +303,7 @@ export class ControlRoomStore {
 
   #eventsForTask(taskId: string): ControlRoomTimelineEvent[] {
     const [source, id] = taskId.split(":", 2);
-    if (source === "direct") return this.#activity.filter((item) => item.sessionId === id && this.#owns(item.sessionId)).map((item) => ({ eventId: item.eventId, taskId, source: "direct_activity" as const, sourceRecordId: id ?? "unknown", timestamp: item.timestamp, kind: item.ok ? "tool_completed" as const : "failed" as const, tool: item.tool, ...(item.strategy === undefined ? {} : { strategy: item.strategy as any }), riskLevel: item.riskLevel, ...(item.preview ? { preview: true as const } : {}), ok: item.ok, ...(item.errorCode === undefined ? {} : { errorCode: item.errorCode }), summary: item.ok ? "Tool result recorded; content omitted." : "Tool failed; content omitted.", ...(item.receiptId === undefined ? {} : { opaqueIds: [item.receiptId] }) }));
+    if (source === "direct") return this.#activity.filter((item) => item.sessionId === id && this.#owns(item.sessionId)).map((item) => ({ eventId: item.eventId, taskId, source: "direct_activity" as const, sourceRecordId: id ?? "unknown", timestamp: item.timestamp, kind: item.ok ? "tool_completed" as const : "failed" as const, tool: item.tool, ...(item.strategy === undefined ? {} : { strategy: item.strategy as any }), riskLevel: item.riskLevel, ...(item.preview ? { preview: true as const } : {}), ok: item.ok, ...(item.errorCode === undefined ? {} : { errorCode: item.errorCode }), ...(item.actionDecision === undefined ? {} : { actionDecision: item.actionDecision }), ...(item.verification === undefined ? {} : { verification: item.verification }), summary: item.ok ? "Tool result recorded; content omitted." : "Tool failed; content omitted.", ...(item.receiptId === undefined ? {} : { opaqueIds: [item.receiptId] }) }));
     return this.#eventIndex.get(taskId) ?? [];
   }
   #owns(sessionId: string | undefined): boolean { return this.#ownerSessionId === undefined || sessionId === this.#ownerSessionId; }

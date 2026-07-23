@@ -128,6 +128,8 @@ export interface ToolResult<T = unknown> {
   confirmation?: ToolConfirmationInfo;
   receipt?: ToolResultReceipt;
   grantDecision?: GrantDecision;
+  actionDecision?: ActionEffectDecisionSummary;
+  verification?: ActionVerificationSummary;
   approval: ApprovalInfo;
   data: T | null;
   observations: string[];
@@ -400,8 +402,85 @@ export interface ToolExecutionMetadata {
   requiresExactTarget: boolean;
   source: ToolSource;
   availability: ToolAvailability;
+  /** Effect-level governance metadata. Optional on legacy definitions; normalized at registration. */
+  operationFamily?: string;
+  operation?: string;
+  reversibility?: "reversible" | "persistent" | "external" | "destructive" | "prohibited";
+  sensitivity?: AppSensitivity;
+  requiredBindings?: Array<"target" | "recipient" | "content" | "artifact" | "channel" | "route">;
+  confirmationLevel?: "none" | "standard" | "strong";
+  verificationKind?: string;
+  cleanupKind?: string;
   /** Structural grant prerequisites; does not grant permission. */
   requiredGrantIds?: string[];
+}
+
+export type ActionEffectDecision =
+  | "allow_read_only"
+  | "allow_from_explicit_intent"
+  | "prepare_only"
+  | "require_confirmation"
+  | "require_strong_confirmation"
+  | "require_clarification"
+  | "guide_only"
+  | "blocked_by_policy"
+  | "unsupported"
+  | "unavailable"
+  | "verification_unavailable";
+
+export type ActionRecoveryAction = "clarify" | "prepare" | "confirm" | "repair" | "select_target" | "select_route" | "guide" | "retry" | "block";
+
+export interface ActionBindingFingerprints {
+  target?: string;
+  recipient?: string;
+  content?: string;
+  artifact?: string;
+  channel?: string;
+  route?: string;
+}
+
+export interface GovernedActionEffect {
+  effectId: string;
+  ownerSessionId: string;
+  goalId?: string;
+  planId?: string;
+  stepId?: string;
+  operationFamily: string;
+  operation: string;
+  bindings: ActionBindingFingerprints;
+  application?: string;
+  executionClass: ToolExecutionClass;
+  reversibility: "reversible" | "persistent" | "external" | "destructive" | "prohibited";
+  externalEffect: boolean;
+  destructive: boolean;
+  sensitivity: AppSensitivity;
+  requiredGrantIds: string[];
+  confirmationLevel: "none" | "standard" | "strong";
+  verificationKind: string;
+  cleanupKind: string;
+  expiresAt: string;
+  status: "prepared" | "authorized" | "executing" | "verified" | "failed" | "cleaned" | "expired";
+  fingerprint: string;
+}
+
+export interface ActionEffectDecisionSummary {
+  decision: ActionEffectDecision;
+  recovery: ActionRecoveryAction;
+  code?: string;
+  reason: string;
+  effectFingerprint?: string;
+  requiresGrant: boolean;
+  requiresConfirmation: boolean;
+  requiresStrongConfirmation: boolean;
+  verificationRequired: boolean;
+}
+
+export interface ActionVerificationSummary {
+  required: boolean;
+  verified: boolean;
+  kind: string;
+  summary: string;
+  independent: boolean;
 }
 
 export interface OptionalAdapterExecutionPolicy {
@@ -490,6 +569,15 @@ export interface CapabilityGrantMatch {
   registrationIds?: string[];
   runtimeToolNames?: string[];
   runtimeCapabilities?: ToolForgeRuntimeCapability[];
+  operationFamilies?: string[];
+  operations?: string[];
+  targetFingerprints?: string[];
+  recipientFingerprints?: string[];
+  contentFingerprints?: string[];
+  artifactFingerprints?: string[];
+  channels?: string[];
+  routes?: string[];
+  ownerSessionIds?: string[];
 }
 
 export interface CapabilityGrant {
@@ -612,6 +700,8 @@ export interface ControlRoomTimelineEvent {
   preview?: boolean;
   ok?: boolean;
   errorCode?: string;
+  actionDecision?: ActionEffectDecisionSummary;
+  verification?: ActionVerificationSummary;
   summary: string;
   opaqueIds?: string[];
 }
@@ -934,6 +1024,9 @@ export interface SafetyInput {
   strategy?: AutomationStrategy;
   generatedToolId?: string;
   generatedTool?: boolean;
+  registrationId?: string;
+  runtimeToolName?: string;
+  runtimeCapabilities?: ToolForgeRuntimeCapability[];
   appId?: string;
   appName?: string;
   url?: string;
@@ -943,6 +1036,7 @@ export interface SafetyInput {
   externalEffect?: boolean;
   destructive?: boolean;
   communicative?: boolean;
+  effect?: Partial<GovernedActionEffect> & { operationFamily?: string; operation?: string; bindings?: ActionBindingFingerprints };
 }
 
 export interface GrantDecision {
@@ -966,6 +1060,7 @@ export interface SafetyDecision {
   reasons: string[];
   matchedRules: string[];
   grantDecision: GrantDecision;
+  actionDecision?: ActionEffectDecisionSummary;
 }
 
 export type PathAccessMode = "read" | "write" | "delete";
@@ -984,6 +1079,7 @@ export interface PathSafetyResult {
 }
 
 export interface SafetyEvaluationContext {
+  ownerSessionId?: string;
   homeDir?: string;
   cwd?: string;
   agentHostDir?: string;
@@ -2173,6 +2269,7 @@ export interface AuditLogEntry {
   deniedGrantIds?: string[];
   guideOnlyGrantIds?: string[];
   grantDecision?: GrantDecision;
+  actionDecision?: ActionEffectDecisionSummary;
   dryRunRequired?: boolean;
   confirmationRequiredByGrant?: boolean;
   approvalRequiredByGrant?: boolean;

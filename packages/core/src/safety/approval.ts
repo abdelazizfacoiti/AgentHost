@@ -3,7 +3,8 @@ import type { ApprovalInfo, PolicyProfile, RiskLevel } from "../types.js";
 export function evaluateApprovalRequirement(
   riskLevel: RiskLevel,
   policy: PolicyProfile,
-  reasons: string[] = []
+  reasons: string[] = [],
+  exactGrantPresent = false
 ): ApprovalInfo {
   const reason = reasons.join(" ");
 
@@ -15,11 +16,20 @@ export function evaluateApprovalRequirement(
     };
   }
 
-  if (riskLevel === "high" && policy.blockHighRiskByDefault) {
+  if (riskLevel === "high" && policy.blockHighRiskByDefault && !exactGrantPresent) {
     return {
       required: false,
       status: "denied",
       reason: reason.length > 0 ? reason : "High-risk actions are blocked by this policy profile."
+    };
+  }
+
+  // Exact scoped grants make high-risk effect eligible for governed execution;
+  // confirmation remains enforced by central runner/handler.
+  if (riskLevel === "high" && exactGrantPresent) {
+    return {
+      required: false,
+      status: "not_required"
     };
   }
 
@@ -31,7 +41,7 @@ export function evaluateApprovalRequirement(
     };
   }
 
-  if (riskLevel === "medium" && policy.requireApprovalForMediumRisk) {
+  if (riskLevel === "medium" && policy.requireApprovalForMediumRisk && !exactGrantPresent) {
     return {
       required: true,
       status: "required",

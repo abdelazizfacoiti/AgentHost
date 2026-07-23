@@ -32,7 +32,7 @@ describe("guide mode", () => {
     expect(result.workflowKind).toBe("sensitive_app");
     expect(result.appSensitivity).toBe("communication");
     expect(result.strategy).toBe("guide_only");
-    expect(result.canAutomateLater).toBe(false);
+    expect(result.canAutomateLater).toBe(true);
     expect(result.warnings.join(" ")).toContain("will not send messages");
     expect(result.steps.map((step) => step.id)).toContain("review-communication");
   });

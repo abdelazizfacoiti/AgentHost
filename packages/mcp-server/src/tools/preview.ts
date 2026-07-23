@@ -31,6 +31,9 @@ interface PreviewResultInput {
   saferAlternative?: ActionPreviewAlternative | undefined;
   wouldExecute?: boolean | undefined;
   observations?: string[] | undefined;
+  /** Canonical central effect binding. Handlers may supply a more specific
+   * local safety projection, but confirmations must use this fingerprint. */
+  effectFingerprint?: string | undefined;
   confirmation?: {
     manager: ConfirmationManager;
     sessionId: string;
@@ -40,6 +43,7 @@ interface PreviewResultInput {
     riskLevel: RiskLevel;
     appSensitivity?: ActionPreviewResult["appSensitivity"];
     dataSensitivity?: DataSensitivity | undefined;
+    effectFingerprint?: string | undefined;
   } | undefined;
 }
 
@@ -50,6 +54,7 @@ export function buildPreviewResult(input: PreviewResultInput): ToolResult<Action
     input.wouldExecute ??
     (supported !== false && !ambiguous && input.safety.allowed);
   const confirmationAvailable = wouldExecute && input.confirmation !== undefined;
+  const effectFingerprint = input.effectFingerprint ?? input.confirmation?.effectFingerprint ?? input.safety.actionDecision?.effectFingerprint;
   const confirmationToken = confirmationAvailable
     ? input.confirmation!.manager.createPreviewToken({
         sessionId: input.confirmation!.sessionId,
@@ -63,6 +68,9 @@ export function buildPreviewResult(input: PreviewResultInput): ToolResult<Action
         ...(input.confirmation!.dataSensitivity === undefined
           ? {}
           : { dataSensitivity: input.confirmation!.dataSensitivity }),
+        ...(effectFingerprint === undefined
+          ? {}
+          : { effectFingerprint }),
         targetSummary: input.targetSummary
       })
     : undefined;
