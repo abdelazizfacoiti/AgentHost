@@ -135,7 +135,7 @@ Workflow traces and skills store redacted summaries. Checkpoint templates accept
 
 ## Scheduler governance boundary
 
-Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, requests, approval reviews, expiry, and staleness diagnostics are local metadata. They do not create timers, workers, run sessions, replay sessions, notifications, files, or execution permission. Scheduler approval is never execution authorization.
+Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, requests, approval reviews, expiry, and staleness diagnostics are local metadata. Schedule records support bounded once/delayed/recurring/cron/calendar descriptions and future-condition markers; pause/resume/cancel/archive/remove are review transitions only. Records are owner-scoped for new MCP sessions and written atomically with restrictive permissions. They do not create timers, workers, run sessions, replay sessions, notifications, files, or execution permission. Scheduler approval is never execution authorization.
 
 ## Local data layout
 

@@ -26,6 +26,7 @@
     "browser:extension:verify": "node scripts/build-browser-extension.mjs",
     "browser:setup": "node scripts/prepare-browser-extension.mjs --setup",
     "release:build": "node scripts/build-release.mjs",
+    "release:preflight": "node scripts/release-preflight.mjs",
     "release:notices": "node scripts/generate-third-party-notices.mjs",
     "release:scan": "node scripts/scan-release.mjs",
     "release:verify": "node scripts/verify-release.mjs",

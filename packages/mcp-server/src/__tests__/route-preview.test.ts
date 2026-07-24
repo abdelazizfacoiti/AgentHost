@@ -39,6 +39,33 @@ describe("route preview", () => {
     expect(result.selectedRoute).toBe("browser_bridge");
   });
 
+  it("uses native adapters before browser routes when both are healthy", async () => {
+    const store = new RouteMetricsStore("/tmp/agenthost-route-preview-native-order");
+    await store.ensureStructure();
+    const router = new AdaptiveActionRouter(store);
+    const result = await router.preview({
+      registry: createBaseCapabilityRegistry(),
+      adapters: { listAdapters: () => [{ adapterId: "native_fixture", appId: "fixture", displayName: "Fixture", capabilities: [], status: "available" }] } as never,
+      profile: "dev",
+      browser: { detect: async () => ({ enabled: true, paired: true, connected: true, reason: "paired" }) } as never
+    }, { goalCategory: "browser_navigation" });
+    expect(result.candidates.find((item) => item.routeFamily === "native_adapter")?.tieBreakKey).toMatch(/^00:/u);
+    expect(result.candidates.find((item) => item.routeFamily === "browser_bridge")?.tieBreakKey).toMatch(/^01:/u);
+  });
+
+  it("reports shared bridge probe cache hits without eager OCR or screenshots", async () => {
+    const store = new RouteMetricsStore("/tmp/agenthost-route-preview-cache-stats");
+    await store.ensureStructure();
+    const router = new AdaptiveActionRouter(store);
+    const cache = new (await import("../decision-cache.js")).BridgeProbeCache(10_000);
+    const context = { registry: createBaseCapabilityRegistry(), adapters: createAdapterRegistry(), profile: "dev" as const, bridgeProbeCache: cache, browser: { detect: async () => ({ enabled: true, paired: true, connected: true }) } as never };
+    await router.preview(context, { goalCategory: "browser_navigation" });
+    const second = await router.preview(context, { goalCategory: "webpage_inspection" });
+    expect(second.probeSummary?.cached).toBeGreaterThanOrEqual(1);
+    expect(second.probeSummary?.succeeded).toBe(1);
+    expect(second.candidates.find((item) => item.routeFamily === "local_ocr")?.health).toBe("healthy");
+  });
+
   it("fails browser routes closed on disconnected or incompatible live bridge state", async () => {
     for (const state of ["unpaired", "version_mismatch"]) {
       const store = new RouteMetricsStore(`/tmp/agenthost-route-preview-${state}`);

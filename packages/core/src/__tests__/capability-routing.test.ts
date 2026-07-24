@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { compareCapabilityRoutes, scoreCapabilityRoute, validateVisualSurface, type CapabilityRouteCandidate, type VisualSurfaceProtocolEnvelope } from "@agenthost/core";
+import { CAPABILITY_ROUTE_FAMILIES, compareCapabilityRoutes, scoreCapabilityRoute, validateVisualSurface, type CapabilityRouteCandidate, type VisualSurfaceProtocolEnvelope } from "@agenthost/core";
 
 function route(overrides: Partial<CapabilityRouteCandidate> = {}): CapabilityRouteCandidate {
   return { routeFamily: "browser_bridge", goalCategory: "browser_navigation", prerequisites: [], health: "healthy", compatible: true, probeTier: 1, estimatedProbeMs: 10, estimatedSetupMs: 10, estimatedExecutionMs: 10, estimatedVerificationMs: 10, verificationStrength: "strong", verifiedSuccesses: 0, verifiedFailures: 0, consecutiveVerifiedFailures: 0, failureProbability: 0.1, recoveryCostMs: 100, contextTokens: 100, riskLevel: "observe", requiresConfirmation: false, tieBreakKey: "00:browser_bridge", ...overrides };
 }
 describe("adaptive route model", () => {
+  it("uses the deterministic product route order", () => {
+    expect(CAPABILITY_ROUTE_FAMILIES).toEqual(["native_adapter", "browser_bridge", "structured_browser", "accessibility", "local_ocr", "screenshot_vision", "desktop_input", "guide_only"]);
+  });
   it("scores safety and verification before small latency differences", () => {
     expect(scoreCapabilityRoute(route({ routeFamily: "desktop_input", verificationStrength: "weak", riskLevel: "medium", tieBreakKey: "06:desktop_input" }))).toBeGreaterThan(scoreCapabilityRoute(route()));
-    expect(compareCapabilityRoutes(route(), route({ routeFamily: "structured_browser", tieBreakKey: "01:structured_browser" }))).toBeLessThan(0);
+    expect(compareCapabilityRoutes(route(), route({ routeFamily: "structured_browser", tieBreakKey: "02:structured_browser" }))).toBeLessThan(0);
   });
   it("rejects unavailable and blocked candidates", () => {
     expect(scoreCapabilityRoute(route({ compatible: false }))).toBe(Infinity);

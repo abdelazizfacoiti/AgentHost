@@ -214,7 +214,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const bridgeProbeCache = new BridgeProbeCache(1_500);
   const speechStore = new SpeechStore(config.agentHostDir);
   await speechStore.ensureStructure();
-  const scheduler = new SchedulerStore(config.agentHostDir);
+  const scheduler = new SchedulerStore(config.agentHostDir, sessionId);
   await scheduler.ensureStructure();
   const receipts = new ToolReceiptManager();
   const visionEvidence = new VisionEvidenceStore();

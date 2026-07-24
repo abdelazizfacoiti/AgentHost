@@ -43,7 +43,11 @@ describe("visual runtime smoke", () => {
       confirmationTokensCreated: false
     });
     expect(store.get(result.activityId)?.terminalVerification?.verified).toBe(true);
-    expect(store.events().some((event) => event.state === "completed")).toBe(true);
+    const events = store.events();
+    expect(events.some((event) => event.state === "preparing" && event.labelKey === "checking_available_methods")).toBe(true);
+    expect(events.some((event) => event.state === "inspecting" && event.labelKey === "verifying_result")).toBe(true);
+    expect(events.some((event) => event.state === "completed")).toBe(true);
+    expect(store.get(result.activityId)?.progress).toMatchObject({ kind: "exact", completed: 1, total: 2, percent: 50 });
     await controller.close();
     await overlay.close();
   });

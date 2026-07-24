@@ -48,7 +48,7 @@ Build on `packages/app-overlay`, renderer diagnostics/setup, target grounding, b
 - renderer/setup diagnostics;
 - reviewable visual flow templates;
 - explicit fallback and Wayland guidance.
-- deterministic Build Week runtime-smoke launcher; internal visual fixtures remain test-only;
+- deterministic local Visual Copilot runtime-smoke launcher; internal visual fixtures remain test-only;
 - bounded current-step target refresh and stale-target recovery;
 - human-readable visual state/recovery projections.
 
@@ -298,6 +298,6 @@ Documentation-only changes must also run stale-claim searches and manual heading
 
 ## Milestone A status
 
-Milestone A1, A2, A3, and A4 are complete for Build Week scope. A4 adds optional local read-only Control Room reporting with redacted projections, bounded polling UI, loopback token protection, and no execution surface.
+Milestone A1, A2, A3, and A4 are complete for the current visual-copilot product scope. A4 adds optional local read-only Control Room reporting with redacted projections, bounded polling UI, loopback token protection, and no execution surface.
 
-P1 Safety Reconciliation and R6 Closure are the current release-hardening boundary. Milestone B remains future planning only. Provider-specific workflows, scheduler execution, skill replay, remote clients, accounts, and autonomous operation remain out of scope.
+P1 Safety Reconciliation and R6 Closure remain the release-hardening boundary. Final Release Polish adds only inert scheduler schedule/lifecycle metadata, deterministic route-cache measurements, authoritative visual-runtime regression coverage, and public-repository/release consistency. Milestone B remains future planning only. Provider-specific workflows, scheduler execution, skill replay, remote clients, accounts, and autonomous operation remain out of scope.

@@ -66,6 +66,17 @@ Output never contains pairing tokens, Control Room tokens, secrets, private page
 
 `agenthost doctor` checks runtime versions, config, permissions, MCP availability, browser artifacts/pairing, strategy registry, X11, actual GTK/PyGObject import support, Control Room, speech, storage, and stale process state. JSON output uses stable status fields and redacted path labels.
 
+Supported environment overrides are `AGENTHOST_HOME`, `AGENTHOST_CONFIG`,
+`AGENTHOST_PROFILE`, `AGENTHOST_LOG_FILE`, `AGENTHOST_OVERLAY_MODE`,
+`AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED`,
+`AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_REDUCED_MOTION`,
+`AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE`, `AGENTHOST_BROWSER_BRIDGE_ENABLED`,
+`AGENTHOST_BROWSER_BRIDGE_PORT`, `AGENTHOST_BROWSER_PAIRING_TOKEN_FILE`,
+`AGENTHOST_BROWSER_PAIRING_STATE_FILE`, `AGENTHOST_CONTROL_ROOM_ENABLED`,
+`AGENTHOST_CONTROL_ROOM_PORT`, and `AGENTHOST_CONTROL_ROOM_TOKEN_FILE`.
+Values are schema-validated; environment overrides do not bypass grants,
+confirmation, redaction, loopback binding, or scheduler non-execution.
+
 ## Lifecycle and recovery
 
 Foreground MCP operation is default. `--background` uses a local PID/lock record with stale-lock detection and bounded shutdown. No daemon, cron, systemd, restart loop, or hidden persistence exists.
@@ -75,6 +86,10 @@ Updates require an operator-provided archive, checksum verification, preflight, 
 ## Release contents and scanning
 
 The archive contains compiled runtime, production dependencies, renderer assets, extension source/artifacts, version manifest, documentation, legal files, and per-file hashes. The release directory also contains archive `SHA256SUMS` sidecars. The project is Apache-2.0 licensed; `LICENSE`, `NOTICE`, and generated `THIRD_PARTY_NOTICES` are copied and verified. The artifact excludes runtime state, logs, screenshots, OCR/page text, audio, pairing/reconnect state, Control Room tokens, confirmations, credentials, caches, temporary files, development tests/maps, absolute checkout links, and dangling development symlinks.
+
+Public repository governance files (`CODE_OF_CONDUCT.md`, `SECURITY.md`, and
+`SUPPORT.md`) are copied into the archive. The root npm package remains
+private; the supported public artifact is the Linux archive and CLI.
 
 `release:scan` fails on credential-like material, token formats, current-user absolute paths, private media/log artifacts, oversized files, or unsafe release contents. `release:verify` validates manifest fingerprints.
 

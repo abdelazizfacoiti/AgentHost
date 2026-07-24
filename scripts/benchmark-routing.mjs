@@ -77,6 +77,10 @@ for (const testCase of cases) {
     replanCount: testCase.replanCount ?? 0,
     fallbackCount: testCase.fallbackCount ?? 0,
     retries: 0,
+    cacheHits: 0,
+    probeCount: 0,
+    latencyBoundMs: 5_000,
+    latencyWithinBound: summary(samples).p95Us <= 5_000,
     ocrCalls: selectedRoute === "local_ocr" ? 1 : 0,
     screenshotCalls: selectedRoute === "screenshot_vision" ? 1 : 0,
     desktopFallbacks: selectedRoute === "desktop_input" ? 1 : 0,
@@ -85,4 +89,11 @@ for (const testCase of cases) {
     candidates: testCase.candidates.map((candidate) => ({ routeFamily: candidate.routeFamily, health: candidate.health, compatible: candidate.compatible, verificationStrength: candidate.verificationStrength }))
   });
 }
-console.log(JSON.stringify({ schemaVersion: 2, benchmark: "goal-routing-fixtures", deterministic: true, generatedAt: "fixture-only", rows, safeguards: { maxIterations: ITERATIONS, maxCandidates: 4, probesExecuted: false, actionsExecuted: false, screenshotsCaptured: false, modelCalls: false }, redacted: true }, null, 2));
+const assertions = {
+  allExpectationsMatch: rows.every((row) => row.matchesExpectation),
+  latencyBounded: rows.every((row) => row.latencyWithinBound),
+  probeCountBounded: rows.every((row) => row.probeCount <= 4),
+  cacheHitCountersPresent: rows.every((row) => Number.isInteger(row.cacheHits) && row.cacheHits >= 0)
+};
+if (!Object.values(assertions).every(Boolean)) throw new Error("routing_benchmark_assertion_failed");
+console.log(JSON.stringify({ schemaVersion: 2, benchmark: "goal-routing-fixtures", deterministic: true, generatedAt: "fixture-only", rows, assertions, safeguards: { maxIterations: ITERATIONS, maxCandidates: 4, maxProbeCount: 4, probesExecuted: false, actionsExecuted: false, screenshotsCaptured: false, modelCalls: false }, redacted: true }, null, 2));

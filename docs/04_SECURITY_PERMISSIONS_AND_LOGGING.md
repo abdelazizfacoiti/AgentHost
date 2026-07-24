@@ -126,7 +126,7 @@ The A3 demo uses authoritative redacted runtime activity only; internal visual f
 
 ## Scheduler governance safety
 
-Jobs, activation, manual-run contracts, preflights, acknowledgements, requests, reviews, expiry, and staleness records are metadata-only. They cannot create timers, workers, run sessions, replay sessions, files, notifications, messages, or confirmation tokens. Approval records do not authorize execution. Any future worker must revalidate policy, grants, readiness, dry-run, confirmation, receipts, checkpoints, cancellation, and stop-on-failure at run time.
+Jobs, activation, manual-run contracts, preflights, acknowledgements, requests, reviews, expiry, and staleness records are metadata-only. New job records are bound to trusted owner session context, redact names/parameters, and use `0700` directories with `0600` atomic JSON files. They cannot create timers, workers, run sessions, replay sessions, files, notifications, messages, or confirmation tokens. Approval records do not authorize execution. Any future worker must revalidate policy, grants, readiness, dry-run, confirmation, receipts, checkpoints, cancellation, and stop-on-failure at run time.
 
 ## Files, redaction, and audit logs
 

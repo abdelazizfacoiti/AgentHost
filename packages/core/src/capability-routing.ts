@@ -1,6 +1,6 @@
 import type { RiskLevel } from "./types.js";
 
-export const CAPABILITY_ROUTE_FAMILIES = ["browser_bridge", "structured_browser", "native_adapter", "accessibility", "local_ocr", "screenshot_vision", "desktop_input", "guide_only"] as const;
+export const CAPABILITY_ROUTE_FAMILIES = ["native_adapter", "browser_bridge", "structured_browser", "accessibility", "local_ocr", "screenshot_vision", "desktop_input", "guide_only"] as const;
 export type CapabilityRouteFamily = typeof CAPABILITY_ROUTE_FAMILIES[number];
 export const CAPABILITY_ROUTE_GOAL_CATEGORIES = [
   "browser_navigation",
@@ -82,6 +82,7 @@ export interface CapabilityRouteSelection {
     succeeded: number;
     failed: number;
     cached: number;
+    freshProbes?: number;
     durationMs: number;
   };
   latencyClass?: "instant" | "short" | "moderate" | "long";

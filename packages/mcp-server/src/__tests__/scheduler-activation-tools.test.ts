@@ -8,11 +8,12 @@ import { GrantStore } from "../grants.js";
 import { SchedulerStore } from "../scheduler-store.js";
 import { runTool } from "../tool-runner.js";
 import { createSchedulerActivationTools } from "../tools/scheduler-activation.js";
+import { createSchedulerTools } from "../tools/scheduler.js";
 import { WorkflowStore } from "../workflow-store.js";
 
 class MemoryLogger implements AuditLogger { entries: AuditLogEntry[] = []; async log(entry: AuditLogEntry) { this.entries.push(entry); } }
-async function context(): Promise<AgentHostMcpContext> { const agentHostDir = `/tmp/agenthost-scheduler-activation-${randomUUID()}`; const policy = getPolicyProfile("dev"); const config: AgentHostConfig = { agentHostDir, configPath: `${agentHostDir}/config.json`, logFile: `${agentHostDir}/logs/test.jsonl`, profile: "dev", policy }; const workflowTrace = new WorkflowStore(agentHostDir); const scheduler = new SchedulerStore(agentHostDir); await Promise.all([workflowTrace.ensureStructure(), scheduler.ensureStructure()]); return { sessionId: "session_scheduler", config, policy, registry: createBaseCapabilityRegistry(), adapters: createAdapterRegistry(), logger: new MemoryLogger(), confirmations: new ConfirmationManager(), grants: new GrantStore({ persistentGrants: [] }), forge: new ForgeStore(agentHostDir), workflowTrace, scheduler, linux: {} as AgentHostMcpContext["linux"] }; }
-async function call(value: AgentHostMcpContext, name: string, input: unknown) { const tool = createSchedulerActivationTools().find((candidate) => candidate.name === name); if (tool === undefined) throw new Error("tool_missing"); return runTool(tool, input, value); }
+async function context(): Promise<AgentHostMcpContext> { const agentHostDir = `/tmp/agenthost-scheduler-activation-${randomUUID()}`; const policy = getPolicyProfile("dev"); const config: AgentHostConfig = { agentHostDir, configPath: `${agentHostDir}/config.json`, logFile: `${agentHostDir}/logs/test.jsonl`, profile: "dev", policy }; const workflowTrace = new WorkflowStore(agentHostDir); const scheduler = new SchedulerStore(agentHostDir, "session_scheduler"); await Promise.all([workflowTrace.ensureStructure(), scheduler.ensureStructure()]); return { sessionId: "session_scheduler", config, policy, registry: createBaseCapabilityRegistry(), adapters: createAdapterRegistry(), logger: new MemoryLogger(), confirmations: new ConfirmationManager(), grants: new GrantStore({ persistentGrants: [] }), forge: new ForgeStore(agentHostDir), workflowTrace, scheduler, linux: {} as AgentHostMcpContext["linux"] }; }
+async function call(value: AgentHostMcpContext, name: string, input: unknown) { const tool = [...createSchedulerActivationTools(), ...createSchedulerTools()].find((candidate) => candidate.name === name); if (tool === undefined) throw new Error("tool_missing"); return runTool(tool, input, value); }
 async function approvedJob(value: AgentHostMcpContext, status: ScheduledJobSpec["status"] = "approved") { const trace = await value.workflowTrace!.createTrace({ sessionId: value.sessionId, name: "Generic schedule" }); await value.workflowTrace!.stopTrace({ sessionId: value.sessionId, traceId: trace.traceId }); const skill = await value.workflowTrace!.saveSkillFromTrace({ traceId: trace.traceId, name: "Safe inspect", description: "Generic" }); const timestamp = new Date().toISOString(); const job: ScheduledJobSpec = { jobId: `job_${randomUUID()}`, name: "private-name@example.test", description: "private description", createdAt: timestamp, updatedAt: timestamp, status, schedule: { kind: "recurring", everyMinutes: 60, timezone: "UTC" }, task: { type: "skill_replay_dryrun", skillId: skill.skillId, dataSensitivity: "none", parameterNames: [], requiredGrantIds: [] }, delivery: { kind: "local_log" }, parametersSummary: [], requiredGrants: [], requiredConfirmations: [], safetyRestrictions: [], retryPolicy: "none", maxAttempts: 1, version: 1, jobHash: "", executable: false, scheduledExecutionEnabled: false }; job.jobHash = schedulerHash(job); await value.scheduler!.saveJob(job); return job; }
 
 describe("scheduler activation tools", () => {
@@ -42,5 +43,17 @@ describe("scheduler activation tools", () => {
     expect(get).toMatchObject({ ok: true, data: { activation: { status: "activation_approved" } } }); expect(list).toMatchObject({ ok: true, data: { activations: [{ activationRequestId }] } }); expect(JSON.stringify([get, list])).not.toContain("private description");
     const schedulerTools = (await import("../tools/scheduler.js")).createSchedulerTools(); const jobGet = schedulerTools.find((candidate) => candidate.name === "scheduler.job_get")!; const jobList = schedulerTools.find((candidate) => candidate.name === "scheduler.job_list")!; expect(await runTool(jobGet, { jobId: job.jobId }, value)).toMatchObject({ ok: true, data: { activation: { activationRequestId, status: "activation_approved" } } }); const jobs = await runTool(jobList, {}, value); expect(jobs.ok).toBe(true); expect((jobs.data as { jobs: Array<{ activation?: { status: string }; description: string }> }).jobs[0]).toMatchObject({ activation: { status: "activation_approved" }, description: "[redacted]" });
     const readinessTool = (await import("../tools/scheduler-readiness.js")).createSchedulerReadinessTools().find((candidate) => candidate.name === "scheduler.job_readiness")!; const readiness = await runTool(readinessTool, { jobId: job.jobId }, value); expect(readiness).toMatchObject({ ok: true, data: { executableNow: false, scheduledExecutionEnabled: false, actualExecutionSupported: false, activationStatus: "activation_approved" } }); expect(value.confirmations).not.toHaveProperty("tokens");
+  });
+
+  it("supports pause, resume, cancel, and archive as metadata-only transitions", async () => {
+    const value = await context();
+    const job = await approvedJob(value);
+    for (const [name, expected] of [["scheduler.job_pause", "paused"], ["scheduler.job_resume", "review_required"], ["scheduler.job_cancel", "cancelled"], ["scheduler.job_archive", "archived"]] as const) {
+      const result = await call(value, name, { jobId: job.jobId });
+      expect(result).toMatchObject({ ok: true, data: { job: { status: expected, executable: false, scheduledExecutionEnabled: false } } });
+      expect(result.data).not.toHaveProperty("runSession");
+      expect(result.data).not.toHaveProperty("replaySession");
+    }
+    expect((await value.scheduler!.getJob(job.jobId)).status).toBe("archived");
   });
 });

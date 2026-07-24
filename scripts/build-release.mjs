@@ -49,6 +49,9 @@ await copy(path.join(releaseRoot, "browser"), path.join(stage, "browser-extensio
 await copy(path.join(root, "README.md"), path.join(stage, "README.md"));
 await copy(path.join(root, "CHANGELOG.md"), path.join(stage, "CHANGELOG.md"));
 await copy(path.join(root, "CONTRIBUTING.md"), path.join(stage, "CONTRIBUTING.md"));
+for (const communityFile of ["CODE_OF_CONDUCT.md", "SECURITY.md", "SUPPORT.md"]) {
+  await copy(path.join(root, communityFile), path.join(stage, communityFile));
+}
 await copy(path.join(root, "docs"), path.join(stage, "docs"));
 for (const legalFile of LEGAL_FILES) {
   await copy(path.join(root, legalFile), path.join(stage, legalFile));

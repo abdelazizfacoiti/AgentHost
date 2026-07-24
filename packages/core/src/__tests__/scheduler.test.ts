@@ -11,4 +11,16 @@ describe("scheduler spec safety", () => {
   it("uses conservative manual-run approval expiry defaults", () => {
     expect(DEFAULT_SCHEDULER_POLICY).toMatchObject({ manualRunApprovalTtlSeconds: 900, manualRunApprovalExpiryWarningSeconds: 300, requireFreshApprovalAtExecution: true, requireFullRevalidationAfterExpiry: true, allowAutomaticRefresh: false });
   });
+
+  it("accepts bounded delayed, cron, and calendar metadata without creating execution state", () => {
+    expect(validateSchedulerSchedule({ kind: "delayed", delayMinutes: 15, timezone: "UTC" }, DEFAULT_SCHEDULER_POLICY)).toEqual([]);
+    expect(validateSchedulerSchedule({ kind: "cron", expression: "0 9 * * 1-5", timezone: "UTC" }, DEFAULT_SCHEDULER_POLICY)).toEqual([]);
+    expect(validateSchedulerSchedule({ kind: "calendar", unit: "weekdays", at: "09:30", timezone: "UTC" }, DEFAULT_SCHEDULER_POLICY)).toEqual([]);
+  });
+
+  it("rejects malformed or high-frequency schedule metadata", () => {
+    expect(validateSchedulerSchedule({ kind: "delayed", delayMinutes: 0, timezone: "UTC" }, DEFAULT_SCHEDULER_POLICY)).toContain("scheduler_delay_invalid");
+    expect(validateSchedulerSchedule({ kind: "cron", expression: "not a cron", timezone: "UTC" }, DEFAULT_SCHEDULER_POLICY)).toContain("scheduler_cron_invalid");
+    expect(validateSchedulerSchedule({ kind: "calendar", unit: "daily", at: "9:3", timezone: "UTC" }, DEFAULT_SCHEDULER_POLICY)).toContain("scheduler_calendar_time_invalid");
+  });
 });

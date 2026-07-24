@@ -2,6 +2,11 @@
 
 AgentHost is local-first. The MCP server, Browser Bridge, overlay renderer, Control Room, OCR, speech providers, stores, and logs are local components. There is no public listener, cloud OCR/TTS, credential extraction, or automatic extension installation.
 
+Release support is documented in `SUPPORT.md`; security reports belong in
+`SECURITY.md` and must be sent privately with redacted diagnostics. Scheduler
+records remain owner-scoped review metadata only and never become background
+jobs.
+
 ## Data boundary
 
 - Pairing and Control Room tokens are generated locally, stored restrictively, and never written to logs or projections.

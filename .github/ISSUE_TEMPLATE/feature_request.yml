@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a bounded, safety-compatible improvement
+title: "[feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "Requests must preserve explicit intent, grants, confirmation, redaction, verification, and local-only boundaries."
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should be solved?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and verification impact
+      description: Explain authorization, target binding, cleanup, and verification.
+    validations:
+      required: true

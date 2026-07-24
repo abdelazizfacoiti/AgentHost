@@ -23,7 +23,7 @@ State-changing tools remain policy/grant/dry-run/confirmation gated. Overlay and
 
 ## Capability strategies
 
-`strategy.list`, `strategy.get`, `strategy.health`, and `strategy.select` expose bounded structural strategy metadata. Selection checks current profile, grants, loaded capabilities, adapter/browser health, compatibility, and deterministic scores. Browser navigation prefers the paired Browser Bridge before accessibility, vision, pointer, or guide fallback. Selection is advisory: it never executes tools, creates confirmations, grants permissions, or stores task content.
+`strategy.list`, `strategy.get`, `strategy.health`, and `strategy.select` expose bounded structural strategy metadata. Selection checks current profile, grants, loaded capabilities, adapter/browser health, compatibility, and deterministic scores. Route preference is native adapter, paired Browser Bridge, structured browser, accessibility, local OCR/vision, desktop, then guide fallback. Selection is advisory: it never executes tools, creates confirmations, grants permissions, or stores task content.
 
 Local proposals require review and two independently verified receipt-backed outcomes before activation. Strategies persist under `~/.agenthost/strategies/` with restrictive permissions and contain no passwords, tokens, page/file content, screenshots, OCR, arbitrary code, shell, dynamic tool names, or transient target IDs. Failed compatibility or verified outcomes degrade strategies; revalidation is explicit.
 
@@ -178,7 +178,7 @@ cannot be acknowledged. `--diagnose` prints renderer capability guidance;
 `--headless` verifies lifecycle while reporting `visible:false`;
 `--require-gui` fails when visible support is unavailable.
 
-Build Week walkthrough, setup, limitations, and video outline: [BUILD_WEEK.md](BUILD_WEEK.md).
+Demo, setup, limitations, and manual verification: [DEMO.md](DEMO.md).
 
 R6 release audit, storage inventory, manual verification checklist, and freeze status: [docs/09_RELEASE_AUDIT.md](docs/09_RELEASE_AUDIT.md).
 
@@ -192,7 +192,7 @@ Configuration accepts `forgeRuntimeSandboxMode` values `auto`, `none`, `bubblewr
 
 Workflow traces and skills store bounded redacted summaries. Checkpoint templates use declared parameters and literal `{{parameter}}` interpolation only. Replay dry-runs and sessions prepare one step at a time; the caller must invoke the original tool and provide a trusted receipt. No autonomous replay exists.
 
-Scheduler records are review-only metadata. Jobs, activation, manual-run contracts, acknowledgements, approvals, and expiry diagnostics create no timers, workers, run sessions, replay sessions, notifications, messages, files, or execution permission.
+Scheduler records are review-only metadata. Jobs support bounded `once`, `delayed`, `recurring`, `cron`, `calendar`, and future-condition schedule descriptions plus metadata-only pause, resume, cancel, archive, and remove lifecycle records. Jobs, activation, manual-run contracts, acknowledgements, approvals, and expiry diagnostics create no timers, workers, run sessions, replay sessions, notifications, messages, files, or execution permission. New records are bound to the trusted MCP owner session and persisted with restrictive atomic writes.
 
 ## Optional adapters
 

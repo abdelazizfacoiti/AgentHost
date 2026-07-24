@@ -1,0 +1,19 @@
+name: Question
+description: Ask about setup or supported behavior
+title: "[question] "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: "Please redact tokens, secrets, private content, screenshots, OCR, and full logs."
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Checks already tried
+      description: Include safe commands such as doctor, diagnose, build, or smoke.

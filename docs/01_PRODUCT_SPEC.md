@@ -89,6 +89,11 @@ Milestone A3 supplies one demo-ready local Visual Copilot runtime smoke. It uses
 
 Workflow traces and skills, checkpoint-template lifecycle, replay planning/session governance, scheduler jobs and activation/manual-run records, receipts, and Forge manifest/artifact/registration metadata are records and reviews. They do not create autonomous execution. Generated capabilities remain absent from the live MCP tool array.
 
+Scheduler specifications may describe a bounded one-time, delayed, recurring,
+cron, calendar, or future-condition schedule. Pause, resume, cancel, archive,
+and remove are metadata-only review transitions bound to trusted owner context;
+no schedule is registered with the operating system and no job is executed.
+
 ### Optional and experimental
 
 Application adapters are optional. Blender is the current reference adapter: disabled by default, explicitly enabled only through configuration, experimental, reviewed, bounded, and not core product direction. Other adapters must follow the same generic optional-adapter policy.

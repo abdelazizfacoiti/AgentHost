@@ -73,6 +73,8 @@ export class BridgeProbeCache {
   readonly #ttlMs: number;
   #result: { value: { enabled: boolean; paired: boolean; connected: boolean; reason?: string }; expiresAt: number } | undefined;
   #inflight: Promise<{ enabled: boolean; paired: boolean; connected: boolean; reason?: string }> | undefined;
+  #cacheHits = 0;
+  #freshProbes = 0;
 
   constructor(ttlMs = 1_500) {
     this.#ttlMs = Math.max(200, Math.min(10_000, ttlMs));
@@ -87,8 +89,9 @@ export class BridgeProbeCache {
     probe: () => Promise<{ enabled: boolean; paired: boolean; connected: boolean; reason?: string }>
   ): Promise<{ enabled: boolean; paired: boolean; connected: boolean; reason?: string }> {
     const cached = this.#result;
-    if (cached !== undefined && Date.now() <= cached.expiresAt) return cached.value;
+    if (cached !== undefined && Date.now() <= cached.expiresAt) { this.#cacheHits += 1; return cached.value; }
     if (this.#inflight !== undefined) return this.#inflight;
+    this.#freshProbes += 1;
     const call = probe().then(
       (value) => {
         this.#result = { value, expiresAt: Date.now() + this.#ttlMs };
@@ -109,4 +112,6 @@ export class BridgeProbeCache {
     this.#result = undefined;
     this.#inflight = undefined;
   }
+
+  stats(): { cacheHits: number; freshProbes: number } { return { cacheHits: this.#cacheHits, freshProbes: this.#freshProbes }; }
 }

@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible AgentHost problem
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include credentials, pairing tokens, private page content, screenshots, OCR, or full logs."
+  - type: input
+    id: version
+    attributes:
+      label: AgentHost version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the command and safe, minimal steps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and safe error code
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, desktop session type, and Node version only.
+    validations:
+      required: true

@@ -22,7 +22,7 @@ export interface AdaptiveActionRouterContext {
 }
 export interface RoutePreviewInput { goalCategory: string; appFamily?: string; riskLevel?: RiskLevel; protectedContext?: boolean; contextTokens?: number; requiresConfirmation?: boolean; }
 
-const ORDER: CapabilityRouteFamily[] = ["browser_bridge", "structured_browser", "native_adapter", "accessibility", "local_ocr", "screenshot_vision", "desktop_input", "guide_only"];
+const ORDER: CapabilityRouteFamily[] = ["native_adapter", "browser_bridge", "structured_browser", "accessibility", "local_ocr", "screenshot_vision", "desktop_input", "guide_only"];
 const available = (registry: CapabilityRegistrySnapshot, name: string): boolean => registry.listTools().some((item) => item.name === name);
 const SAFE_PROJECTION_LABEL = /^[a-z][a-z0-9_.-]{0,79}$/u;
 const SAFE_APP_FAMILIES = new Set(["browser", "communication", "office", "development", "media", "system", "unknown"]);
@@ -77,6 +77,7 @@ export class AdaptiveActionRouter {
     if (cached !== undefined) return cached;
     
     const probeStartedAt = Date.now();
+    const probeStatsBefore = context.bridgeProbeCache?.stats();
     const candidates = await this.#candidates(context, input);
     const ranked = candidates.map((candidate) => { scoreCapabilityRoute(candidate); return candidate; }).sort(compareCapabilityRoutes);
     // Guide mode is a terminal fallback, not a cheaper normal route. Protected
@@ -106,6 +107,7 @@ export class AdaptiveActionRouter {
           : { appFamily: candidateAppFamily })
       };
     });
+    const probeStatsAfter = context.bridgeProbeCache?.stats();
     const result: CapabilityRouteSelection = {
       routeSelectionId: `route_selection_${randomUUID()}`,
       ...(selected === undefined ? {} : { selectedRoute: selected.routeFamily }),
@@ -125,7 +127,8 @@ export class AdaptiveActionRouter {
         attempted: context.browser === undefined ? 0 : 1,
         succeeded: candidates.some((item) => item.routeFamily === "browser_bridge" && item.health !== "unavailable") ? 1 : 0,
         failed: context.browser === undefined || candidates.some((item) => item.routeFamily === "browser_bridge" && item.health === "unavailable") ? 1 : 0,
-        cached: 0,
+        cached: Math.max(0, (probeStatsAfter?.cacheHits ?? 0) - (probeStatsBefore?.cacheHits ?? 0)),
+        freshProbes: Math.max(0, (probeStatsAfter?.freshProbes ?? 0) - (probeStatsBefore?.freshProbes ?? 0)),
         durationMs: Math.min(5_000, Math.max(0, Date.now() - probeStartedAt))
       },
       ...(latencyClass === undefined ? {} : { latencyClass }),

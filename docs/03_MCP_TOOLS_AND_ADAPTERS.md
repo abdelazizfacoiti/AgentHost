@@ -20,7 +20,7 @@ Each loaded definition has:
 
 ### Capability strategy registry
 
-`strategy.list`, `strategy.get`, `strategy.health`, `strategy.select`, and `strategy.explain_selection` expose redacted structural strategy metadata. `strategy.select` uses deterministic goal/profile/capability/adapter/Browser Bridge health filtering and stable scoring, then returns at most three bounded fallback IDs. `strategy.verify_outcome` performs one fixed read-only verification checkpoint. `strategy.propose`, `strategy.review`, `strategy.activate`, `strategy.record_outcome`, `strategy.revalidate`, `strategy.disable`, and `strategy.archive` change local strategy metadata only. No strategy tool invokes browser, desktop, accessibility, file, shell, Forge, workflow, or scheduler execution. Local strategy activation requires explicit review and two independently verified signed-receipt outcomes; built-ins are trusted structural definitions.
+`strategy.list`, `strategy.get`, `strategy.health`, `strategy.select`, and `strategy.explain_selection` expose redacted structural strategy metadata. `strategy.select` uses deterministic goal/profile/capability/adapter/Browser Bridge health filtering and stable scoring, then returns at most three bounded fallback IDs. Route tie order is native adapter, Browser Bridge, structured browser, accessibility, local OCR/vision, desktop, then guide. `strategy.verify_outcome` performs one fixed read-only verification checkpoint. `strategy.propose`, `strategy.review`, `strategy.activate`, `strategy.record_outcome`, `strategy.revalidate`, `strategy.disable`, and `strategy.archive` change local strategy metadata only. No strategy tool invokes browser, desktop, accessibility, file, shell, Forge, workflow, or scheduler execution. Local strategy activation requires explicit review and two independently verified signed-receipt outcomes; built-ins are trusted structural definitions.
 
 Missing/contradictory metadata and duplicate names fail closed. Disabled optional tools and generated Forge tool names are absent from both callable inventories.
 
@@ -122,7 +122,7 @@ Receipts are attached by the normal runner rather than exposed as a standalone a
 
 ### Scheduler and manual-run governance
 
-`scheduler.job_*`, activation tools, readiness/activation previews, manual-run contract tools, preflight tools, acknowledgement/request tools, request review/revocation tools, and approval validity/explanation tools are metadata-only. They may create local review records, but never create timers, workers, run sessions, replay sessions, notifications, files, or execution permission. Scheduler approval remains non-executable.
+`scheduler.job_*` (including pause, resume, cancel, archive, and remove), activation tools, readiness/activation previews, manual-run contract tools, preflight tools, acknowledgement/request tools, request review/revocation tools, and approval validity/explanation tools are metadata-only. They may create local review records for bounded once/delayed/recurring/cron/calendar descriptions, but never create timers, workers, run sessions, replay sessions, notifications, files, or execution permission. Scheduler approval remains non-executable.
 
 ### Overlay renderer and visual-assistance sessions
 
