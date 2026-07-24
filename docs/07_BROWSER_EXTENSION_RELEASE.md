@@ -1,6 +1,10 @@
 # Browser Extension Release
 
 AgentHost browser bridge has separate development and public distribution paths.
+The current public repository ships source and deterministic unsigned review
+artifacts only. Signed Firefox and Chromium store releases require external
+publisher accounts and review; do not describe unsigned artifacts as public
+installers.
 
 ## Deterministic artifacts
 
@@ -17,7 +21,7 @@ Output under `release/browser/`:
 
 Build validates fixed loopback host, required permissions, forbidden permissions, stable Firefox ID, and stable Chromium development identity. Metadata reports `signed:false` and `publicInstallable:false`. Never relabel unsigned artifact.
 
-## Firefox public installation
+## Firefox public installation (future external release)
 
 1. Build unsigned XPI.
 2. Submit XPI through Mozilla Add-ons Developer Hub using release-owner account.
@@ -27,9 +31,11 @@ Build validates fixed loopback host, required permissions, forbidden permissions
 6. Attach signed XPI and checksum to AgentHost release.
 7. Public instructions install signed XPI once through normal Firefox UI.
 
-Signing credentials remain outside repository. Until Mozilla returns signed artifact, Firefox public installation is blocked. Temporary `about:debugging` loading remains development-only.
+Signing credentials remain outside the repository. Until Mozilla returns a
+signed artifact, public Firefox installation is blocked. Temporary
+`about:debugging` loading is the supported development path.
 
-## Chromium public installation
+## Chromium public installation (future external release)
 
 1. Build MV3 ZIP.
 2. Upload ZIP through Chrome Web Store developer console.
@@ -38,17 +44,21 @@ Signing credentials remain outside repository. Until Mozilla returns signed arti
 5. Verify published version and protocol compatibility.
 6. Public instructions use verified store listing.
 
-Unpacked loading remains development-only. Store credentials remain outside repository.
+Until a verified store listing exists, unpacked loading is the supported
+development path. Store credentials remain outside the repository.
 
 ## Pairing lifecycle
 
-1. Operator generates short-lived token through confirmation-gated AgentHost tool.
-2. Extension presents token once from loopback origin.
-3. AgentHost enrolls exact origin, extension identity, browser family, protocol, and compatible version.
-4. Extension stores random device reconnect secret locally; AgentHost stores only SHA-256 hash.
-5. Browser and AgentHost restarts use `/v1/reconnect` to obtain fresh memory-only session.
-6. Rotation revokes previous devices before issuing new enrollment token.
-7. Reset revokes devices and deletes pending enrollment token.
+1. Operator starts `agenthost browser setup --browser <firefox|chromium> --apply`, or the equivalent source setup.
+2. Extension requests local enrollment from `127.0.0.1` after the operator selects **Pair with AgentHost**.
+3. AgentHost shows the exact extension identity for explicit approval.
+4. AgentHost enrolls exact origin, extension identity, browser family, protocol, and compatible version.
+5. Extension stores a random device reconnect secret locally; AgentHost stores only its SHA-256 hash.
+6. Browser and AgentHost restarts use `/v1/reconnect` to obtain a fresh memory-only session.
+7. Reset revokes devices and deletes pending enrollment state.
+
+One-time token pairing remains available only as a legacy repair path through
+`browser.generate_pairing_token`; it is not the normal public setup flow.
 
 Reconnect uses bounded exponential backoff with jitter, maximum 30-second interval and five-minute retry bursts. Existing browser alarm checks reset one bounded burst approximately once per minute while the extension remains installed, so AgentHost restarts recover without a permanent `reconnect_exhausted` dead-end. Operator Retry remains available for immediate recovery.
 

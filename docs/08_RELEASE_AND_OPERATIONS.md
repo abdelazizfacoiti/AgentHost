@@ -14,6 +14,10 @@ R5 packages existing AgentHost capabilities for local Linux use. It adds no auto
 
 ## Install
 
+The supported public artifact is the GitHub source tree and Linux x86_64
+archive/CLI. The root npm package remains private; no npm install package is
+promised.
+
 ```bash
 npm run build
 npm run release:build
@@ -22,6 +26,10 @@ npm run release:verify
 (cd release && sha256sum -c agenthost-v0.1.0-linux-x64.tar.gz.sha256)
 npm run release:install -- release/agenthost-v0.1.0-linux-x64.tar.gz
 ```
+
+When consuming a downloaded archive directly, verify its sidecar checksum,
+extract it, and run `./bin/agenthost.mjs doctor` from the extracted directory.
+The wrapper is self-contained and does not require `sudo`.
 
 Install writes only AgentHost-owned locations:
 
@@ -59,6 +67,22 @@ Output never contains pairing tokens, Control Room tokens, secrets, private page
 ## Codex integration
 
 `agenthost integrations codex add` previews one AgentHost entry. `--apply` is the only write path. Existing MCP servers and unrelated settings remain untouched; a backup is written before changes. The entry uses installed `agenthost start`, never a repository path. Unsupported or ambiguous TOML is rejected with manual instructions.
+
+## Browser quickstart
+
+For a packaged install, run:
+
+```bash
+agenthost browser setup --browser firefox --apply
+# or:
+agenthost browser setup --browser chromium --apply
+```
+
+Load the printed unpacked extension directory in the browser, choose **Pair
+with AgentHost** in the popup, approve the exact extension identity, and wait
+for reconnect verification. The bridge is loopback-only and pairing is
+explicit. Source-checkout setup is documented in
+`docs/06_BROWSER_SETUP_VALIDATION.md`.
 
 ## Setup and doctor
 
