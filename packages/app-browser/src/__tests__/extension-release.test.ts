@@ -29,6 +29,10 @@ describe("browser extension release boundary", () => {
     const source = await readFile(path.join(extension, "background.js"), "utf8");
     expect(source).toContain("MAX_RECONNECT_MS=300000");
     expect(source).toContain("MAX_RETRY_DELAY=30000");
+    expect(source).toContain("const r=await timedFetch(`${await base()}${url}`");
+    expect(source).toContain("const r=await timedFetch(`${await base()}/v1/commands`");
+    expect(source).not.toContain("const r=await fetch(`${await base()}${url}`");
+    expect(source).not.toContain("const r=await fetch(`${await base()}/v1/commands`");
     expect(source).toContain('api.alarms.create("agenthostReconnect"');
     expect(source).toContain('"/v1/reconnect"');
     expect(source).toContain("agenthostRefreshSecret");
