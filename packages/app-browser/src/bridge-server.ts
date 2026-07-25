@@ -464,10 +464,12 @@ export class BrowserBridgeServer {
     } as const)[state];
   }
 
-  #authorized(request: IncomingMessage, exactOrigin: string): boolean {
+  #authorized(request: IncomingMessage, exactOrigin: string | undefined): boolean {
+    const sessionRoute = (request.method === "GET" && request.url === "/v1/commands")
+      || (request.method === "POST" && request.url?.startsWith("/v1/results/") === true);
     return this.#valid()
       && request.headers.authorization === `Bearer ${this.#session!.token}`
-      && exactOrigin === this.#session!.exactOrigin;
+      && (exactOrigin === undefined ? sessionRoute : exactOrigin === this.#session!.exactOrigin);
   }
 
   #compatible(identity: ExtensionIdentity): boolean {
@@ -725,28 +727,34 @@ export class BrowserBridgeServer {
   async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
       const exactOrigin = parseOrigin(request);
-      if (exactOrigin === undefined) return json(response, 403, { error: "invalid_origin" });
       const url = request.url ?? "";
+      const sessionRoute = (request.method === "GET" && url === "/v1/commands")
+        || (request.method === "POST" && url.startsWith("/v1/results/"));
+      if (exactOrigin === undefined && !sessionRoute) return json(response, 403, { error: "invalid_origin" });
 
       if (request.method === "POST" && url === "/v1/pair") {
+        if (exactOrigin === undefined) return json(response, 403, { error: "invalid_origin" });
         const input = await body(request);
         const result = await this.protocolRequest("/v1/pair", input, exactOrigin);
         return json(response, result.status, result.body);
       }
 
       if (request.method === "POST" && url === "/v1/reconnect") {
+        if (exactOrigin === undefined) return json(response, 403, { error: "invalid_origin" });
         const input = await body(request);
         const result = await this.protocolRequest("/v1/reconnect", input, exactOrigin);
         return json(response, result.status, result.body);
       }
 
       if (request.method === "POST" && url === "/v1/enrollment/request") {
+        if (exactOrigin === undefined) return json(response, 403, { error: "invalid_origin" });
         const input = await body(request);
         const result = await this.protocolRequest("/v1/enrollment/request", input, exactOrigin);
         return json(response, result.status, result.body);
       }
 
       if (request.method === "POST" && url === "/v1/enrollment/status") {
+        if (exactOrigin === undefined) return json(response, 403, { error: "invalid_origin" });
         const input = await body(request);
         const result = await this.protocolRequest("/v1/enrollment/status", input, exactOrigin);
         return json(response, result.status, result.body);

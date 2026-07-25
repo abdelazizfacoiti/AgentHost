@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +33,19 @@ async function request(bridge: BrowserBridgeServer, route: string, value: unknow
     value as Record<string, unknown>,
     origin
   );
+}
+
+async function httpGet(bridge: BrowserBridgeServer, headers: Record<string, string> = {}): Promise<{ status: number; body: string }> {
+  const port = bridge.status().port;
+  return await new Promise((resolve, reject) => {
+    const request = httpRequest({ host: "127.0.0.1", port, path: "/v1/commands", method: "GET", headers }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    request.on("error", reject);
+    request.end();
+  });
 }
 
 async function enroll(bridge: BrowserBridgeServer) {
@@ -99,6 +113,18 @@ describe("BrowserBridgeServer", () => {
     expect(await readFile(config.pairingStateFile, "utf8")).not.toContain(enrolled.refreshSecret);
     expect((await stat(config.pairingStateFile)).mode & 0o777).toBe(0o600);
     await restarted.close();
+  });
+
+  it("accepts originless authenticated command polling but rejects a mismatched origin", async () => {
+    const { bridge } = await fixture();
+    await bridge.start();
+    const enrolled = await enroll(bridge);
+    const originless = await httpGet(bridge, { authorization: `Bearer ${enrolled.sessionToken}` });
+    expect(originless.status).toBe(200);
+    expect(JSON.parse(originless.body)).toEqual({ commands: [] });
+    const mismatched = await httpGet(bridge, { authorization: `Bearer ${enrolled.sessionToken}`, origin: "moz-extension://different-extension" });
+    expect(mismatched.status).toBe(401);
+    await bridge.close();
   });
 
   it("rejects revoked device and permits fresh explicit enrollment", async () => {
