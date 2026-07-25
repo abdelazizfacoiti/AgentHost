@@ -44,6 +44,9 @@ describe("browser extension release boundary", () => {
     expect(setup).not.toContain("randomBytes");
     const popup = await readFile(path.join(extension, "popup.html"), "utf8");
     expect(popup).toContain('id="enroll"');
+    expect(popup).toContain("leave the AgentHost browser setup command running");
+    const popupScript = await readFile(path.join(extension, "popup.js"), "utf8");
+    expect(popupScript).toContain("No active pairing session");
     expect(popup).toContain("<details>");
   });
 
