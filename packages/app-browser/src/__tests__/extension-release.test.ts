@@ -34,6 +34,11 @@ describe("browser extension release boundary", () => {
     expect(source).not.toContain("const r=await fetch(`${await base()}${url}`");
     expect(source).not.toContain("const r=await fetch(`${await base()}/v1/commands`");
     expect(source).toContain('api.alarms.create("agenthostReconnect"');
+    expect(source).toContain('const nativeTabsQuery=api.tabs.query.bind(api.tabs)');
+    expect(source).toContain('tabs_query_timeout');
+    expect(source).toContain('api.tabs.onActivated.addListener');
+    expect(source).toContain('api.tabs.query=safeTabsQuery');
+    expect(source).toContain('agenthost_current_tab');
     expect(source).toContain('"/v1/reconnect"');
     expect(source).toContain("agenthostRefreshSecret");
     expect(source).toContain("/v1/enrollment/request");
@@ -51,6 +56,7 @@ describe("browser extension release boundary", () => {
     expect(popup).toContain("leave the AgentHost browser setup command running");
     const popupScript = await readFile(path.join(extension, "popup.js"), "utf8");
     expect(popupScript).toContain("No active pairing session");
+    expect(popupScript).toContain("agenthost_current_tab");
     expect(popup).toContain("<details>");
   });
 

@@ -66,3 +66,14 @@ run=async function(command,payload){
   return agenthostPermissionRun(command,payload);
 };
 poll=async function(){if(enrolling)return true;if(!sessionToken&&!await connect())return false;try{const r=await timedFetch(`${await base()}/v1/commands`,{headers:{authorization:`Bearer ${sessionToken}`}});if(!r.ok){sessionToken=null;lastError=r.status===401?"token_expired":"bridge_unavailable";return false;}lastError="paired";lastSeen=Date.now();for(const c of(await r.json()).commands){try{await timedFetch(`${await base()}/v1/results/${c.id}`,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${sessionToken}`},body:JSON.stringify({ok:true,data:await run(c.command,c.payload)})});}catch(error){const code=error?.message==="site_permission_required"?"site_permission_required":"browser_response_invalid";await timedFetch(`${await base()}/v1/results/${c.id}`,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${sessionToken}`},body:JSON.stringify({ok:false,error:code})});}}return true;}catch{sessionToken=null;lastError="bridge_unavailable";return false;}};
+const nativeTabsQuery=api.tabs.query.bind(api.tabs),nativeTabsGet=api.tabs.get?.bind(api.tabs),tabCache=new Map();let activeTabId=null;
+function rememberTab(tab){if(!tab||tab.id===undefined)return;const id=String(tab.id);tabCache.set(id,{...(tabCache.get(id)??{}),...tab});if(tab.active===true)activeTabId=id;}
+function forgetTab(tabId){const id=String(tabId);tabCache.delete(id);if(activeTabId===id)activeTabId=null;}
+function cachedTabs(query){if(query?.id!==undefined){const tab=tabCache.get(String(query.id));return tab?[tab]:[];}if(query?.active===true&&activeTabId!==null){const tab=tabCache.get(activeTabId);return tab?[tab]:[];}return [...tabCache.values()];}
+async function safeTabsQuery(query={}){const cached=cachedTabs(query);if((query?.id!==undefined||query?.active===true)&&cached.length>0)return cached;try{const result=await Promise.race([nativeTabsQuery(query),new Promise((_,reject)=>setTimeout(()=>reject(new Error("tabs_query_timeout")),1500))]);if(Array.isArray(result))result.forEach(rememberTab);return result;}catch{return cached;}}
+api.tabs.query=safeTabsQuery;
+api.tabs.onCreated.addListener(rememberTab);
+api.tabs.onActivated.addListener(({tabId})=>{activeTabId=String(tabId);if(nativeTabsGet){Promise.race([nativeTabsGet(tabId),new Promise((_,reject)=>setTimeout(()=>reject(new Error("tabs_get_timeout")),1500))]).then(rememberTab).catch(()=>{});}});
+api.tabs.onUpdated.addListener((tabId,changeInfo,tab)=>rememberTab({...tab,...changeInfo,id:tabId}));
+api.tabs.onRemoved.addListener(forgetTab);
+api.runtime.onMessage.addListener(message=>{if(message?.type==="agenthost_current_tab")return safeTabsQuery({active:true,currentWindow:true}).then(tabs=>({url:String(tabs[0]?.url??"")}));});

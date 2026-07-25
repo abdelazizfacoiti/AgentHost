@@ -81,6 +81,7 @@ export function createBrowserTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
  const action=(name:"browser.click_element"|"browser.fill_text"|"browser.focus_element",inputSchema:any,mcpInputSchema:any,kind:"click"|"fill"|"focus"):AnyAgentHostToolDefinition<AgentHostMcpContext>=>({
    name,description:`Confirmation-gated browser ${kind} using a revalidated element reference.`,riskLevel:"medium",inputSchema,mcpInputSchema,inputSummary:`Browser ${kind} element`,
    auditInputSummary:i=>`Browser ${kind} element ${i.elementId}${i.text===undefined?"":" textLength="+i.text.length}`,
+   safety:{actionType:"browser_action"},
    auditOutputSummary:r=>r.ok?`Browser ${kind} completed without logging page or text content.`:r.error?.code??`Browser ${kind} failed.`,preview:{isDryRun:(i:any)=>i.dryRun===true},resolveEffect:(i,c)=>resolveBrowserElementEffect(i,c,kind),
    async handler(i:any,c:any,r:any){
     try { const e=await browser(c).describeElement(i.elementId),t=await tab(c,e.tabId);
