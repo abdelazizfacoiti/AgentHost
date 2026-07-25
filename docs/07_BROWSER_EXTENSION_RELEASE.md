@@ -66,6 +66,6 @@ Reconnect uses bounded exponential backoff with jitter, maximum 30-second interv
 
 1. Run confirmation-gated `browser.reset_pairing`.
 2. Remove extension through browser extension manager.
-3. Remove development folders under `~/AgentHost/browser-extension/` if used.
+3. Remove development folders under `~/.local/share/agenthost/browser-extension/` if used (or the directory selected by `AGENTHOST_BROWSER_EXTENSION_DIR`).
 
 Never execute token file and never use `sudo` for pairing.

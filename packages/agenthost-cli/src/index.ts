@@ -15,7 +15,7 @@ const home = os.homedir();
 const agentHome = path.resolve(process.env.AGENTHOST_HOME ?? defaultAgentHostHome(home));
 const publicConfig = path.resolve(process.env.AGENTHOST_CONFIG ?? defaultPublicConfigPath(home));
 const lockPath = path.join(agentHome, "run", "agenthost.lock.json");
-const extensionDir = process.env.AGENTHOST_BROWSER_EXTENSION_DIR ?? path.join(home, ".local", "share", "agenthost", "browser-extension");
+const extensionDir = path.resolve(process.env.AGENTHOST_BROWSER_EXTENSION_DIR ?? path.join(home, ".local", "share", "agenthost", "browser-extension"));
 
 type Json = Record<string, unknown>;
 type Output = { ok: boolean; command: string; data?: unknown; error?: string; warnings?: string[] };
@@ -77,6 +77,46 @@ function parseFlags(args: string[]): { positional: string[]; flags: Set<string>;
   const positional: string[] = [], flags = new Set<string>(), values = new Map<string, string>();
   for (let i = 0; i < args.length; i += 1) { const item = args[i]!; if (!item.startsWith("--")) { positional.push(item); continue; } const [key, inline] = item.slice(2).split("=", 2); if (inline !== undefined) values.set(key!, inline); else if (args[i + 1] !== undefined && !args[i + 1]!.startsWith("--")) { values.set(key!, args[++i]!); } else flags.add(key!); }
   return { positional, flags, values };
+}
+function browserExtensionPaths(family: SupportedBrowserFamily): { root: string; manifest: string } {
+  const root = path.join(extensionDir, family);
+  return { root, manifest: path.join(root, "manifest.json") };
+}
+function browserSetupInstructions(family: SupportedBrowserFamily, extensionRoot: string, manifestPath: string): string[] {
+  return family === "firefox"
+    ? [
+        "Open about:debugging#/runtime/this-firefox.",
+        "Choose Load Temporary Add-on….",
+        `Select ${manifestPath}.`,
+        "Open the AgentHost Browser Bridge popup and choose Pair with AgentHost.",
+        "Keep this command running until pairing and reconnect verification complete."
+      ]
+    : [
+        "Open chrome://extensions (or edge://extensions).",
+        "Enable Developer mode and choose Load unpacked.",
+        `Select ${extensionRoot}.`,
+        "Open the AgentHost Browser Bridge popup and choose Pair with AgentHost.",
+        "Keep this command running until pairing and reconnect verification complete."
+      ];
+}
+function printBrowserSetupGuide(family: SupportedBrowserFamily, extensionRoot: string, manifestPath: string, port: number, waitMs: number, artifactAvailable: boolean, json: boolean): void {
+  if (json) return;
+  const status = artifactAvailable ? "ready" : "missing (run npm run browser:extension:prepare or reinstall the release)";
+  const lines = [
+    "",
+    "AgentHost Browser Bridge setup",
+    `Browser: ${family}`,
+    `Extension artifact: ${status}`,
+    `Extension directory: ${extensionRoot}`,
+    `Manifest: ${manifestPath}`,
+    `Bridge: http://127.0.0.1:${port}`,
+    "",
+    ...browserSetupInstructions(family, extensionRoot, manifestPath).map((instruction, index) => `${index + 1}. ${instruction}`),
+    "",
+    `Waiting up to ${Math.ceil(waitMs / 1000)} seconds for browser enrollment...`,
+    ""
+  ];
+  process.stdout.write(`${lines.join("\n")}\n`);
 }
 async function verifyArchiveChecksum(archive: string, supplied: string | undefined): Promise<string> {
   const expected = supplied === undefined ? await readSha256Sidecar(archive) : normalizeSha256(supplied);
@@ -142,12 +182,16 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
     if (requestedValue !== undefined && requested === undefined) {
       return fail("browser setup", "browser_unsupported");
     }
-    const packaged = path.join(runtimeRoot(), "browser-extension", "source");
+    const packagedCandidates = [
+      path.join(runtimeRoot(), "browser-extension", "source"),
+      path.join(runtimeRoot(), "packages", "app-browser", "extension")
+    ];
+    const packaged = packagedCandidates.find((candidate) => existsSync(candidate));
     await safeMkdir(extensionDir);
     const artifactAvailability = new Map<SupportedBrowserFamily, boolean>();
     for (const family of ["firefox", "chromium"] as const) {
       const destination = path.join(extensionDir, family);
-      if (existsSync(packaged)) {
+      if (packaged !== undefined) {
         await safeMkdir(destination);
         for (const file of ["background.js", "popup.html", "popup.js", "popup.css"]) {
           await cp(path.join(packaged, file), path.join(destination, file), { force: true }).catch(() => undefined);
@@ -200,9 +244,9 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
       };
     }
     const family = selectedBrowser;
-    const instructions = family === "firefox"
-      ? ["Open about:debugging#/runtime/this-firefox.", "Load Temporary Add-on from prepared firefox/manifest.json.", "Open extension popup and choose Pair with AgentHost."]
-      : ["Open chrome://extensions.", "Enable Developer mode and load prepared chromium directory.", "Open extension popup and choose Pair with AgentHost."];
+    const extensionPaths = browserExtensionPaths(family);
+    const artifactAvailable = artifactAvailability.get(family) === true;
+    const instructions = browserSetupInstructions(family, extensionPaths.root, extensionPaths.manifest);
     if (!flags.flags.has("apply")) {
       return {
         ok: true,
@@ -212,7 +256,10 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
           selectedBrowser: family,
           inventory,
           instructions,
-          extensionDir: "[browser-extension]",
+          extensionRoot: extensionDir,
+          extensionDir: extensionPaths.root,
+          manifestPath: extensionPaths.manifest,
+          extensionArtifactAvailable: artifactAvailable,
           pairingMode: "browser_side_approval",
           tokenReturned: false,
           next: "Rerun with --apply; use --approve in non-interactive terminals."
@@ -254,6 +301,8 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
         return fail("browser setup", code === "EADDRINUSE" ? "bridge_port_conflict" : "bridge_unavailable");
       }
       const enrollment = server.beginEnrollment(family);
+      const waitMs = Math.max(5_000, Math.min(10 * 60_000, Number(flags.values.get("wait-ms") ?? 120_000)));
+      printBrowserSetupGuide(family, extensionPaths.root, extensionPaths.manifest, bridgeConfig.port, waitMs, artifactAvailable, flags.flags.has("json"));
       if (!process.stdout.isTTY && !flags.flags.has("approve")) {
         return {
           ok: false,
@@ -263,12 +312,16 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
             selectedBrowser: family,
             setupState: enrollment.state,
             instructions,
+            extensionRoot: extensionDir,
+            extensionDir: extensionPaths.root,
+            manifestPath: extensionPaths.manifest,
+            extensionArtifactAvailable: artifactAvailable,
+            bridgePort: bridgeConfig.port,
             tokenReturned: false,
             next: "Rerun interactively or add --approve after reviewing selected browser."
           }
         };
       }
-      const waitMs = Math.max(5_000, Math.min(10 * 60_000, Number(flags.values.get("wait-ms") ?? 120_000)));
       const deadline = Date.now() + waitMs;
       let approved = false;
       while (Date.now() < deadline) {
@@ -336,6 +389,9 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
               state: "ready",
               reconnectVerified: true,
               extensionIdentitySuffix: state.extensionIdentitySuffix,
+              extensionRoot: extensionDir,
+              extensionDir: extensionPaths.root,
+              manifestPath: extensionPaths.manifest,
               bridgeHost: "127.0.0.1",
               bridgePort: bridgeConfig.port,
               tokenReturned: false

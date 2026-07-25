@@ -25,6 +25,7 @@
     "browser:extension:build": "node scripts/build-browser-extension.mjs",
     "browser:extension:verify": "node scripts/build-browser-extension.mjs",
     "browser:setup": "node scripts/prepare-browser-extension.mjs --setup",
+    "browser:pair": "node packages/agenthost-cli/dist/index.js browser setup",
     "release:build": "node scripts/build-release.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:notices": "node scripts/generate-third-party-notices.mjs",

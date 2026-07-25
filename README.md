@@ -159,13 +159,34 @@ export AGENTHOST_HOME="$PWD/.agenthost"
 export AGENTHOST_CONFIG="$PWD/.agenthost/config.json"
 export AGENTHOST_BROWSER_EXTENSION_DIR="$PWD/.agenthost/browser-extension"
 npm run browser:setup
+```
+
+`npm run browser:setup` prepares both unpacked artifacts and prints their exact
+paths. It does not start enrollment. Choose one browser, then run the pairing
+command in Terminal 1:
+
+```bash
+npm run build
+npm run browser:pair -- --browser firefox --apply --approve
+# or: npm run browser:pair -- --browser chromium --apply --approve
+```
+
+Leave that command running. It starts the bounded local enrollment session and
+prints the exact manifest/directory to load. In Firefox use
+`about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…**; in
+Chromium use `chrome://extensions` → **Developer mode** → **Load unpacked**.
+Open the extension popup and click **Pair with AgentHost**. After the command
+reports that the Browser Bridge is ready, start normal MCP in Terminal 2:
+
+```bash
 npm run start:mcp
 ```
 
-Load `firefox/manifest.json` or the Chromium directory printed by the setup
-command, open the popup, and choose **Pair with AgentHost**. Use
-`browser.setup_status`, `browser.diagnose_bridge`, and `browser.verify_pairing`
-for recovery and live status.
+Do not use `npm run start:mcp` as the pairing command: it serves MCP but does
+not create an enrollment session. Use `browser.setup_status`,
+`browser.diagnose_bridge`, and `browser.verify_pairing` for recovery and live
+status. Fresh setup uses browser-side enrollment; one-time tokens are only a
+legacy repair path.
 
 Browser-side enrollment is the normal pairing path. One-time token pairing is
 retained only as a legacy repair flow; it is never required for a fresh setup.

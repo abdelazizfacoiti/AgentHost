@@ -174,7 +174,7 @@ Jobs, reviews, activations, manual-run contracts, preflights, acknowledgements, 
 
 Records are local JSON with restrictive permissions and safe atomic writes where implemented. Receipt secrets and active receipt state are process-local; raw page text, OCR, credentials, tokens, and private payloads are not persisted.
 
-The unpacked browser bundle is prepared separately under `~/AgentHost/browser-extension/{firefox,chromium}`.
+The unpacked browser bundle is prepared separately under `~/.local/share/agenthost/browser-extension/{firefox,chromium}` by default (or the directory selected by `AGENTHOST_BROWSER_EXTENSION_DIR`).
 
 ## Control Room reporting boundary
 

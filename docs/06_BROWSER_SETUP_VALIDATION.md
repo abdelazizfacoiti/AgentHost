@@ -31,13 +31,30 @@ export AGENTHOST_HOME="$PWD/.agenthost"
 export AGENTHOST_CONFIG="$PWD/.agenthost/config.json"
 export AGENTHOST_BROWSER_EXTENSION_DIR="$PWD/.agenthost/browser-extension"
 npm run browser:setup
+```
+
+The command prepares development-only unpacked Firefox/Chromium bundles and
+enables local bridge config. It does not install an extension or create pairing
+credentials silently. It also does not create an enrollment session.
+
+Build the CLI once, then start enrollment in a separate terminal:
+
+```bash
+npm run build
+npm run browser:pair -- --browser firefox --apply --approve
+# or: npm run browser:pair -- --browser chromium --apply --approve
+```
+
+Leave `browser:pair` running while you load the printed extension path and
+click **Pair with AgentHost** in the popup. Only after it reports
+`Browser Bridge is ready` should you start the normal MCP server:
+
+```bash
 npm run start:mcp
 ```
 
-The command explicitly
-prepares development-only unpacked Firefox/Chromium bundles and enables local
-bridge config. It does not install an extension or create pairing credentials
-silently.
+`npm run start:mcp` alone does not create a browser enrollment session. Fresh
+setup uses browser-side enrollment; legacy pairing tokens are only for repair.
 
 Load the printed bundle, then use browser-side enrollment:
 

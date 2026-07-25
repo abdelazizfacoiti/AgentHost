@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -38,7 +39,8 @@ describe("browser extension release boundary", () => {
     expect(source).not.toContain("console.log");
     expect(source).not.toContain("setInterval(poll,1000)");
     const setup = await readFile(path.join(root, "scripts", "prepare-browser-extension.mjs"), "utf8");
-    expect(setup).toContain("does not create, print, or preserve pairing credentials");
+    expect(setup).toContain("No pairing token is required for a fresh setup");
+    expect(setup).toContain("npm run browser:pair");
     expect(setup).not.toContain("randomBytes");
     const popup = await readFile(path.join(extension, "popup.html"), "utf8");
     expect(popup).toContain('id="enroll"');
@@ -67,5 +69,30 @@ describe("browser extension release boundary", () => {
     expect(second).toBe(first);
     expect(metadata.artifacts).toHaveLength(2);
     expect(metadata.artifacts.every((item: any) => item.signed === false && item.publicInstallable === false)).toBe(true);
+  });
+
+  it("prints the browser-side pairing flow and creates a fresh config parent", async () => {
+    const temporaryHome = await mkdtemp(path.join(os.tmpdir(), "agenthost-browser-setup-"));
+    const extensionDir = path.join(temporaryHome, "extensions");
+    const configPath = path.join(temporaryHome, "config", "config.json");
+    try {
+      await exec(process.execPath, ["scripts/prepare-browser-extension.mjs", "--setup", "--browser", "firefox"], {
+        cwd: root,
+        env: {
+          ...process.env,
+          HOME: temporaryHome,
+          AGENTHOST_HOME: path.join(temporaryHome, "agenthost"),
+          AGENTHOST_CONFIG: configPath,
+          AGENTHOST_BROWSER_EXTENSION_DIR: extensionDir
+        }
+      });
+      const setup = await readFile(path.join(root, "scripts", "prepare-browser-extension.mjs"), "utf8");
+      expect(setup).toContain("npm run browser:pair -- --browser firefox --apply --approve");
+      expect(setup).toContain("No pairing token is required for a fresh setup");
+      expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({ browserBridge: { enabled: true, port: 43117 } });
+      expect(await readFile(path.join(extensionDir, "firefox", "manifest.json"), "utf8")).toContain("browser-bridge@agenthost.local");
+    } finally {
+      await rm(temporaryHome, { recursive: true, force: true });
+    }
   });
 });
