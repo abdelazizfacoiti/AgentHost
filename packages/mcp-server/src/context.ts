@@ -82,6 +82,9 @@ export interface LinuxAutomation {
   fileExists(input: { path: string }): Promise<FileExistsResult>;
   listDirectory(input: { path: string; limit?: number }): Promise<FileListResult>;
   ensureDir(input: { path: string }): Promise<FileEnsureDirResult>;
+  copyFile?(input: { source: string; destination: string }): Promise<{ source: string; destination: string; copied: boolean }>;
+  moveFile?(input: { source: string; destination: string }): Promise<{ source: string; destination: string; moved: boolean }>;
+  deletePath?(input: { path: string; recursive?: boolean }): Promise<{ path: string; deleted: boolean }>;
   getDesktopCapabilities(): Promise<DesktopCapabilitiesResult>;
   getActiveWindow(): Promise<DesktopGetActiveWindowResult>;
   screenshot(input: { path: string; includeActiveWindowOnly?: boolean }): Promise<DesktopScreenshotResult>;

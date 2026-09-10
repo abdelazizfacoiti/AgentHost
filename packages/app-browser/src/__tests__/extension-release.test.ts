@@ -25,6 +25,14 @@ describe("browser extension release boundary", () => {
     expect(server).toContain('listen(this.config.port, "127.0.0.1"');
   });
 
+  it("auto-enrolls on startup when unpaired and matches server selector policy", async () => {
+    const source = await readFile(path.join(extension, "background.js"), "utf8");
+    expect(source).toContain("if(!enrolling&&!sessionToken)enroll()");
+    expect(source).not.toContain("agenthostAutoEnroll=false");
+    expect(source).toContain("function cssSafe(v){return typeof v===\"string\"&&v.length<=256&&!/:has|::/.test(v)");
+    expect(source).not.toContain("[,:]|:has|:not");
+  });
+
   it("contains bounded reconnect and persistent device enrollment without logging credentials", async () => {
     const source = await readFile(path.join(extension, "background.js"), "utf8");
     expect(source).toContain("MAX_RECONNECT_MS=300000");

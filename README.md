@@ -1,10 +1,14 @@
 # AgentHost
 
-AgentHost is a local MCP runtime that gives Codex and other agents a governed
-body on a Linux workstation. It exposes bounded capabilities for files, shell,
-desktop, accessibility, browsers, local vision, speech, and visual assistance
-while keeping policy, grants, confirmations, receipts, checkpoints, redaction,
-and audit logs local.
+AgentHost is a local general-purpose computer-use agent runtime. It gives Codex
+and other agents a governed body on a Linux workstation: the model reasons
+about a goal and composes computer, browser, filesystem, shell, application,
+MCP, vision/OCR, speech, and skill capabilities to accomplish it — observing
+each result, verifying outcomes, and recovering from failures.
+
+The runtime exposes capabilities; the model decides how to use them.
+Permissions are capability-based and configurable; safety (isolation, secrets,
+audit, emergency stop) is enforced by the runtime.
 
 AgentHost is universal and provider-agnostic. Gmail, WhatsApp, Slack, Blender,
 and other application names are examples only—not built-in product targets.
@@ -22,9 +26,18 @@ Linux archive/CLI release.
   loopback-only and disabled unless explicitly enabled.
 - The root npm package remains private; npm publication is not promised.
 
-State-changing operations remain policy, grant, dry-run, exact-target, and
-confirmation gated. Workflow replay and scheduler records are metadata-only.
-Visual surfaces never control target applications.
+The agent works in a loop: understand → plan → inspect → act → observe →
+verify → recover. Every important action has an observation path
+(`computer.observe_state`, screenshots, accessibility, browser state, command
+output). Tool errors are recoverable, not terminal; repeated identical
+failures trigger a change of capability, not a blind retry.
+
+Consequence tiers replace the old per-tool confirmation tax: LOW executes
+automatically, MEDIUM executes with logging, HIGH requires approval, CRITICAL
+requires explicit confirmation. `agenthost stop` (or Control Room Stop)
+halts state-changing tools immediately, independent of the model. Workflow
+replay and scheduler records remain metadata-only. Visual surfaces never
+control target applications.
 
 ## Fastest start: release archive
 
@@ -134,6 +147,9 @@ Choose one browser and run the explicit setup flow:
 agenthost browser setup --browser firefox --apply
 # or:
 agenthost browser setup --browser chromium --apply
+# or (Chromium only): let AgentHost launch and pair the browser itself —
+# no manual extension install, no popup click:
+agenthost browser setup --browser chromium --auto --apply --approve
 ```
 
 The command prepares the unpacked extension, enables the local bridge, waits

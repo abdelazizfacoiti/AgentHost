@@ -1,6 +1,6 @@
 # Linux Release Candidate and Operations (R5/R6)
 
-R5 packages existing AgentHost capabilities for local Linux use. It adds no automation capability and does not change safety policy.
+R5 packages AgentHost's general-purpose computer-use capabilities for local Linux use. It expands automation capability intentionally (general file operations, shell execution boundary, website-agnostic browser work, observe-verify-recover loop, tasks, skills, agent controls) while safety policy is enforced by the runtime: isolation, secret redaction, audit logging, loopback binding, permission boundaries, dangerous-action approval, and an emergency stop independent of the model.
 
 ## Supported boundary
 
@@ -51,6 +51,11 @@ agenthost setup [--resume]
 agenthost start [--background]
 agenthost stop
 agenthost status
+agenthost task [list|status|pause|resume|stop]
+agenthost capabilities
+agenthost permissions
+agenthost skills
+agenthost sessions
 agenthost control-room
 agenthost browser setup|status|reset
 agenthost overlay doctor
@@ -76,13 +81,17 @@ For a packaged install, run:
 agenthost browser setup --browser firefox --apply
 # or:
 agenthost browser setup --browser chromium --apply
+# or (Chromium only, no manual install or popup click):
+agenthost browser setup --browser chromium --auto --apply --approve
 ```
 
-Load the printed unpacked extension directory in the browser, choose **Pair
-with AgentHost** in the popup, approve the exact extension identity, and wait
-for reconnect verification. The bridge is loopback-only and pairing is
-explicit. Source-checkout setup is documented in
-`docs/06_BROWSER_SETUP_VALIDATION.md`.
+Manual flow: load the printed unpacked extension directory in the browser,
+choose **Pair with AgentHost** in the popup, approve the exact extension
+identity, and wait for reconnect verification. `--auto` instead launches
+Chromium with the extension pre-loaded under an AgentHost-owned profile; the
+extension enrolls itself on startup and you approve the identity once. The
+bridge is loopback-only and pairing is explicit. Source-checkout setup is
+documented in `docs/06_BROWSER_SETUP_VALIDATION.md`.
 
 ## Setup and doctor
 
@@ -119,4 +128,4 @@ private; the supported public artifact is the Linux archive and CLI.
 
 ## Security guarantees
 
-Packaging does not alter AgentHost safety boundaries: no public bridge, no secret extraction, no CAPTCHA/MFA/login/payment bypass, no silent send/submit/upload/delete/pay/buy, no sudo, no arbitrary generated code, no scheduler execution, and no autonomous background operation.
+Packaging does not alter AgentHost safety boundaries: no public bridge, no secret extraction, no CAPTCHA/MFA/login/payment bypass, no silent send/submit/upload/delete/pay/buy, no sudo, no arbitrary generated code, no scheduler execution, and no autonomous background operation. Consequence tiers (LOW/MEDIUM/HIGH/CRITICAL) gate actions by actual effect; `agenthost stop` and Control Room Stop halt state-changing tools via `run/stop.requested` even if the model does not cooperate; human takeover pauses agent action until the operator returns control and the agent re-observes. External content (pages, files, documents, tool results) is untrusted data, never instructions.

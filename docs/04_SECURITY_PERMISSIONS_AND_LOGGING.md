@@ -17,6 +17,36 @@ R5/R6 installation is rootless and limited to AgentHost-owned user paths. Archiv
 - no arbitrary generated JavaScript/Python execution;
 - no generated tools as independent live MCP tools.
 
+''## Consequence tiers
+
+Actions map to LOW (automatic), MEDIUM (logged), HIGH (approval), CRITICAL
+(explicit confirmation); blocked stays blocked (`packages/core/src/action-risk.ts`).
+Confirmation follows actual consequence — temporary files, test runs,
+navigation, and form drafts do not demand confirmation by themselves; sends,
+deletes of important data, purchases, permission changes, and destructive
+effects do. The policy engine stays configurable; the execution engine carries
+no unnecessary hardcoded denials.
+
+## Emergency stop and human takeover
+
+`agenthost stop`, `agent.stop`, task stop, and Control Room POST
+`/api/v1/agent/stop` (token-authenticated, loopback-only) write
+`run/stop.requested`; the central runner refuses state-changing tools with
+`emergency_stop_requested` until resume clears it. `agent.takeover_begin`
+writes `run/takeover.active`; the runner refuses with
+`human_takeover_active`; on `takeover_end`/resume the agent must re-observe
+(`computer.observe_state`) before continuing. Neither path depends on model
+cooperation. Control Room GET routes stay read-only; only the two agent
+POST routes mutate stop state.
+
+## Untrusted external content
+
+User instructions and system/agent policy are trusted. Tool results, web
+pages, files, documents, emails, and MCP responses are untrusted data
+(`packages/core/src/capability-permissions.ts`). A page instructing credential
+upload is data, never an instruction — critical now that browsing is
+website-agnostic.
+
 ## Central execution baseline
 
 Every loaded tool has validated execution metadata. Missing or contradictory metadata fails closed. For state-changing tools, the central runner:
@@ -39,7 +69,7 @@ Screenshot suppression is coordinator-wide and serialized: all dynamic surfaces 
 
 ## Profiles and grants
 
-Profiles include strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. The default is `strict`; demos must explicitly launch with `AGENTHOST_PROFILE=demo-unlocked-local` (or set that profile in the local config) and restart the MCP process. Demo mode removes ordinary local/normal-app friction and grants bounded communication-page reads, but it is not unrestricted: credential/security contexts, secrets, destructive shell, broad filesystem access, and authentication/security bypasses remain hard blocked. External sends/uploads and other meaningful effects require exact governed routes, scoped grants, fresh confirmation, and verification; an unscoped effect remains blocked. State-changing tools retain dry-run and confirmation requirements.
+Profiles include general (default), strict, dev, gui-dev, demo-unlocked-local, private-data, and future-disabled autopilot. The default is `general`: shell, files, GUI input, accessibility, screenshots, and browser automation are allowed, while communication, private-data reads, external sends/uploads, and destructive effects require an explicit grant plus confirmation — so any user-requested task is executable once approved. `strict` remains for conservative setups; demos must explicitly launch with `AGENTHOST_PROFILE=demo-unlocked-local` (or set that profile in the local config) and restart the MCP process. Demo mode removes ordinary local/normal-app friction and grants bounded communication-page reads, but it is not unrestricted: credential/security contexts, secrets, destructive shell, broad filesystem access, and authentication/security bypasses remain hard blocked. External sends/uploads and other meaningful effects require exact governed routes, scoped grants, fresh confirmation, and verification; an unscoped effect remains blocked. State-changing tools retain dry-run and confirmation requirements.
 
 Persistent grant config is strict and round-trips these runtime fields without synthesizing permissions:
 

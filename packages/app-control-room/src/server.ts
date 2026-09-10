@@ -86,9 +86,21 @@ export class ControlRoomServer {
         response.end(CONTROL_ROOM_HTML);
         return;
       }
-      if (request.method !== "GET") return json(response, 405, { error: "control_room_read_only" });
       const authorization = request.headers.authorization;
       if (typeof authorization !== "string" || !authorization.startsWith("Bearer ") || !equal(authorization.slice(7), this.#token)) return json(response, 401, { error: "control_room_unauthorized" });
+      if (request.method === "POST") {
+        const parsed = new URL(request.url, "http://127.0.0.1:" + this.config.port);
+        if (parsed.pathname === "/api/v1/agent/stop") {
+          if (this.provider.agentControl === undefined) return json(response, 404, { error: "control_room_not_found" });
+          return json(response, 200, await this.provider.agentControl({ action: "stop" }));
+        }
+        if (parsed.pathname === "/api/v1/agent/resume") {
+          if (this.provider.agentControl === undefined) return json(response, 404, { error: "control_room_not_found" });
+          return json(response, 200, await this.provider.agentControl({ action: "resume" }));
+        }
+        return json(response, 405, { error: "control_room_read_only" });
+      }
+      if (request.method !== "GET") return json(response, 405, { error: "control_room_read_only" });
       const parsed = new URL(request.url, "http://127.0.0.1:" + this.config.port);
       const limitValue = Number(parsed.searchParams.get("limit") ?? "50");
       const limit = Number.isFinite(limitValue) ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(limitValue))) : 50;
@@ -98,6 +110,10 @@ export class ControlRoomServer {
       const cursor = queryCursor(parsed.searchParams.get("cursor"));
       if (cursor === undefined) return json(response, 400, { error: "control_room_invalid_cursor" });
       if (parsed.pathname === "/api/v1/status") return json(response, 200, { enabled: this.config.enabled, listening: true, port: this.config.port });
+      if (parsed.pathname === "/api/v1/agent/status") {
+        if (this.provider.agentStatus === undefined) return json(response, 404, { error: "control_room_not_found" });
+        return json(response, 200, await this.provider.agentStatus());
+      }
       if (parsed.pathname === "/api/v1/dashboard") return json(response, 200, await this.provider.dashboard({ ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) }));
       if (parsed.pathname === "/api/v1/health") return json(response, 200, await this.provider.health());
       if (parsed.pathname === "/api/v1/tasks") { const status = parsed.searchParams.get("status"); return json(response, 200, await this.provider.tasks({ limit, ...(cursor === 0 ? {} : { cursor: String(cursor) }), ...(status === null ? {} : { status }), ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) })); }

@@ -4,6 +4,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   checkLinuxDependency,
+  clearCommandPathCache,
+  findCommandPath,
   detectLinuxApp,
   ensureLinuxDir,
   linuxFileExists,
@@ -15,6 +17,17 @@ import {
 import { getPolicyProfile } from "@agenthost/core";
 
 describe("Linux helpers", () => {
+  it("caches PATH lookups for repeated input actions", async () => {
+    clearCommandPathCache();
+    const env = { PATH: "/usr/bin:/bin" };
+    const first = await findCommandPath("sh", { env });
+    const second = await findCommandPath("sh", { env });
+    expect(first).toBe(second);
+    expect(first).toContain("sh");
+    clearCommandPathCache();
+    await expect(findCommandPath("sh", { env })).resolves.toBe(first);
+  });
+
   it("checks commands without executing them", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-dep-"));
     const commandPath = path.join(dir, "sample-command");

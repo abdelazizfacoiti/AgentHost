@@ -100,6 +100,7 @@ export const GRANT_SCOPES = ["session", "persistent"] as const;
 export type GrantScope = (typeof GRANT_SCOPES)[number];
 
 export type PolicyProfileName =
+  | "general"
   | "strict"
   | "dev"
   | "gui-dev"

@@ -36,6 +36,15 @@ export async function isExecutable(filePath: string): Promise<boolean> {
   }
 }
 
+// PATH lookups happen on every desktop/input action. Cache them per PATH
+// value: binaries do not move mid-session, and access() storms (one stat per
+// PATH dir per lookup) were the dominant cost of each click/type/hotkey.
+const commandPathCache = new Map<string, string | undefined>();
+
+export function clearCommandPathCache(): void {
+  commandPathCache.clear();
+}
+
 export async function findCommandPath(command: string, context: LinuxLookupContext = {}): Promise<string | undefined> {
   if (command.trim().length === 0) {
     return undefined;
@@ -46,14 +55,24 @@ export async function findCommandPath(command: string, context: LinuxLookupConte
     return (await isExecutable(resolved)) ? resolved : undefined;
   }
 
+  const pathEnv = context.env?.PATH ?? process.env.PATH ?? "";
+  const cacheKey = `${command}\0${pathEnv}`;
+  const cached = commandPathCache.get(cacheKey);
+
+  if (cached !== undefined || commandPathCache.has(cacheKey)) {
+    return cached;
+  }
+
   for (const dir of splitPathEnv(context.env)) {
     const candidate = path.join(dir, command);
 
     if (await isExecutable(candidate)) {
+      commandPathCache.set(cacheKey, candidate);
       return candidate;
     }
   }
 
+  commandPathCache.set(cacheKey, undefined);
   return undefined;
 }
 

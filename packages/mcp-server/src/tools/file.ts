@@ -7,7 +7,7 @@ import type {
   FileWriteResult,
   ToolResult
 } from "@agenthost/core";
-import { evaluateSafety, normalizePathForPolicy, toolFailure, toolSuccess } from "@agenthost/core";
+import { createGovernedActionEffect, evaluateSafety, fingerprintActionBinding, normalizePathForPolicy, toolFailure, toolSuccess } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
@@ -56,6 +56,24 @@ const listInputSchema = z
   })
   .strict();
 
+const sourceDestSchema = z
+  .object({
+    source: pathSchema,
+    destination: pathSchema,
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
+  })
+  .strict();
+const deleteInputSchema = z
+  .object({
+    path: pathSchema,
+    recursive: z.boolean().optional(),
+    dryRun: z.boolean().optional(),
+    confirmationToken: z.string().trim().min(1).max(500).optional()
+  })
+  .strict();
+type SourceDestInput = z.infer<typeof sourceDestSchema>;
+type DeleteInput = z.infer<typeof deleteInputSchema>;
 type WriteInput = z.infer<typeof writeInputSchema>;
 type ReadInput = z.infer<typeof readInputSchema>;
 type PathOnlyInput = z.infer<typeof pathOnlyInputSchema>;
@@ -487,5 +505,118 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
     }
   };
 
-  return [write, read, exists, list, ensureDir];
+  return [write, read, exists, list, ensureDir, copy, move, remove];
 }
+
+
+
+const copy: AgentHostToolDefinition<SourceDestInput, unknown, AgentHostMcpContext> = {
+  name: "file.copy",
+  description: "Copies a file subject to path policy, dry-run, and confirmation.",
+  riskLevel: "medium",
+  inputSchema: sourceDestSchema,
+  mcpInputSchema: {
+    type: "object",
+    properties: {
+      source: { type: "string", minLength: 1, maxLength: 1000 },
+      destination: { type: "string", minLength: 1, maxLength: 1000 },
+      dryRun: { type: "boolean" },
+      confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
+    },
+    required: ["source", "destination"],
+    additionalProperties: false
+  },
+  inputSummary: "Copy file",
+  safety: { actionType: "file_write", getInput: (input) => ({ filePath: input.destination }) },
+  resolveEffect: (input, context) => createGovernedActionEffect({ ownerSessionId: context.sessionId, operationFamily: "file", operation: "copy", executionClass: "state_changing", bindings: { target: fingerprintActionBinding(`${input.source}|${input.destination}`) }, reversibility: "reversible", confirmationLevel: "standard", verificationKind: "tool_result" }),
+  preview: { isDryRun: (input) => input.dryRun === true },
+  async handler(input, context, runtime): Promise<ToolResult<unknown>> {
+    if (runtime?.isDryRun) {
+      const safetyDecision = runtime.safetyDecision ?? evaluateSafety({ tool: "file.copy", actionType: "file_write", filePath: input.destination }, context.policy, createSafetyEvaluationContext(context));
+      return buildPreviewResult({ tool: "file.copy", riskLevel: "medium", safety: safetyDecision, targetSummary: `Copy ${input.source} to ${input.destination}`, target: toFilePreviewTarget(input.destination, `Copy ${input.source} to ${input.destination}`), confirmation: { manager: context.confirmations, sessionId: context.sessionId, input, target: { source: input.source, destination: input.destination }, explanation: "Use this token to copy the exact previewed file.", riskLevel: safetyDecision.riskLevel, appSensitivity: safetyDecision.appSensitivity }, reasons: previewReasons("Classified the copy without executing it.", safetyDecision.reasons), observations: ["Previewed file copy without copying."] });
+    }
+    if (input.confirmationToken === undefined) {
+      const { code, reason } = missingConfirmationReason(runtime?.safetyDecision ?? evaluateSafety({ tool: "file.copy", actionType: "file_write", filePath: input.destination }, context.policy, createSafetyEvaluationContext(context)));
+      return toolFailure({ tool: "file.copy", riskLevel: "medium", confirmation: confirmationRequired(reason), error: { code, message: reason }, observations: [reason] });
+    }
+    const verification = context.confirmations.verifyAndConsume(input.confirmationToken, { sessionId: context.sessionId, tool: "file.copy", input, target: { source: input.source, destination: input.destination }, riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium" });
+    if (!verification.ok) return toolFailure({ tool: "file.copy", riskLevel: "medium", confirmation: rejectedConfirmation(verification.tokenId, verification.reason), error: { code: "confirmation_rejected", message: verification.reason }, observations: [verification.reason] });
+    return toolSuccess({ tool: "file.copy", riskLevel: "medium", confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and file copy executed."), data: await context.linux.copyFile!({ source: input.source, destination: input.destination }), observations: ["Copied file after policy and confirmation."] });
+  }
+};
+
+const move: AgentHostToolDefinition<SourceDestInput, unknown, AgentHostMcpContext> = {
+  name: "file.move",
+  description: "Moves/renames a file subject to path policy, dry-run, and confirmation.",
+  riskLevel: "medium",
+  inputSchema: sourceDestSchema,
+  mcpInputSchema: {
+    type: "object",
+    properties: {
+      source: { type: "string", minLength: 1, maxLength: 1000 },
+      destination: { type: "string", minLength: 1, maxLength: 1000 },
+      dryRun: { type: "boolean" },
+      confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
+    },
+    required: ["source", "destination"],
+    additionalProperties: false
+  },
+  inputSummary: "Move file",
+  safety: { actionType: "file_write", getInput: (input) => ({ filePath: input.destination }) },
+  resolveEffect: (input, context) => createGovernedActionEffect({ ownerSessionId: context.sessionId, operationFamily: "file", operation: "move", executionClass: "state_changing", bindings: { target: fingerprintActionBinding(`${input.source}|${input.destination}`) }, reversibility: "reversible", confirmationLevel: "standard", verificationKind: "tool_result" }),
+  preview: { isDryRun: (input) => input.dryRun === true },
+  async handler(input, context, runtime): Promise<ToolResult<unknown>> {
+    if (runtime?.isDryRun) {
+      const safetyDecision = runtime.safetyDecision ?? evaluateSafety({ tool: "file.move", actionType: "file_write", filePath: input.destination }, context.policy, createSafetyEvaluationContext(context));
+      return buildPreviewResult({ tool: "file.move", riskLevel: "medium", safety: safetyDecision, targetSummary: `Move ${input.source} to ${input.destination}`, target: toFilePreviewTarget(input.destination, `Copy ${input.source} to ${input.destination}`), confirmation: { manager: context.confirmations, sessionId: context.sessionId, input, target: { source: input.source, destination: input.destination }, explanation: "Use this token to move the exact previewed file.", riskLevel: safetyDecision.riskLevel, appSensitivity: safetyDecision.appSensitivity }, reasons: previewReasons("Classified the move without executing it.", safetyDecision.reasons), observations: ["Previewed file move without moving."] });
+    }
+    if (input.confirmationToken === undefined) {
+      const { code, reason } = missingConfirmationReason(runtime?.safetyDecision ?? evaluateSafety({ tool: "file.move", actionType: "file_write", filePath: input.destination }, context.policy, createSafetyEvaluationContext(context)));
+      return toolFailure({ tool: "file.move", riskLevel: "medium", confirmation: confirmationRequired(reason), error: { code, message: reason }, observations: [reason] });
+    }
+    const verification = context.confirmations.verifyAndConsume(input.confirmationToken, { sessionId: context.sessionId, tool: "file.move", input, target: { source: input.source, destination: input.destination }, riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium" });
+    if (!verification.ok) return toolFailure({ tool: "file.move", riskLevel: "medium", confirmation: rejectedConfirmation(verification.tokenId, verification.reason), error: { code: "confirmation_rejected", message: verification.reason }, observations: [verification.reason] });
+    return toolSuccess({ tool: "file.move", riskLevel: "medium", confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and file move executed."), data: await context.linux.moveFile!({ source: input.source, destination: input.destination }), observations: ["Moved file after policy and confirmation."] });
+  }
+};
+
+const remove: AgentHostToolDefinition<DeleteInput, unknown, AgentHostMcpContext> = {
+  name: "file.delete",
+  description: "Deletes a file or empty directory subject to path policy. High-consequence: requires approval and exact target.",
+  riskLevel: "high",
+  inputSchema: deleteInputSchema,
+  mcpInputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", minLength: 1, maxLength: 1000 },
+      recursive: { type: "boolean" },
+      dryRun: { type: "boolean" },
+      confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
+    },
+    required: ["path"],
+    additionalProperties: false
+  },
+  inputSummary: "Delete file",
+  safety: { actionType: "file_delete", getInput: (input) => ({ filePath: input.path, destructive: true }) },
+  resolveEffect: (input, context) => {
+    if (input.recursive === true) throw new Error("action_unsupported:Recursive delete is not supported; delete explicit paths instead.");
+    return createGovernedActionEffect({ ownerSessionId: context.sessionId, operationFamily: "file", operation: "delete", executionClass: "state_changing", destructive: true, bindings: { target: fingerprintActionBinding(input.path) }, reversibility: "destructive", confirmationLevel: "strong", verificationKind: "tool_result" });
+  },
+  preview: { isDryRun: (input) => input.dryRun === true },
+  async handler(input, context, runtime): Promise<ToolResult<unknown>> {
+    if (input.recursive === true) {
+      return toolFailure({ tool: "file.delete", riskLevel: "blocked", error: { code: "recursive_delete_unsupported", message: "Recursive delete is not supported; delete explicit paths instead." }, observations: ["Recursive delete refused."] });
+    }
+    if (runtime?.isDryRun) {
+      const safetyDecision = runtime.safetyDecision ?? evaluateSafety({ tool: "file.delete", actionType: "file_delete", filePath: input.path, destructive: true }, context.policy, createSafetyEvaluationContext(context));
+      return buildPreviewResult({ tool: "file.delete", riskLevel: "high", safety: safetyDecision, targetSummary: `Delete ${input.path}`, target: toFilePreviewTarget(input.path, `Delete ${input.path}`), confirmation: { manager: context.confirmations, sessionId: context.sessionId, input, target: { path: input.path }, explanation: "Use this token to delete the exact previewed path.", riskLevel: safetyDecision.riskLevel, appSensitivity: safetyDecision.appSensitivity }, reasons: previewReasons("Classified the delete without executing it.", safetyDecision.reasons), observations: ["Previewed file delete without deleting."] });
+    }
+    if (input.confirmationToken === undefined) {
+      const { code, reason } = missingConfirmationReason(runtime?.safetyDecision ?? evaluateSafety({ tool: "file.delete", actionType: "file_delete", filePath: input.path, destructive: true }, context.policy, createSafetyEvaluationContext(context)));
+      return toolFailure({ tool: "file.delete", riskLevel: "high", confirmation: confirmationRequired(reason), error: { code, message: reason }, observations: [reason] });
+    }
+    const verification = context.confirmations.verifyAndConsume(input.confirmationToken, { sessionId: context.sessionId, tool: "file.delete", input, target: { path: input.path }, riskLevel: runtime?.safetyDecision?.riskLevel ?? "high" });
+    if (!verification.ok) return toolFailure({ tool: "file.delete", riskLevel: "high", confirmation: rejectedConfirmation(verification.tokenId, verification.reason), error: { code: "confirmation_rejected", message: verification.reason }, observations: [verification.reason] });
+    return toolSuccess({ tool: "file.delete", riskLevel: "high", confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and delete executed."), data: await context.linux.deletePath!({ path: input.path }), observations: ["Deleted path after policy and confirmation."] });
+  }
+};

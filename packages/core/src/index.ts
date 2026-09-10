@@ -1,3 +1,5 @@
+export * from "./action-risk.js";
+export * from "./capability-permissions.js";
 export * from "./adapters.js";
 export * from "./capabilities.js";
 export * from "./config.js";

@@ -18,6 +18,27 @@ The CLI prepares the unpacked artifact, enables the loopback bridge, waits for
 browser-side enrollment, asks for explicit extension-identity approval, and
 verifies reconnect before returning `state: ready`.
 
+## Assisted auto-pairing (Chromium)
+
+```bash
+agenthost browser setup --browser chromium --auto --apply --approve
+```
+
+`--auto` launches Chromium itself with the unpacked extension pre-loaded
+(`--load-extension`) under an AgentHost-owned profile directory. The
+extension auto-enrolls on startup when unpaired, so there is no manual
+extension install and no popup click: the CLI waits, you approve the exact
+extension identity once (terminal prompt, or `--approve` when you have already
+reviewed the selection), and it verifies reconnect before returning
+`pairingMode: assisted_auto` plus the launched browser PID. Leave that browser
+instance running — it is the paired browser. The legacy one-time token path
+remains as a repair flow only.
+
+Firefox cannot auto-load an unpacked temporary add-on, so `--auto` with
+Firefox fails closed (`firefox_auto_unsupported`) with the manual steps.
+Manual popup pairing (`Pair with AgentHost`) stays as the fallback for both
+browsers.
+
 ## Source checkout setup
 
 ```bash

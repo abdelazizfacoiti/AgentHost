@@ -82,6 +82,15 @@ function browserExtensionPaths(family: SupportedBrowserFamily): { root: string; 
   const root = path.join(extensionDir, family);
   return { root, manifest: path.join(root, "manifest.json") };
 }
+function resolveExecutable(name: string): string | undefined {
+  if (name.includes("/")) return existsSync(name) ? name : undefined;
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (dir.length === 0) continue;
+    const candidate = path.join(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
 function browserSetupInstructions(family: SupportedBrowserFamily, extensionRoot: string, manifestPath: string): string[] {
   return family === "firefox"
     ? [
@@ -144,7 +153,7 @@ async function setup(flags: ReturnType<typeof parseFlags>): Promise<Output> {
         await safeWrite(`${legacy}.migration.bak`, await readFile(legacy, "utf8"));
         await safeWrite(publicConfig, JSON.stringify(migrated, null, 2) + "\n");
       } else {
-        await safeWrite(publicConfig, JSON.stringify({ schemaVersion: AGENTHOST_CONFIG_SCHEMA_VERSION, profile: "strict", browserBridge: { enabled: false }, controlRoom: { enabled: false } }, null, 2) + "\n");
+        await safeWrite(publicConfig, JSON.stringify({ schemaVersion: AGENTHOST_CONFIG_SCHEMA_VERSION, profile: "general", browserBridge: { enabled: false }, controlRoom: { enabled: false } }, null, 2) + "\n");
       }
     }
     const stateFile = path.join(agentHome, "setup", "state.json"); const state = (await readJson(stateFile)) ?? { schemaVersion: 1, completed: [] };
@@ -164,7 +173,48 @@ async function start(flags: ReturnType<typeof parseFlags>): Promise<Output> {
   if (!flags.flags.has("background")) { const child = spawn(process.execPath, [entry], { stdio: "inherit", env: childEnv }); const exit = await new Promise<number>((resolve) => { child.once("error", () => resolve(1)); child.once("exit", (code) => resolve(code ?? 1)); }); return exit === 0 ? { ok: true, command: "start", data: { stopped: true } } : fail("start", `mcp_exit_${exit}`); }
   const child = spawn(process.execPath, [entry], { stdio: "ignore", detached: true, env: childEnv }); child.unref(); await safeWrite(lockPath, JSON.stringify({ pid: child.pid, startedAt: new Date().toISOString(), version: AGENTHOST_VERSION }) + "\n"); return { ok: true, command: "start", data: { background: true, pid: child.pid } };
 }
-async function stop(): Promise<Output> { const lock = await readLock(); const pid = typeof lock?.pid === "number" ? lock.pid : undefined; if (pid === undefined || !processAlive(pid)) { await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: false, reason: "not_running" } }; } try { process.kill(pid, "SIGTERM"); } catch { return fail("stop", "process_stop_failed"); } const deadline = Date.now() + 2_000; while (processAlive(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50)); if (processAlive(pid)) return fail("stop", "process_stop_timeout"); await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: true } }; }
+async function stop(): Promise<Output> {
+  await safeWrite(path.join(agentHome, "run", "stop.requested"), JSON.stringify({ stopped: true, reason: "cli_stop", at: new Date().toISOString() }) + "\n");
+  const lock = await readLock(); const pid = typeof lock?.pid === "number" ? lock.pid : undefined;
+  if (pid === undefined || !processAlive(pid)) { await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: true, background: false, reason: "stop_flag_written" } }; }
+  try { process.kill(pid, "SIGTERM"); } catch { return fail("stop", "process_stop_failed"); }
+  const deadline = Date.now() + 2_000; while (processAlive(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+  if (processAlive(pid)) return fail("stop", "process_stop_timeout");
+  await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: true, background: true } };
+}
+async function taskCommand(args: ReturnType<typeof parseFlags>): Promise<Output> {
+  const [action, id] = args.positional.slice(1);
+  const taskDir = path.join(agentHome, "tasks");
+  if (action === undefined || action === "list") {
+    let files: string[] = [];
+    try { files = (await readdir(taskDir)).filter((f) => f.endsWith(".json")); } catch { files = []; }
+    const tasks: unknown[] = [];
+    for (const f of files.slice(0, 50)) { const t = await readJson(path.join(taskDir, f)); if (t) tasks.push({ taskId: t.taskId, goal: String(t.goal ?? "").slice(0, 120), status: t.status, phase: t.phase, updatedAt: t.updatedAt }); }
+    return { ok: true, command: "task list", data: { tasks } };
+  }
+  if ((action === "status" || action === "resume" || action === "pause") && id) {
+    const safe = id.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 200);
+    const record = await readJson(path.join(taskDir, `${safe}.json`));
+    if (!record) return fail(`task ${action}`, "task_not_found");
+    if (action !== "status") { await rm(path.join(agentHome, "run", "stop.requested"), { force: true }).catch(() => undefined); }
+    return { ok: true, command: `task ${action}`, data: action === "status" ? record : { taskId: safe, resumed: action === "resume" } };
+  }
+  if (action === "stop") { await safeWrite(path.join(agentHome, "run", "stop.requested"), JSON.stringify({ stopped: true, reason: "cli_task_stop", at: new Date().toISOString() }) + "\n"); return { ok: true, command: "task stop", data: { stopped: true } }; }
+  return fail("task", "usage: agenthost task [list|status <id>|pause <id>|resume <id>|stop]");
+}
+async function capabilitiesCommand(): Promise<Output> {
+  return { ok: true, command: "capabilities", data: { families: ["computer", "browser", "filesystem", "shell", "applications", "mcp", "network", "vision", "ocr", "speech", "skills"], note: "Authoritative live list: system.list_capabilities over MCP. Permissions: agenthost permissions." } };
+}
+async function permissionsCommand(): Promise<Output> {
+  return { ok: true, command: "permissions", data: { model: "LOW->automatic, MEDIUM->logged, HIGH->approval, CRITICAL->explicit confirmation; blocked stays blocked", capabilities: { computer: "allow", browser: "allow", filesystem: "allow", shell: "allow", applications: "allow", mcp: "allow", network: "approval_required", vision: "allow", ocr: "allow", speech: "allow", skills: "allow" }, hardStop: "agenthost stop halts state-changing tools via run/stop.requested" } };
+}
+async function skillsCommand(): Promise<Output> {
+  return { ok: true, command: "skills", data: { skills: ["software-development", "web-research", "file-management", "browser-work", "desktop-automation", "data-analysis", "document-editing", "testing-debugging", "system-administration"], note: "Detail over MCP: skills.list / skills.get. Skills compose; capabilities are discovered via agent.discover_capabilities." } };
+}
+async function sessionsCommand(): Promise<Output> {
+  const lock = await readLock();
+  return { ok: true, command: "sessions", data: { background: lock ?? null, tasksDir: "[agenthost-home]/tasks", stopRequested: existsSync(path.join(agentHome, "run", "stop.requested")), takeoverActive: existsSync(path.join(agentHome, "run", "takeover.active")) } };
+}
 async function doctor(): Promise<Output> {
   const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: pythonModuleExists("import gi; from gi.repository import Gtk"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, browserArtifacts: existsSync(extensionDir) || packagedBrowserArtifactsAvailable(), codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
   const warnings = [!checks.architecture ? "x86_64 is the public RC target." : "", !checks.python ? "Install Python 3 for overlay and local speech diagnostics." : "", !checks.x11 ? "X11 DISPLAY is unavailable; visible overlay is unsupported." : "", !checks.browserArtifacts ? "Browser extension artifacts are not prepared." : ""].filter(Boolean);
@@ -244,9 +294,25 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
       };
     }
     const family = selectedBrowser;
+    const auto = flags.flags.has("auto");
     const extensionPaths = browserExtensionPaths(family);
     const artifactAvailable = artifactAvailability.get(family) === true;
     const instructions = browserSetupInstructions(family, extensionPaths.root, extensionPaths.manifest);
+    if (auto && family === "firefox") {
+      return {
+        ok: false,
+        command: "browser setup",
+        error: "firefox_auto_unsupported",
+        data: {
+          selectedBrowser: family,
+          instructions,
+          extensionDir: extensionPaths.root,
+          manifestPath: extensionPaths.manifest,
+          tokenReturned: false,
+          next: "Firefox requires manual temporary add-on loading. Rerun without --auto and follow the printed steps, or use --browser chromium --auto."
+        }
+      };
+    }
     if (!flags.flags.has("apply")) {
       return {
         ok: true,
@@ -302,7 +368,28 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
       }
       const enrollment = server.beginEnrollment(family);
       const waitMs = Math.max(5_000, Math.min(10 * 60_000, Number(flags.values.get("wait-ms") ?? 120_000)));
-      printBrowserSetupGuide(family, extensionPaths.root, extensionPaths.manifest, bridgeConfig.port, waitMs, artifactAvailable, flags.flags.has("json"));
+      let autoPid: number | undefined;
+      if (auto && family === "chromium") {
+        const probe = probes.find((item) => item.family === "chromium" && item.executableAvailable && item.executableName !== undefined);
+        const names = [...(probe?.executableName === undefined ? [] : [probe.executableName]), "chromium", "chromium-browser", "google-chrome", "google-chrome-stable"];
+        const executable = names.map(resolveExecutable).find((item) => item !== undefined);
+        if (executable === undefined) {
+          await setupStore.transition(setupRecord.setupId, "failed", { failureCode: "browser_not_detected" });
+          await server.close();
+          return fail("browser setup", "browser_executable_not_found");
+        }
+        const profileDir = path.join(agentHome, "browser-profile", "chromium");
+        await safeMkdir(profileDir);
+        const child = spawn(executable, [`--load-extension=${extensionPaths.root}`, `--user-data-dir=${profileDir}`, "--no-first-run", "--disable-default-apps", "--disable-features=Translate", "--disable-sync", "about:blank"], { detached: true, stdio: "ignore" });
+        child.on("error", () => undefined);
+        child.unref();
+        autoPid = child.pid;
+        if (!flags.flags.has("json")) {
+          process.stdout.write(`\nAgentHost auto-pairing: launched ${executable} (pid ${autoPid ?? "unknown"}) with the extension pre-loaded.\nThe extension enrolls itself; approve the identity below (or rerun with --approve).\nWaiting up to ${Math.ceil(waitMs / 1000)} seconds for pairing...\n\n`);
+        }
+      } else {
+        printBrowserSetupGuide(family, extensionPaths.root, extensionPaths.manifest, bridgeConfig.port, waitMs, artifactAvailable, flags.flags.has("json"));
+      }
       if (!process.stdout.isTTY && !flags.flags.has("approve")) {
         return {
           ok: false,
@@ -388,6 +475,8 @@ async function browser(command: string, flags: ReturnType<typeof parseFlags>): P
               setupId: setupRecord.setupId,
               state: "ready",
               reconnectVerified: true,
+              pairingMode: autoPid !== undefined ? "assisted_auto" : "browser_side_approval",
+              ...(autoPid === undefined ? {} : { launchedBrowserPid: autoPid }),
               extensionIdentitySuffix: state.extensionIdentitySuffix,
               extensionRoot: extensionDir,
               extensionDir: extensionPaths.root,
@@ -447,13 +536,18 @@ async function uninstall(flags: ReturnType<typeof parseFlags>): Promise<Output> 
 async function main(): Promise<number> {
   const args = parseFlags(process.argv.slice(2)); const json = args.flags.has("json"); const [top, sub] = args.positional; let result: Output;
   try {
-    if (top === undefined || top === "help") result = { ok: true, command: "help", data: "agenthost version|doctor|setup|start|stop|status|control-room|browser|overlay|speech|integrations|config|update|uninstall" };
+    if (top === undefined || top === "help") result = { ok: true, command: "help", data: "agenthost version|doctor|setup|start|stop|status|task|capabilities|permissions|skills|sessions|control-room|browser|overlay|speech|integrations|config|update|uninstall" };
     else if (top === "version") result = { ok: true, command: "version", data: { version: AGENTHOST_VERSION, platform: process.platform, architecture: process.arch } };
     else if (top === "doctor") result = await doctor();
     else if (top === "setup") result = await setup(args);
     else if (top === "start") result = await start(args);
     else if (top === "stop") result = await stop();
     else if (top === "status") result = await status();
+    else if (top === "task") result = await taskCommand(args);
+    else if (top === "capabilities") result = await capabilitiesCommand();
+    else if (top === "permissions") result = await permissionsCommand();
+    else if (top === "skills") result = await skillsCommand();
+    else if (top === "sessions") result = await sessionsCommand();
     else if (top === "browser") result = await browser(sub ?? "status", args);
     else if (top === "integrations" && sub === "codex") result = await codex(args.positional[2] ?? "status", args);
     else if (top === "config") result = sub === "validate" ? await configValidate() : await configShow();

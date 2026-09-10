@@ -9,6 +9,7 @@ import type { OverlayRendererMode, OverlayPublicConfig } from "./overlay.js";
 import type { RuntimeActivityOverlayConfig } from "./runtime-activity.js";
 
 const policyProfileNameSchema = z.enum([
+  "general",
   "strict",
   "dev",
   "gui-dev",
@@ -303,7 +304,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const fileConfig = await readConfigFile(configPath);
 
   const agentHostDir = resolveLocalPath(env.AGENTHOST_HOME ?? fileConfig.agentHostDir ?? initialAgentHostDir, homeDir);
-  const profile = (env.AGENTHOST_PROFILE ?? fileConfig.profile ?? "strict") as PolicyProfileName;
+  const profile = (env.AGENTHOST_PROFILE ?? fileConfig.profile ?? "general") as PolicyProfileName;
   const parsedProfile = policyProfileNameSchema.parse(profile);
   const forgeRuntimeSandboxMode = forgeRuntimeSandboxModeSchema.parse(
     (env.AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE ?? fileConfig.forgeRuntimeSandboxMode ?? "auto") as ForgeRuntimeSandboxMode

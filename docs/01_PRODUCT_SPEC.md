@@ -2,7 +2,7 @@
 
 ## Product definition
 
-AgentHost is a universal adaptive local capability runtime: a safe, permissioned body for Codex and other agents on a real workstation. It is also a visual copilot for showing bounded, operator-visible guidance. The core is provider-agnostic and application-agnostic; product examples never become hardcoded architecture.
+AgentHost is a local general-purpose computer-use agent: a safe, permissioned body for Codex and other agents on a real workstation. The model reasons about a user goal and uses the computer's available interfaces to accomplish it — inspecting the environment, planning, acting, observing results, verifying outcomes, and recovering from failures. It is also a visual copilot for showing bounded, operator-visible guidance. The core is provider-agnostic and application-agnostic; product examples never become hardcoded architecture.
 
 ```text
 Codex / agent
@@ -13,7 +13,15 @@ Codex / agent
   -> bounded result + receipt + redacted audit record
 ```
 
-## Strategy priority
+## Capability model
+
+AgentHost exposes capability families — computer, browser, filesystem, shell,
+applications, MCP, network, vision, OCR, speech, skills — and the model
+composes them dynamically per task. The strategy order below survives only as
+an internal cost/optimization heuristic; it never defines what AgentHost is
+capable of doing.
+
+## Strategy priority (advisory cost order, not a capability boundary)
 
 1. app adapter/API
 2. official API/plugin API
@@ -32,7 +40,7 @@ V2-A unifies dynamic visual projection behind one owner/session-bound coordinato
 
 V2-B adds `strategy.route_preview`, an advisory action-level router over loaded browser, adapter, accessibility, OCR/vision, desktop, and guide families. It is deterministic, safety-first, bounded, verification-aware, and metrics-backed only by verified outcomes. It does not execute or silently switch tools.
 
-R5 adds an honest Linux x86_64 release-candidate surface around existing capabilities: rootless archive installation, `agenthost` CLI, resumable setup, redacted doctor diagnostics, Codex MCP integration with preview/backup/rollback, controlled lifecycle, browser/overlay/Control Room/speech onboarding, and deterministic release scans. Packaging adds no execution capability and keeps host dependencies explicit.
+R5 adds an honest Linux x86_64 release-candidate surface around general-purpose computer-use capabilities: rootless archive installation, `agenthost` CLI, resumable setup, redacted doctor diagnostics, Codex MCP integration with preview/backup/rollback, controlled lifecycle, browser/overlay/Control Room/speech onboarding, and deterministic release scans. Packaging adds no execution capability and keeps host dependencies explicit.
 
 The default loaded registry currently contains 247 tools with validated explicit execution metadata (optional adapters are conditional):
 

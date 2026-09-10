@@ -384,19 +384,21 @@ async function activeWindowViaXdotool(
   xdotoolPath: string,
   context: LinuxDesktopContext = {}
 ): Promise<DesktopGetActiveWindowResult> {
-  const idResult = await runDesktopCommand(xdotoolPath, ["getactivewindow"], context);
-  const windowId = trimLine(idResult.stdout);
+  // One spawn instead of three: xdotool chains subcommands against the window
+  // stack, so getactivewindow feeds getwindowpid/getwindowname directly. The
+  // numeric pid stays in the middle; the title (which may span lines) is last.
+  const combined = await runDesktopCommand(xdotoolPath, ["getactivewindow", "getwindowpid", "getwindowname"], context);
+  const lines = combined.stdout.split(/\r?\n/);
+  const windowId = (lines[0] ?? "").trim();
 
-  if (idResult.exitCode !== 0 || windowId === undefined) {
+  if (combined.exitCode !== 0 || lines.length < 2 || windowId.length === 0) {
     return unsupportedResult("xdotool", "Unable to determine the active window on X11.", {});
   }
 
-  const titleResult = await runDesktopCommand(xdotoolPath, ["getwindowname", windowId], context);
-  const pidResult = await runDesktopCommand(xdotoolPath, ["getwindowpid", windowId], context);
-  const pidValue = trimLine(pidResult.stdout);
-  const pid = pidValue !== undefined && /^\d+$/.test(pidValue) ? Number(pidValue) : undefined;
+  const pidValue = (lines[1] ?? "").trim();
+  const pid = /^\d+$/.test(pidValue) ? Number(pidValue) : undefined;
   const appName = pid !== undefined ? await readProcessName(pid) : undefined;
-  const title = redactTitle(trimLine(titleResult.stdout));
+  const title = redactTitle(lines.slice(2).join("\n").trim() || undefined);
   const activeWindow: DesktopWindowContext = {
     windowId
   };
@@ -766,8 +768,14 @@ function parseWmctrlLine(line: string): RawWindowSummary | undefined {
   };
 }
 
-async function listRawWindows(context: LinuxDesktopContext = {}): Promise<
-  | { supported: false; backend: string; reason: string }
+const WINDOW_LIST_CACHE_TTL_MS = 2_000;
+const windowListCache = new Map<string, { at: number; windows: RawWindowSummary[] }>();
+
+export function clearWindowListCache(): void {
+  windowListCache.clear();
+}
+
+async function listRawWindows(context: LinuxDesktopContext = {}): Promise<  | { supported: false; backend: string; reason: string }
   | { supported: true; backend: string; windows: RawWindowSummary[]; reason: string }
 > {
   const supportStatus = await detectWindowListSupport(context);
@@ -777,6 +785,21 @@ async function listRawWindows(context: LinuxDesktopContext = {}): Promise<
       supported: false,
       backend: supportStatus.backend,
       reason: supportStatus.reason
+    };
+  }
+
+  // Window enumeration spawns wmctrl plus one /proc read per window. Cache the
+  // raw listing briefly: focus-by-name and observe flows poll it in bursts,
+  // and a 2s window keeps app switching snappy without going stale.
+  const cacheKey = (context.env?.DISPLAY ?? process.env.DISPLAY ?? "") + "\0" + (context.env?.XAUTHORITY ?? process.env.XAUTHORITY ?? "");
+  const cached = windowListCache.get(cacheKey);
+
+  if (cached !== undefined && Date.now() - cached.at < WINDOW_LIST_CACHE_TTL_MS) {
+    return {
+      supported: true,
+      backend: "wmctrl",
+      windows: cached.windows,
+      reason: "Listed visible X11 windows through wmctrl."
     };
   }
 
@@ -820,6 +843,8 @@ async function listRawWindows(context: LinuxDesktopContext = {}): Promise<
 
     windows.push(parsed);
   }
+
+  windowListCache.set(cacheKey, { at: Date.now(), windows });
 
   return {
     supported: true,
@@ -882,7 +907,6 @@ export async function focusLinuxWindow(
   input: LinuxWindowFocusInput,
   context: LinuxDesktopContext = {}
 ): Promise<WindowFocusResult> {
-  const rawResult = await listRawWindows(context);
   const requestedWindow: DesktopWindowContext = {};
 
   if (input.windowId !== undefined) {
@@ -900,6 +924,30 @@ export async function focusLinuxWindow(
   if (input.pid !== undefined) {
     requestedWindow.pid = input.pid;
   }
+
+  // Fast path: a windowId is already unique. Activating it directly skips the
+  // full wmctrl listing plus one /proc read per window, which is the
+  // dominant cost of app switching. wmctrl itself fails on unknown ids.
+  if (input.windowId !== undefined && input.appName === undefined && input.title === undefined && input.pid === undefined) {
+    const focusSupport = await detectWindowFocusSupport(context);
+    if (!focusSupport.supported) {
+      return { supported: false, backend: focusSupport.backend, focused: false, window: requestedWindow, reason: focusSupport.reason };
+    }
+    const directPath = await findCommandPath("wmctrl", context);
+    if (directPath === undefined) {
+      return { supported: false, backend: "unavailable", focused: false, window: requestedWindow, reason: "Window focus requires wmctrl on X11." };
+    }
+    const direct = await runDesktopCommand(directPath, ["-i", "-a", input.windowId], context);
+    return {
+      supported: true,
+      backend: "wmctrl",
+      focused: direct.exitCode === 0,
+      window: summarizeWindow({ windowId: input.windowId }, true),
+      reason: direct.exitCode === 0 ? "Focused the requested X11 window through wmctrl." : "wmctrl could not focus the requested window."
+    };
+  }
+
+  const rawResult = await listRawWindows(context);
 
   if (!rawResult.supported) {
     return {

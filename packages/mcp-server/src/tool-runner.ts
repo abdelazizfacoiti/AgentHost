@@ -18,6 +18,7 @@ import { actionEffectFromSafetyInput, decideGovernedAction, evaluateSafety, reda
 import type { z } from "zod";
 import type { GrantStore } from "./grants.js";
 import { validateToolExecutionMetadata } from "./tool-metadata.js";
+import { isStopRequested, isTakeoverActive } from "./stop-flag.js";
 import type { RuntimeActivityService } from "./runtime-activity-service.js";
 
 export interface ToolExecutionContext {
@@ -263,6 +264,19 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
         }
 
         if (metadataValid) {
+          const centralStateChanging = execution.executionClass === "state_changing";
+          const stopExempt = /^(agent\.|task\.|skills\.|system\.|policy\.)/.test(definition.name);
+          if (centralStateChanging && !isDryRun && !stopExempt) {
+            try {
+              const home = (context as unknown as { config?: { agentHostDir?: string } }).config?.agentHostDir;
+              if (home !== undefined && await isStopRequested(home)) {
+                result = centralFailure({ definition: definition as AgentHostToolDefinition<unknown, TData>, code: "emergency_stop_requested", message: "Emergency stop was requested. State-changing execution is halted until the operator resumes.", ...(safetyDecision === undefined ? {} : { safetyDecision }) });
+              } else if (home !== undefined && await isTakeoverActive(home)) {
+                result = centralFailure({ definition: definition as AgentHostToolDefinition<unknown, TData>, code: "human_takeover_active", message: "Human takeover is active. The operator controls the machine; re-observe with computer.observe_state after takeover ends.", ...(safetyDecision === undefined ? {} : { safetyDecision }) });
+              }
+            } catch { /* Stop-flag check is best effort; fail open to normal policy on I/O error. */ }
+          }
+          if (result === undefined) {
           // The state-changing baseline is intentionally fail-closed. Read-only,
           // diagnostic, metadata-only, inert, and visual-only tools do not enter
           // the confirmation gate.
@@ -419,6 +433,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
             if (safetyDecision?.actionDecision !== undefined && result.actionDecision === undefined) {
               result = { ...result, actionDecision: safetyDecision.actionDecision };
             }
+          }
           }
         }
       }

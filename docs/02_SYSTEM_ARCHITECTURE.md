@@ -3,14 +3,27 @@
 ## Runtime shape
 
 ```text
-Codex / agent
-  -> MCP stdio server
-  -> schema + execution metadata
-  -> policy + grants + protected-context checks
-  -> dry-run / confirmation envelope
-  -> domain handler and local backend
-  -> ToolResult + receipt + redacted audit record
+USER GOAL
+  -> understand / plan / inspect environment
+  -> select capability (computer/browser/filesystem/shell/apps/MCP/vision/skills)
+  -> act (central runner: schema + metadata + policy/grants + stop/takeover gate
+     + dry-run/confirmation envelope + exact-target check)
+  -> observe (computer.observe_state, screenshots, a11y, browser/command state)
+  -> verify (checkpoints, re-observation)
+  -> recover on failure (diagnose, retry, alternative capability) or done
+  -> ToolResult + receipt + redacted audit record + task history
 ```
+
+Capabilities are broad; permissions are configurable; safety is enforced by
+the runtime. New modules: `core/action-risk.ts` (LOW/MEDIUM/HIGH/CRITICAL
+consequence tiers), `core/capability-permissions.ts` (capability families,
+trusted vs untrusted sources), `mcp-server/stop-flag.ts` (hard stop +
+takeover flags under `run/`), `mcp-server/tools/computer.ts`
+(`computer.observe_state`), `mcp-server/tools/agent.ts` (status/stop/resume/
+takeover/discovery, all stop-exempt), `mcp-server/tools/tasks.ts`
+(persistent task lifecycle under `tasks/`), `mcp-server/tools/skills.ts`
+(reusable skill catalog). The central runner halts state-changing tools when
+`run/stop.requested` or `run/takeover.active` exists.
 
 ### Release boundary
 

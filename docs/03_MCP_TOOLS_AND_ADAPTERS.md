@@ -62,9 +62,22 @@ Examples: `system.get_info`, `system.list_capabilities`, `system.check_dependenc
 
 Class: read-only or diagnostic. External effect: none. Dry-run/confirmation: not required. These report local state and policy metadata only.
 
+### Agent control, tasks, skills, and observation
+
+`agent.status`, `agent.stop`, `agent.resume`, `agent.takeover_begin`,
+`agent.takeover_end` (stop/takeover enforced centrally, exempt from their own
+gate), and `agent.discover_capabilities` (runtime families, counts, adapters,
+browser/desktop availability). `task.create/status/update/log_event/pause/
+resume/complete` persist long-running goal state under `tasks/`.
+`skills.list/get` serve the reusable catalog (software-development,
+web-research, file-management, browser-work, desktop-automation,
+data-analysis, document-editing, testing-debugging, system-administration).
+`computer.observe_state` returns active window, desktop capabilities, and
+screen geometry for post-action verification and recovery.
+
 ### Files and shell
 
-`file.read`, `file.exists`, and `file.list` are read-only. `file.write` and `file.ensure_dir` are state-changing. `shell.run_safe` is state-changing and bounded.
+`file.read`, `file.exists`, and `file.list` are read-only. `file.write`, `file.ensure_dir`, `file.copy`, and `file.move` are state-changing with dry-run/confirmation; `file.delete` is high-consequence (approval, exact target, no recursive mode). `shell.run_safe` is state-changing and bounded; the shell classifier now treats wrapper/metacharacter/destructive/package operations as approval-gated high-risk rather than hard-blocked, while sudo, filesystem formatting, kill-all, and root permission changes stay blocked, as do credential and browser-profile paths.
 
 State-changing calls require a declared dry-run, policy/grant approval, and session-bound confirmation where required. Protected paths, dangerous commands, secrets, broad filesystem access, sudo, installation, and unsafe network use remain blocked.
 
@@ -88,13 +101,13 @@ Enrollment is browser-family scoped, identity/protocol/version checked, and
 stored as redacted local lifecycle metadata. Setup never returns reconnect
 secrets through status or logs; pairing approval remains explicit.
 
-Actions: `browser.open_url`, `browser.click_element`, `browser.fill_text`, `browser.focus_element`.
+Actions: `browser.open_url`, `browser.click_element`, `browser.fill_text`, `browser.focus_element` — website-agnostic. Financial and system-settings contexts are approval-gated instead of blanket-blocked (external/destructive financial effects still have no governed route); only credential/security contexts, password inputs, authentication, and CAPTCHA remain hard-blocked. Checkpoint failures now carry recovery guidance (re-observe, re-find, alternative capability).
 
 The bridge is disabled by default, loopback-only, paired, fixed-command, bounded, and redacted. Actions require short-lived opaque tab/page-bound `elementId` references; direct selectors cannot execute actions. Navigation/action calls use dry-run and confirmation. Password, secret, login, CAPTCHA, MFA, and credential/security operations remain protected. Send, submit, upload, delete, and payment effects are governed by exact target/content/route bindings when a supported route exists; otherwise they return `action_unsupported` or guide-only. Communication reads require grants; financial/credential/admin content is protected.
 
 ### Vision and screenshot handoff
 
-`vision.analyze_image`, `vision.find_text`, `vision.find_target`, and `vision.prepare_pointer_action` are read-only. OCR is local Tesseract only. Results contain bounded redacted text/boxes/centers and suggestions. The handoff validates fresh trusted evidence and returns only a `desktop.click` `dryRun:true` payload; it never clicks or types.
+`vision.analyze_image`, `vision.find_text`, `vision.find_target`, and `vision.prepare_pointer_action` are read-only. OCR is local Tesseract only. Observation is first-class: financial and system-settings windows are now observable (credential/security stays blocked, including pointer handoff), and `computer.observe_state` exists for mandatory post-action verification. The handoff validates fresh trusted evidence and returns only a `desktop.click` `dryRun:true` payload; it never clicks or types.
 
 ### Checkpoints
 

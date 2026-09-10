@@ -23,7 +23,10 @@ import {
   checkLinuxDependency,
   captureLinuxScreenshot,
   clickLinuxDesktop,
+  copyLinuxFile,
+  deleteLinuxPath,
   performLinuxPointerAction,
+  moveLinuxFile,
   detectLinuxApp,
   detectLinuxAccessibilitySupport,
   ensureLinuxDir,
@@ -66,6 +69,10 @@ import { createAccessibilityTools } from "./tools/accessibility.js";
 import { createAppTools } from "./tools/app.js";
 import { createBlenderTools } from "./tools/blender.js";
 import { createDesktopTools } from "./tools/desktop.js";
+import { createComputerTools } from "./tools/computer.js";
+import { createAgentTools } from "./tools/agent.js";
+import { createTaskTools } from "./tools/tasks.js";
+import { createSkillTools } from "./tools/skills.js";
 import { createFileTools } from "./tools/file.js";
 import { createForgeTools } from "./tools/forge.js";
 import { createForgeSandboxTools } from "./tools/forge-sandbox.js";
@@ -271,6 +278,9 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       fileExists: (input) => linuxFileExists(input, { agentHostDir: config.agentHostDir }),
       listDirectory: (input) => listLinuxDirectory(input, { agentHostDir: config.agentHostDir }),
       ensureDir: (input) => ensureLinuxDir(input, { agentHostDir: config.agentHostDir }),
+      copyFile: (input) => copyLinuxFile(input, { agentHostDir: config.agentHostDir }),
+      moveFile: (input) => moveLinuxFile(input, { agentHostDir: config.agentHostDir }),
+      deletePath: (input) => deleteLinuxPath(input, { agentHostDir: config.agentHostDir }),
       getDesktopCapabilities: () => getLinuxDesktopCapabilities({ agentHostDir: config.agentHostDir }),
       getActiveWindow: () => getLinuxActiveWindow({ agentHostDir: config.agentHostDir }),
       getScreenGeometry: () => getLinuxScreenGeometry({ agentHostDir: config.agentHostDir }),
@@ -362,6 +372,10 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createShellTools(),
     ...createFileTools(),
     ...createDesktopTools(),
+    ...createComputerTools(),
+    ...createAgentTools(),
+    ...createTaskTools(),
+    ...createSkillTools(),
     ...createWindowTools(),
     ...createAccessibilityTools(),
     ...createGuideTools(),

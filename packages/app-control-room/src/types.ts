@@ -10,4 +10,6 @@ export interface ControlRoomReportProvider {
   screenshots(input: ControlRoomScreenshotQuery): Promise<{ screenshots: ControlRoomScreenshotProjection[]; nextCursor?: string; truncated: boolean }>;
   screenshot(screenshotId: string): Promise<ControlRoomScreenshotProjection>;
   health(): Promise<ControlRoomHealthProjection>;
+  agentStatus?(): Promise<{ stopped: boolean; takeoverActive: boolean }>;
+  agentControl?(input: { action: "stop" | "resume" }): Promise<{ stopped: boolean }>;
 }

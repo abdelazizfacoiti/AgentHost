@@ -49,6 +49,30 @@ const GUI_DEV_DEFAULTS: PermissionDefaults = {
   guiHotkey: "allow"
 };
 
+// General-purpose default: the user can perform any task they request and
+// approve. Routine capabilities execute under dry-run/confirmation; external,
+// communicative, private-data, and destructive effects additionally require an
+// explicit grant (approval). Nothing task-worthy is denied by default.
+const GENERAL_DEFAULTS: PermissionDefaults = {
+  shell: "allow",
+  fileRead: "allow",
+  fileWrite: "allow",
+  appOpen: "allow",
+  screenshots: "allow",
+  windowFocus: "allow",
+  accessibilityRead: "allow",
+  accessibilityActions: "allow",
+  guiClick: "allow",
+  guiType: "allow",
+  guiHotkey: "allow",
+  browserAutomation: "allow",
+  communicationActions: "approval_required",
+  privateDataReads: "approval_required",
+  externalSendsUploads: "approval_required",
+  destructiveActions: "approval_required",
+  generatedTools: "deny"
+};
+
 // Local demo only. Hard safety classifiers and confirmation tokens still apply.
 const DEMO_UNLOCKED_LOCAL_DEFAULTS: PermissionDefaults = {
   ...GUI_DEV_DEFAULTS,
@@ -245,6 +269,37 @@ export const DEMO_UNLOCKED_LOCAL_POLICY_PROFILE: PolicyProfile = {
   }]
 };
 
+export const GENERAL_POLICY_PROFILE: PolicyProfile = {
+  name: "general",
+  description: "General-purpose default. Any user-requested task is executable; consequential effects require grants plus confirmation.",
+  enabled: true,
+  allowScreenshots: true,
+  allowAppLaunch: true,
+  allowShell: true,
+  allowFileWriteRoots: ["~/.agenthost", "~/Desktop/agenthost-output"],
+  allowGenericClick: true,
+  allowGenericType: true,
+  allowEmailSend: false,
+  allowUploads: false,
+  requireApprovalForMediumRisk: false,
+  blockHighRiskByDefault: false,
+  requireDryRunForStateChanging: true,
+  requireConfirmationForStateChanging: true,
+  requireExactTargetForStateChanging: true,
+  defaults: GENERAL_DEFAULTS,
+  grants: [{
+    id: "general.communication-read",
+    scope: "persistent",
+    effect: "allow",
+    description: "Default read/inspect grant for communication apps. Sends and external effects still need approval plus confirmation.",
+    match: {
+      actionTypes: ["observe", "inspect", "file_read"],
+      appSensitivities: ["communication"]
+    },
+    requirements: { maxRiskLevel: "medium" }
+  }]
+};
+
 export const PRIVATE_DATA_POLICY_PROFILE: PolicyProfile = {
   name: "private-data",
   description: "Restricted profile for private-data inspection with explicit grants.",
@@ -300,6 +355,8 @@ export function getPolicyProfile(name: PolicyProfileName, options: { grants?: Ca
   const grants = options.grants ?? [];
 
   switch (name) {
+    case "general":
+      return clonePolicyProfile(GENERAL_POLICY_PROFILE, grants);
     case "strict":
       return clonePolicyProfile(STRICT_POLICY_PROFILE, grants);
     case "dev":
@@ -317,6 +374,7 @@ export function getPolicyProfile(name: PolicyProfileName, options: { grants?: Ca
 
 export function listPolicyProfiles(): PolicyProfile[] {
   return [
+    getPolicyProfile("general"),
     getPolicyProfile("strict"),
     getPolicyProfile("dev"),
     getPolicyProfile("gui-dev"),

@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ActionEffectDecisionSummary, ActionVerificationSummary, ControlRoomDashboardProjection, ControlRoomHealthProjection, ControlRoomScreenshotProjection, ControlRoomTaskProjection, ControlRoomTimelineEvent, RiskLevel, RuntimeActivityProjection } from "@agenthost/core";
 import type { ControlRoomReportProvider, ControlRoomScreenshotQuery, ControlRoomTaskQuery } from "@agenthost/app-control-room";
+import { clearStop, isStopRequested, isTakeoverActive, requestStop } from "./stop-flag.js";
 
 interface ActivityRecord {
   eventId: string;
@@ -81,8 +82,10 @@ export class ControlRoomStore {
   readonly #eventIndex = new Map<string, ControlRoomTimelineEvent[]>();
   readonly #sources: ControlRoomSources;
   readonly #ownerSessionId: string | undefined;
+  readonly #agentHostDir: string;
   #screenshotWrite: Promise<void> = Promise.resolve();
   constructor(agentHostDir: string, sources: ControlRoomSources = {}, options: ControlRoomStoreOptions = {}) {
+    this.#agentHostDir = agentHostDir;
     this.#root = path.join(agentHostDir, "control-room");
     this.#activityFile = path.join(this.#root, "activity.jsonl");
     this.#screenshotFile = path.join(this.#root, "screenshots.jsonl");
@@ -139,7 +142,9 @@ export class ControlRoomStore {
       timeline: (id, input) => this.timeline(id, input),
       screenshots: (input) => this.screenshots(input),
       screenshot: (id) => this.screenshot(id),
-      health: () => this.health()
+      health: () => this.health(),
+      agentStatus: () => this.agentStatus(),
+      agentControl: (input) => this.agentControl(input)
     };
   }
 
@@ -309,4 +314,14 @@ export class ControlRoomStore {
   #owns(sessionId: string | undefined): boolean { return this.#ownerSessionId === undefined || sessionId === this.#ownerSessionId; }
   #screenshotsForSession(sessionId: string): ScreenshotRecord[] { return [...this.#screenshots.values()].filter((item) => this.#owns(item.sessionId) && item.sessionId === sessionId); }
   #screenshotsInRange(from: string, to: string): ScreenshotRecord[] { return [...this.#screenshots.values()].filter((item) => this.#owns(item.sessionId) && item.capturedAt >= from && item.capturedAt <= to); }
+
+  async agentStatus(): Promise<{ stopped: boolean; takeoverActive: boolean }> {
+    return { stopped: await isStopRequested(this.#agentHostDir), takeoverActive: await isTakeoverActive(this.#agentHostDir) };
+  }
+
+  async agentControl(input: { action: "stop" | "resume" }): Promise<{ stopped: boolean }> {
+    if (input.action === "stop") await requestStop(this.#agentHostDir, "control_room_stop");
+    else await clearStop(this.#agentHostDir);
+    return { stopped: await isStopRequested(this.#agentHostDir) };
+  }
 }

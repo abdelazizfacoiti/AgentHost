@@ -11,8 +11,8 @@ describe("loadAgentHostConfig", () => {
 
     expect(config.agentHostDir).toBe(path.join(homeDir, ".agenthost"));
     expect(config.schemaVersion).toBe(1);
-    expect(config.profile).toBe("strict");
-    expect(config.policy.name).toBe("strict");
+    expect(config.profile).toBe("general");
+    expect(config.policy.name).toBe("general");
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
     expect(config.overlayRendererMode).toBe("auto");
     expect(config.runtimeActivityOverlay).toEqual(expect.objectContaining({ enabled: true, position: "top_left", interactiveControls: false, screenshotSuppression: true, multiTaskSummary: true }));
@@ -190,7 +190,7 @@ describe("loadAgentHostConfig", () => {
 
     const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
     expect(config.optionalAdapters).toEqual({ blender: { enabled: false } });
-    expect(config.policy.grants[0]).toMatchObject({
+    expect(config.policy.grants.find((grant) => grant.id === "runtime-full")).toMatchObject({
       match: {
         generatedToolIds: ["artifact-1"],
         registrationIds: ["registration-1"],

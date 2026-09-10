@@ -68,26 +68,26 @@ const SHELL_RULES: ShellRule[] = [
   {
     id: "shell.shell_wrapper",
     pattern: /(^|\s)(?:bash|dash|fish|sh|zsh)\s+-c(\s|$)/i,
-    riskLevel: "blocked",
-    reason: "Shell wrapper execution is not allowed."
+    riskLevel: "high",
+    reason: "Shell wrapper execution requires approval and output limits."
   },
   {
     id: "shell.metacharacter",
     pattern: /[`$][(]|[;&|<>]/,
-    riskLevel: "blocked",
-    reason: "Shell metacharacters require a shell and are not allowed."
+    riskLevel: "high",
+    reason: "Shell metacharacters require approval; commands run without an implicit shell."
   },
   {
     id: "shell.destructive_file_command",
     pattern: /(^|\s)(?:rm|rmdir|shred|truncate|unlink)(\s|$)/i,
-    riskLevel: "blocked",
-    reason: "Destructive file commands are not allowed."
+    riskLevel: "high",
+    reason: "Destructive file commands require explicit approval and exact target."
   },
   {
     id: "shell.package_or_system_change",
     pattern: /(^|\s)(?:apt|apt-get|dnf|yum|pacman|zypper|snap|flatpak|systemctl|service)\s+(?:install|remove|purge|upgrade|dist-upgrade|update|start|stop|restart|enable|disable)\b/i,
-    riskLevel: "blocked",
-    reason: "Package installation or system service changes are not allowed in Phase 3."
+    riskLevel: "high",
+    reason: "Package or service changes require explicit approval."
   }
 ];
 
@@ -118,8 +118,8 @@ export function classifyShellCommand(
   if (policy.name === "demo-unlocked-local") {
     const executable = command.trim().split(/\s+/)[0] ?? "";
     if (!DEMO_COMMANDS.has(executable)) {
-      riskLevel = "blocked";
-      reasons.push("Demo profile only permits approved local development commands.");
+      riskLevel = maxRiskLevel(riskLevel, "high");
+      reasons.push("Demo profile treats non-allowlisted commands as high-risk and approval-gated.");
       matchedRules.push("demo.shell.command_not_allowlisted");
     }
   }

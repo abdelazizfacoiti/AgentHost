@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readdir, readFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import {
   normalizePathForPolicy,
@@ -151,4 +151,35 @@ export async function ensureLinuxDir(
     exists: true,
     created: !before.exists
   };
+}
+
+export async function copyLinuxFile(
+  input: { source: string; destination: string },
+  context: SafetyEvaluationContext = {}
+): Promise<{ source: string; destination: string; copied: boolean }> {
+  const normalizedSource = normalize(input.source, context);
+  const normalizedDestination = normalize(input.destination, context);
+  await mkdir(path.dirname(normalizedDestination), { recursive: true });
+  await copyFile(normalizedSource, normalizedDestination);
+  return { source: normalizedSource, destination: normalizedDestination, copied: true };
+}
+
+export async function moveLinuxFile(
+  input: { source: string; destination: string },
+  context: SafetyEvaluationContext = {}
+): Promise<{ source: string; destination: string; moved: boolean }> {
+  const normalizedSource = normalize(input.source, context);
+  const normalizedDestination = normalize(input.destination, context);
+  await mkdir(path.dirname(normalizedDestination), { recursive: true });
+  await rename(normalizedSource, normalizedDestination);
+  return { source: normalizedSource, destination: normalizedDestination, moved: true };
+}
+
+export async function deleteLinuxPath(
+  input: { path: string; recursive?: boolean },
+  context: SafetyEvaluationContext = {}
+): Promise<{ path: string; deleted: boolean }> {
+  const normalizedPath = normalize(input.path, context);
+  await rm(normalizedPath, { recursive: input.recursive === true, force: false });
+  return { path: normalizedPath, deleted: true };
 }
