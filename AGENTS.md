@@ -2,56 +2,7 @@
 
 ## Project mission
 
-We are building **AgentHost**, a universal local MCP server that gives Codex-style agents a safe, permissioned body on a real computer.
-
-AgentHost should help agents automate **many apps and workflows**, not one specific app.
-
-The product is:
-
-```text
-A safe local runtime that gives AI agents controlled access to apps, files, shell, browser workflows, and desktop actions.
-```
-
-The product is not:
-
-```text
-A Blender automation script.
-```
-
-Blender is only an optional future demo adapter.
-
-## Automation strategy order
-
-For any app or task, prefer this order:
-
-1. app-specific adapter
-2. official API/plugin API
-3. CLI/script interface
-4. browser automation
-5. accessibility tree
-6. GUI screenshot/click/type fallback
-7. guide mode only
-
-Use GUI clicking and typing only as fallback and only when policy allows it.
-
-For unsupported or sensitive apps, prefer guide mode.
-
-## Current milestone
-
-Current release-hardening boundary: **P1 Safety Reconciliation + R6 Closure**.
-Implement only explicitly approved safety, metadata, parity, logging, and release-documentation work. Verify source and tests before claiming completion.
-
-Existing browser, desktop, accessibility, Forge, speech, overlay, workflow, scheduler-governance, Control Room, and optional-adapter features remain governed by their current safety contracts. Do not infer permission from this file.
-
-## Architecture rules
-
-Core must be app-agnostic.
-
-Core must not import app-specific implementations.
-
-Core must not import Linux-specific implementations.
-
-Use this shape:
+**AgentHost** is a universal local MCP server giving agents a safe, permissioned body on a real computer. It automates many apps/workflows — not one specific app. Blender is only an optional future demo adapter.
 
 ```text
 Codex / agent brain
@@ -63,109 +14,141 @@ Universal automation layer
   ↓ any app / terminal / browser / file workflow
 ```
 
-## Package direction
+## Automation strategy order
 
-Recommended structure:
+For any task, prefer:
+1. app-specific adapter → 2. official API/plugin → 3. CLI/script → 4. browser automation → 5. accessibility tree → 6. GUI screenshot/click/type → 7. guide mode
 
-```text
+GUI clicking/typing is fallback only. Use guide mode for unsupported or sensitive apps.
+
+## Current milestone
+
+**P1 Safety Reconciliation + R6 Closure**. Implement only approved safety, metadata, parity, logging, and release-documentation work. Verify source and tests before claiming completion.
+
+## Architecture rules
+
+- **Core must be app-agnostic** — no app-specific imports in `packages/core`
+- **Core must not import Linux-specific implementations**
+- App-specific adapters are optional; Blender code lives only in `packages/app-blender/` or `packages/app-adapters/blender/`
+
+## Package map
+
+```
 packages/
-  core/
-  mcp-server/
-  automation/
-  os-linux/
-  app-adapters/
-  app-browser/
-  app-blender/
-  shared/
+  core/              @agenthost/core — risk tiers, capability permissions, policies, types
+  mcp-server/        @agenthost/mcp-server — MCP server, tools, server, resources
+  agenthost-cli/     CLI tool (bin: agenthost-mcp)
+  app-browser/       browser extension + background.js
+  app-overlay/       GTK3 renderer + overlay manager
+  app-control-room/  Control Room web UI
+  os-linux/          OS adapters (filesystem, desktop, dependencies, window mgmt)
+  app-blender/       optional Blender adapter
 ```
 
-App-specific adapters must be optional.
+## Key commands
 
-Blender-specific code belongs only in:
+| Command | What it does |
+|---|---|
+| `npm run build` | `tsc -b` — build all packages |
+| `npm run lint` | `tsc -b --pretty false` |
+| `npm run test` | `vitest run` — all packages |
+| `npm start:mcp` | Run MCP server |
+| `npm run smoke:mcp` | Smoke test |
+| `npm run browser:pair` | Pair browser bridge |
+| `npm run control-room` | Start Control Room |
 
-```text
-packages/app-blender/
-```
+**Test order**: `build → lint → test`. Run a single test file: `npx vitest run packages/core/src/__tests__/<file>.test.ts`. Tests live in `__tests__/` dirs inside each package's `src/`.
 
-or:
+**Build is project-wide**: `tsc -b` reads `tsconfig.json` references. Build individual packages with `npx tsc -b packages/core`.
 
-```text
-packages/app-adapters/blender/
-```
+## Default profile
 
-## Safety rules
+The default policy profile is **`general`** (not `strict`). It allows shell, files, GUI input, browser automation, screenshots. Gates communication/private-data/external/destructive as `approval_required`.
 
-Every future tool must pass through:
+## Safety model
 
-1. schema validation
-2. risk classification
-3. policy check
-4. approval handling if needed
-5. execution
-6. audit logging
+Every tool passes through: schema validation → risk classification → policy check → approval handling → execution → audit logging.
 
-High-risk actions include:
+- Risk tiers: `LOW` / `MEDIUM` / `HIGH` / `CRITICAL`
+- 11 capability families with trusted vs untrusted source boundaries
+- `agenthost task approve <id> [--max-risk low|medium]` creates 30-min operator-only approval
+- Stop enforcement via `stop-flag.ts`; `emergency_stop_requested`/`human_takeover_active` gates
 
-- sending emails
-- posting messages
-- uploading files
-- deleting files
-- overwriting important files
-- running sudo
-- installing packages
-- changing system settings
-- accessing secrets
-- interacting with financial/payment sites
-- submitting forms
-- publishing content
-- destructive shell commands
+## Logging
 
-Never implement:
+All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API keys, tokens, cookies, private keys, full sensitive files, or screenshots.
 
-- hidden persistence
-- stealth control
-- credential extraction
-- security bypasses
-- CAPTCHA bypass
-- disabling security tools
-- malware-like behavior
+## Key files & paths
 
-## Logging rules
+- `~/.agenthost/` — config (`config.json`), logs, screenshots, runtime data, control-room stores
+- `~/.bridge/config.json` — browser bridge config (port `43117`)
+- `~/.agenthost/logs/` — JSONL audit logs
+- `~/.agenthost/screenshots/` — captured screenshots
+- `~/.agenthost/control-room/` — activity.jsonl + screenshots.jsonl
 
-All tool calls should be logged locally as JSONL.
+## Environment gotchas
 
-Default path:
+- **AZERTY keyboard**: `xdotool type` breaks for special chars (`:/#`). Use `xdotool key` or clipboard paste instead.
+- **Draw.io**: Requires account/signup prompt that blocks automation. Use **Excalidraw** for quick drawing tasks.
+- **Firefox bridge**: Paired but connection can be unstable. `--auto` works for Chromium, fails closed for Firefox.
+- **Second Firefox window**: `xdotool windowactivate` may fail with `BadWindow`. Use `xdotool search --name <pattern>` to find correct window ID.
+- **Control Room screenshot limit**: Default pagination limit is **50** (`limit()` in `control-room-store.ts` caps at `Math.min(100, Math.max(1, Math.floor(value)))`). Do not exceed 50 screenshots in a single query to avoid truncation errors.
 
-```text
-~/.agenthost/logs/
-```
+## Browser extension
 
-Do not log:
+Extension auto-enrolls on Chromium startup with `--load-extension`. Firefox `--auto` fails closed. Prepare with `npm run browser:extension:prepare` or `npm run browser:setup`.
 
-- passwords
-- API keys
-- tokens
-- cookies
-- private keys
-- full sensitive files
-- full private messages
-- screenshots by default
+## Testing quirks
+
+- ~94 files, ~540 tests across `__tests__/` dirs
+- Tests use Vitest (no separate config file; defaults from `vitest`)
+- `packages/mcp-server/src/__tests__/general-purpose-agent.test.ts` — 10-test suite for general-purpose agent flow
+- `packages/core/src/__tests__/capability-manifest.test.ts` — new manifest tests
+- `packages/mcp-server/src/__tests__/resources.test.ts` — resource discovery tests
+- `packages/mcp-server/src/__tests__/guide-overlay-tools.test.ts` — guide overlay tests
+- Integration tests may require browser bridge connection and X11 display (`:0`)
 
 ## Development workflow
 
 Before major changes:
-
 1. inspect repo
-2. read docs
+2. read docs (`docs/README.md`, `docs/01-04`, `06`, `08`)
 3. summarize current state
 4. propose exact files to create/edit
 5. implement only approved milestone
 
 After implementation:
-
 1. show changed files
 2. explain how to run
 3. explain how to test
-4. run available build/test/lint commands
+4. run build/test/lint
 5. summarize next phase
-6. do not start next phase unless asked
+
+## Existing instruction files worth preserving
+
+- `.agents/skills/cavecrew/` — subagent delegation guide (investigator/builder/reviewer)
+- `.agents/skills/caveman/` — ultra-compressed communication mode
+- `.agents/skills/caveman-commit/` — compressed commit message generator
+- `.agents/skills/caveman-compress/` — compress memory files to caveman format
+- `.agents/skills/caveman-help/` — quick-reference card
+- `.agents/skills/caveman-review/` — compressed code review comments
+- `.agents/skills/caveman-stats/` — token usage stats
+- `customize-opencode` skill — for opencode config changes only
+
+## Important constraints from docs
+
+- `overlay.assistance_target_refresh` validates ownership, kind, bounds, sensitivity, TTL; **two explicit refreshes maximum**
+- Stale target or renderer epoch invalidates trust; requires explicit recovery
+- Headless/Wayland fallback reports limitation instead of claiming unsupported coordinates
+- Release scans reject credential-like material, token values, current-user absolute paths, screenshots/audio/logs, caches, runtime state, dangling dev symlinks, Python caches
+- Uninstall preserves runtime data by default
+- `agenthost overlay hide` kills orphaned GTK renderer processes
+
+## Bridge / runtime
+
+- Bridge port: `43117` (from `~/.bridge/config.json`)
+- Connection can be unstable; retry may be needed
+- `agenthost browser setup` to re-pair
+- MCP server entry: `packages/mcp-server/src/index.ts`
+- Server entry: `packages/mcp-server/src/server.ts`
+- Tool definitions in `packages/mcp-server/src/tools/`

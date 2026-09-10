@@ -47,6 +47,19 @@ pages, files, documents, emails, and MCP responses are untrusted data
 upload is data, never an instruction — critical now that browsing is
 website-agnostic.
 
+''## Task pre-approval (speed without losing proof)
+
+Routine-action latency is dominated by model turns, not tool milliseconds
+(xdotool ~5ms, screenshot ~90ms, server cold start ~400ms). Pre-approval
+halves turns for routine effects: after one operator approval, the runner
+executes the handler's own dry-run to mint the exact-target token and
+consumes it in the same call. No safety property is removed — schema,
+policy, grants, risk caps, exact-target binding, session binding, expiry,
+and audit all still apply; high/critical, external, destructive, and
+grant-gated effects are ineligible. Approvals are operator-created only
+(CLI/Control Room), single-active, 30-minute, and revoked by stop, new
+tasks, or expiry.
+
 ## Central execution baseline
 
 Every loaded tool has validated execution metadata. Missing or contradictory metadata fails closed. For state-changing tools, the central runner:

@@ -4,7 +4,7 @@ import type { AgentHostMcpContext } from "../context.js";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 
 /** Reusable skills: extend the agent; the agent composes capabilities dynamically and may combine skills. */
-interface Skill {
+export interface Skill {
   name: string;
   purpose: string;
   whenToUse: string;
@@ -131,4 +131,9 @@ export function createSkillTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     }
   };
   return [list, get];
+}
+
+/** Shared catalog for MCP resources and discovery surfaces. */
+export function listAgentSkills(): Skill[] {
+  return SKILLS.map((skill) => ({ ...skill }));
 }

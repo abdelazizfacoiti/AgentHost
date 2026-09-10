@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import { beginTakeover, clearStop, endTakeover, isStopRequested, isTakeoverActive, requestStop } from "../stop-flag.js";
+import { clearTaskApproval } from "../task-approval.js";
 
 const empty = z.object({}).strict();
 
@@ -51,6 +52,8 @@ export function createAgentTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
     safety: { actionType: "inspect" },
     async handler(_input, context): Promise<ToolResult<unknown>> {
       await requestStop(context.config.agentHostDir, "agent_stop_tool");
+      await clearTaskApproval(context.config.agentHostDir).catch(() => undefined);
+      await context.runtimeActivityOverlay?.hideNow().catch(() => undefined);
       return toolSuccess({ tool: "agent.stop", riskLevel: "low", data: { stopped: true }, observations: ["Stop requested; central runner now halts state-changing tools."] });
     }
   };

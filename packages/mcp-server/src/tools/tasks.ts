@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { toolFailure, toolSuccess, type ToolResult } from "@agenthost/core";
+import { clearTaskApproval } from "../task-approval.js";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
@@ -61,6 +62,7 @@ export function createTaskTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
     inputSchema: createInput, mcpInputSchema: schema({ goal: { type: "string", minLength: 1, maxLength: 2000 } }, ["goal"]), inputSummary: "Create task", safety: { actionType: "inspect" },
     async handler(input, context): Promise<ToolResult<unknown>> {
       const now = new Date().toISOString();
+      await clearTaskApproval(context.config.agentHostDir).catch(() => undefined);
       const task: AgentTask = { taskId: `task_${randomUUID()}`, goal: input.goal, status: "active", phase: "understand", currentAction: "inspect environment", events: [], createdAt: now, updatedAt: now };
       log(task, "note", `Task created: ${input.goal.slice(0, 200)}`);
       await save(context.config.agentHostDir, task);
@@ -133,7 +135,8 @@ export function createTaskTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
       task.status = "completed";
       log(task, "verification", "Task marked complete after outcome verification.");
       await save(context.config.agentHostDir, task);
-      return toolSuccess({ tool: "task.complete", riskLevel: "low", data: task });
+      await context.runtimeActivityOverlay?.hideNow().catch(() => undefined);
+      return toolSuccess({ tool: "task.complete", riskLevel: "low", data: task, observations: ["Working widget hidden; overlays expire on their TTL."] });
     }
   };
   return [create, get, update, logEvent, pause, resume, complete];

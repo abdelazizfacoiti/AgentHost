@@ -133,6 +133,18 @@ and config in the client environment:
 
 The server keeps normal diagnostics off stdout so MCP stdio remains valid.
 
+### For Codex, Claude Code, Copilot, OpenCode, and other agent clients
+
+Do not ingest all 250+ tool schemas up front. Pull the lazy MCP resources
+first — `agenthost://capabilities.md` (one condensed brief for system
+prompts), `agenthost://capabilities`, `agenthost://skills`, and
+`agenthost://status` — then `agent.discover_capabilities` and
+`skills.list/get` for detail. For static config files, paste the output of:
+
+```bash
+agenthost capabilities --markdown
+```
+
 ## Browser Bridge: get connected quickly
 
 The Browser Bridge gives AgentHost structured tab and DOM information without

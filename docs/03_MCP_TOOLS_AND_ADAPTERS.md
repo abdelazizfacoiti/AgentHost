@@ -69,11 +69,21 @@ Class: read-only or diagnostic. External effect: none. Dry-run/confirmation: not
 gate), and `agent.discover_capabilities` (runtime families, counts, adapters,
 browser/desktop availability). `task.create/status/update/log_event/pause/
 resume/complete` persist long-running goal state under `tasks/`.
+`agenthost task approve <id> [--max-risk low|medium]` (operator-only, no MCP
+tool) pre-approves a task's routine effects for 30 minutes: the central
+runner chains the exact dry-run + single-use confirmation server-side, so one
+model turn replaces two. Only low/medium, non-external, non-destructive
+effects qualify; high/critical effects keep per-action confirmation, and
+`stop`, new tasks, or expiry revoke the approval.
 `skills.list/get` serve the reusable catalog (software-development,
 web-research, file-management, browser-work, desktop-automation,
 data-analysis, document-editing, testing-debugging, system-administration).
 `computer.observe_state` returns active window, desktop capabilities, and
-screen geometry for post-action verification and recovery.
+screen geometry for post-action verification and recovery. `includeWindows`
+and `includeBrowserTabs` fold window-list and tab-list turns into the same
+call. `computer.wait_for` polls active-window state at ~150ms until it
+matches (or times out), replacing fixed multi-second sleeps and the model
+turn spent waiting.
 
 ### Files and shell
 
@@ -139,7 +149,7 @@ Receipts are attached by the normal runner rather than exposed as a standalone a
 
 ### Overlay renderer and visual-assistance sessions
 
-`overlay.get_capabilities`, renderer diagnostics/restart, primitives (`show_pointer`, `highlight_target`, `show_tooltip`, `show_widget`, `update`, `dismiss`, `clear`, `emergency_hide`), assistance-session tools, and `overlay.control_surface_show/get/update/hide/apply_event` are `visual_only` with no target-app external effect. Control surfaces bind one generic operator view to one trusted assistance session and expose only `continue`, `pause`, `resume`, `cancel`, `retry_visual_render`, `inspect_diagnostics`, `emergency_hide`, and `close_control_surface`. No `back` action exists. Events never invoke another tool. Renderer IDs are short-lived and invalid after restart; duplicate event IDs are rejected by a separate TTL replay ledger. GTK3/X11 is optional; headless fallback is safe; Wayland limitations are explicit.
+`overlay.get_capabilities`, renderer diagnostics/restart, primitives (`show_pointer`, `highlight_target`, `show_tooltip`, `show_widget`, `update`, `dismiss`, `clear`, `emergency_hide`), assistance-session tools, visual guides (`overlay.guide_present/advance/dismiss`), and `overlay.control_surface_show/get/update/hide/apply_event` are `visual_only` with no target-app external effect. `overlay.guide_present` renders a checklist with progress plus a highlight and tooltip on the current step's screen target in one call; `advance` moves everything to the next step (finishing dismisses all); `dismiss` clears immediately. Guides are ephemeral, owner-scoped, TTL-bound, and auto-expire. Control surfaces bind one generic operator view to one trusted assistance session and expose only `continue`, `pause`, `resume`, `cancel`, `retry_visual_render`, `inspect_diagnostics`, `emergency_hide`, and `close_control_surface`. No `back` action exists. Events never invoke another tool. Renderer IDs are short-lived and invalid after restart; duplicate event IDs are rejected by a separate TTL replay ledger. GTK3/X11 is optional; headless fallback is safe; Wayland limitations are explicit.
 
 R4 runtime activity is not a new execution tool. The normal tool runner emits bounded activity records and the overlay controller renders only allowlisted labels, lifecycle state, elapsed time, authoritative progress, blocker/warning codes, and renderer/suppression status. Direct tool rows are projected through this authoritative source once. Activity state never creates permissions, confirmations, target-app actions, or background work.
 
@@ -154,6 +164,32 @@ V2 surface projection uses a versioned envelope and fixed trusted component regi
 ## Confirmation and result model
 
 State-changing tools declare dry-run/confirmation metadata. The central runner validates schema, policy, grants, protected contexts, and the non-consuming confirmation envelope. Domain handlers revalidate exact targets and consume the token exactly once. `ToolResult` remains backward-compatible and may include a safe receipt. No receipt grants permission, and no confirmation token is returned by workflow/scheduler/overlay governance tools.
+
+''## MCP resources: fast discovery for agent clients
+
+Codex, Claude Code, Copilot, OpenCode, and other MCP clients should NOT
+ingest all 250+ tool schemas up front. Pull these lazy resources first:
+
+- `agenthost://capabilities.md` — one condensed brief (families, loop,
+  confirmation model) sized for system prompts.
+- `agenthost://capabilities` — live families, tool counts, and classes.
+- `agenthost://skills` — reusable skill catalog.
+- `agenthost://status` — live stop/takeover state and tool count.
+
+Then call `agent.discover_capabilities` and `skills.list/get` for detail, and
+only then `tools/list`. For static config files (`AGENTS.md`, `CLAUDE.md`),
+paste `agenthost capabilities --markdown`.
+
+## Overlay lifecycle: no stuck widgets
+
+Every overlay carries a TTL (default 30s, max 5min) enforced by a 5-second
+sweeper even when nothing polls state. The working widget auto-hides after
+terminal work (completed, failed, cancelled; default 5s) and hides
+immediately on `task.complete` and `agent.stop`. Renderer children exit when
+their MCP parent dies (stdin HUP plus a 5-second parent-watch). If a widget
+ever sticks anyway, `agenthost overlay hide` terminates orphaned renderers
+(live ones are left alone) and `overlay.emergency_hide` clears owned
+overlays at once.
 
 ## Control Room
 

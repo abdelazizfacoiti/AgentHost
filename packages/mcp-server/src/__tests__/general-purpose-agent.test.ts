@@ -15,6 +15,7 @@ import { createAgentHostMcpServer } from "../server.js";
 import { runTool } from "../tool-runner.js";
 import { classifyShellCommand } from "@agenthost/core";
 import { clearStop, isStopRequested, requestStop } from "../stop-flag.js";
+import { approvalCoversRisk } from "../task-approval.js";
 
 async function boot() {
   const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-general-"));
@@ -161,6 +162,49 @@ describe("general-purpose computer agent", () => {
     const gated = await call("shell.run_safe", { command: "ls", args: ["/tmp"] });
     expect(gated.ok).toBe(false);
     if (!gated.ok) expect(gated.error?.code).not.toBe("emergency_stop_requested");
+  });
+
+  it("observes windows and tabs in one call and waits without fixed sleeps", async () => {
+    const { call } = await boot();
+    const full = await call("computer.observe_state", { includeWindows: true, includeBrowserTabs: true });
+    expect(full.ok).toBe(true);
+    expect((full.data as Record<string, unknown>)).toHaveProperty("activeWindow");
+    const matched = await call("computer.wait_for", { timeoutMs: 2000 });
+    expect(matched.ok).toBe(true);
+    const timeout = await call("computer.wait_for", {
+      expectedActiveWindow: { appName: "definitely-not-the-active-app-agenthost" },
+      timeoutMs: 400
+    });
+    expect(timeout.ok).toBe(false);
+    if (!timeout.ok) expect(timeout.error?.code).toBe("wait_timeout");
+  });
+
+  it("chains routine actions server-side under operator task approval", async () => {
+    const { root, call } = await boot();
+    const { approveTaskScope, activeTaskApproval, clearTaskApproval } = await import("../task-approval.js");
+    const created = await call("task.create", { goal: "speed test" });
+    const taskId = (created.data as { taskId: string }).taskId;
+    // No approval: single call without token is gated.
+    const gated = await call("file.copy", { source: "/tmp/x", destination: "/tmp/y" });
+    expect(gated.ok).toBe(false);
+    // Operator approves (operator path, not an MCP tool).
+    const approval = await approveTaskScope(root, taskId, "medium", "cli");
+    expect(await activeTaskApproval(root)).toMatchObject({ taskId });
+    expect(approvalCoversRisk(approval, "medium")).toBe(true);
+    expect(approvalCoversRisk(approval, "high")).toBe(false);
+    // Same call now executes in one turn: dry-run chained server-side.
+    const source = `${root}/pre.txt`;
+    const dest = `${root}/pre-copy.txt`;
+    await writeFile(source, "fast", "utf8");
+    const executed = await call("file.copy", { source, destination: dest });
+    expect(executed.ok).toBe(true);
+    expect((executed.observations ?? []).join(" ")).toContain("pre-approval");
+    expect(await readFile(dest, "utf8")).toBe("fast");
+    // High-consequence effects still need per-action confirmation.
+    const del = await call("file.delete", { path: `${root}/pre.txt` });
+    expect(del.ok).toBe(false);
+    await clearTaskApproval(root);
+    expect(await activeTaskApproval(root)).toBeUndefined();
   });
 
   it("requests stop flags directly and observes computer state after resume", async () => {

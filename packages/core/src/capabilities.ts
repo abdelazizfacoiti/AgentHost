@@ -92,8 +92,9 @@ function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
   else if (name.startsWith("browser.setup_")) metadata = "state_changing";
   else if (/^forge\.(run_sandboxed_tool|dispatch_generated_tool)$/.test(name)) metadata = "state_changing";
   else if (name.startsWith("workflow.") || name.startsWith("scheduler.") || name.startsWith("forge.")) metadata = "metadata_only";
+  else if (/^(task\.(create|update|log_event|pause|resume|complete)|agent\.(stop|resume|takeover_begin|takeover_end))$/.test(name)) metadata = "metadata_only";
   else if (name.startsWith("guide.")) metadata = "metadata_only";
-  else if (name === "file.ensure_dir") metadata = "state_changing";
+  else if (name === "file.ensure_dir" || /^file\.(copy|move|delete)$/.test(name)) metadata = "state_changing";
   else if (visual) metadata = "visual_only";
   else if (/(^|\.)(open|write|delete|click|type|focus|hotkey|scroll|drag|mouse|invoke|set_value|run_|send|upload)/.test(name)) metadata = "state_changing";
   const stateChanging = metadata === "state_changing";
@@ -102,7 +103,7 @@ function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
     externalEffect: false,
     requiresDryRun: stateChanging,
     requiresConfirmationToken: stateChanging,
-    requiresExactTarget: stateChanging && /browser|desktop|window|accessibility|click|type|focus|scroll|drag|mouse/.test(name),
+    requiresExactTarget: stateChanging && (/browser|desktop|window|accessibility|click|type|focus|scroll|drag|mouse/.test(name) || /^(file\.(copy|move|delete|ensure_dir)|shell\.run_safe)$/.test(name)),
     source: "base",
     availability: "available"
   };
@@ -725,6 +726,121 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       name: "adapter.detect_for_app",
       riskLevel: "low" as const,
       description: "Detects whether registered app adapters can support a given app."
+    },
+    {
+      name: "computer.observe_state",
+      riskLevel: "observe" as const,
+      description: "Observes active window, capabilities, geometry, and optionally windows and browser tabs."
+    },
+    {
+      name: "computer.wait_for",
+      riskLevel: "observe" as const,
+      description: "Polls active-window state until it matches or times out."
+    },
+    {
+      name: "agent.status",
+      riskLevel: "observe" as const,
+      description: "Returns agent operational status: stop flag, takeover state, and tool counts."
+    },
+    {
+      name: "agent.stop",
+      riskLevel: "low" as const,
+      description: "Requests an immediate hard stop of further state-changing agent actions."
+    },
+    {
+      name: "agent.resume",
+      riskLevel: "low" as const,
+      description: "Clears a previous stop/takeover and resumes governed execution."
+    },
+    {
+      name: "agent.takeover_begin",
+      riskLevel: "low" as const,
+      description: "Hands control to the human operator."
+    },
+    {
+      name: "agent.takeover_end",
+      riskLevel: "low" as const,
+      description: "Returns control from the human operator to the agent."
+    },
+    {
+      name: "agent.discover_capabilities",
+      riskLevel: "observe" as const,
+      description: "Discovers runtime capability families, counts, adapters, and availability."
+    },
+    {
+      name: "task.create",
+      riskLevel: "low" as const,
+      description: "Creates a persistent task with a user goal."
+    },
+    {
+      name: "task.status",
+      riskLevel: "observe" as const,
+      description: "Returns persistent task state."
+    },
+    {
+      name: "task.update",
+      riskLevel: "low" as const,
+      description: "Updates task phase and current action."
+    },
+    {
+      name: "task.log_event",
+      riskLevel: "low" as const,
+      description: "Appends a bounded event to the task history."
+    },
+    {
+      name: "task.pause",
+      riskLevel: "low" as const,
+      description: "Pauses a task without losing state."
+    },
+    {
+      name: "task.resume",
+      riskLevel: "low" as const,
+      description: "Resumes a paused task."
+    },
+    {
+      name: "task.complete",
+      riskLevel: "low" as const,
+      description: "Marks a task complete after verifying the outcome."
+    },
+    {
+      name: "skills.list",
+      riskLevel: "observe" as const,
+      description: "Lists the reusable skill catalog."
+    },
+    {
+      name: "skills.get",
+      riskLevel: "observe" as const,
+      description: "Returns full skill detail."
+    },
+    {
+      name: "file.copy",
+      riskLevel: "medium" as const,
+      description: "Copies a file subject to path policy, dry-run, and confirmation."
+    },
+    {
+      name: "file.move",
+      riskLevel: "medium" as const,
+      description: "Moves/renames a file subject to path policy, dry-run, and confirmation."
+    },
+    {
+      name: "file.delete",
+      riskLevel: "high" as const,
+      description: "Deletes a file or empty directory subject to path policy and approval."
+    },
+    {
+      name: "overlay.guide_present",
+      riskLevel: "low" as const,
+      description: "Presents a step-by-step visual guide with checklist, highlight, and tooltip."
+    },
+    {
+      name: "overlay.guide_advance",
+      riskLevel: "low" as const,
+      description: "Advances the visual guide to the next step."
+    },
+    {
+      name: "overlay.guide_dismiss",
+      riskLevel: "low" as const,
+      description: "Dismisses every overlay belonging to a visual guide."
     }
   ]) {
     registry.registerTool(capability);

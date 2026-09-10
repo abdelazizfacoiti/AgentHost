@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   createAdapterRegistry,
   createBaseCapabilityRegistry,
@@ -100,6 +100,7 @@ import { createOverlayAssistanceTools } from "./tools/overlay-assistance.js";
 import { createOverlayAssistanceInspectionTools } from "./tools/overlay-assistance-inspection.js";
 import { createOverlayAssistanceTemplateTools } from "./tools/overlay-assistance-templates.js";
 import { createOverlayControlSurfaceTools } from "./tools/overlay-control-surface.js";
+import { createGuideOverlayTools } from "./tools/guide-overlay.js";
 import { SchedulerStore } from "./scheduler-store.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { WorkflowReplayStore } from "./workflow-replay-store.js";
@@ -109,6 +110,7 @@ import { OverlayAssistanceStore } from "./overlay-assistance-store.js";
 import { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
 import { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
 import { applyProductionExecutionMetadata, materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
+import { listResourceEntries, readResource } from "./resources.js";
 import { ControlRoomStore } from "./control-room-store.js";
 import { CapabilityStrategyStore } from "./capability-strategy-store.js";
 import { CapabilityStrategyService } from "./capability-strategy-service.js";
@@ -363,6 +365,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createOverlayAssistanceInspectionTools(),
     ...createOverlayAssistanceTemplateTools(),
     ...createOverlayControlSurfaceTools(),
+    ...createGuideOverlayTools(),
     ...createVisionTools(),
     ...createCheckpointTools(),
     ...createSpeechTools(),
@@ -404,11 +407,28 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     },
     {
       capabilities: {
-        tools: {}
+        tools: {},
+        resources: {}
       },
       instructions: SERVER_INSTRUCTIONS
     }
   );
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: listResourceEntries()
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    try {
+      const { mimeType, text } = await readResource(
+        { registry: context.registry, adapters: context.adapters, policy: context.policy, config: context.config },
+        request.params.uri
+      );
+      return { contents: [{ uri: request.params.uri, mimeType, text }] };
+    } catch {
+      throw new Error(`Unknown resource: ${request.params.uri}`);
+    }
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: loadedTools.map((tool) => ({

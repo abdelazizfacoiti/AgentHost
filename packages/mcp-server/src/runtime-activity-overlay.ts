@@ -35,6 +35,18 @@ export class RuntimeActivityOverlayController {
 
   start(): void { this.#unsubscribe = this.#activity.subscribe((record) => { this.#renderQueue = this.#renderQueue.then(() => this.#render(record)).catch(() => undefined); }); }
   async close(): Promise<void> { this.#closed = true; this.#unsubscribe?.(); if (this.#terminalTimer !== undefined) clearTimeout(this.#terminalTimer); if (this.#overlayId !== undefined) await this.#manager.dismiss(this.#overlayId).catch(() => undefined); this.#overlayId = undefined; this.#rendererEpoch = undefined; }
+  /** Immediately hide the working widget (task done/stopped). The overlay must never outlive the work. */
+  async hideNow(): Promise<void> {
+    if (this.#terminalTimer !== undefined) {
+      clearTimeout(this.#terminalTimer);
+      this.#terminalTimer = undefined;
+    }
+    if (this.#overlayId !== undefined) {
+      await this.#manager.dismiss(this.#overlayId).catch(() => undefined);
+      this.#overlayId = undefined;
+      this.#rendererEpoch = undefined;
+    }
+  }
   async onRendererRestart(): Promise<void> { this.#activity.store().clearRendererBindings(); this.#overlayId = undefined; this.#rendererEpoch = undefined; await this.#renderQueue; const active = this.#activity.store().list({ limit: 1 })[0]; if (active !== undefined) { this.#renderQueue = this.#renderQueue.then(() => this.#render(active)).catch(() => undefined); await this.#renderQueue; } }
   async projection(): Promise<{ visible: boolean; rendererStatus: "available" | "degraded" | "headless" | "unavailable"; suppression: RuntimeActivityScreenshotSuppression }> { const diagnostics = await this.#manager.diagnostics(); return { visible: this.#overlayId !== undefined && this.#manager.isOverlayLive(this.#overlayId) && diagnostics.rendererStatus === "available" && diagnostics.capabilities.visible !== false, rendererStatus: diagnostics.rendererStatus, suppression: this.#activity.store().list({ limit: 1 })[0]?.screenshotSuppression ?? "none" }; }
 
@@ -69,7 +81,7 @@ export class RuntimeActivityOverlayController {
 
   async #render(record?: RuntimeActivityRecord): Promise<void> {
     if (this.#closed || !this.#options.enabled) return;
-    if (this.#terminalTimer !== undefined && (record === undefined || !["completed", "cancelled"].includes(record.state))) {
+    if (this.#terminalTimer !== undefined && (record === undefined || !["completed", "failed", "cancelled"].includes(record.state))) {
       clearTimeout(this.#terminalTimer);
       this.#terminalTimer = undefined;
     }
@@ -90,7 +102,7 @@ export class RuntimeActivityOverlayController {
       return;
     }
     const activeCount = this.#activity.store().list({ limit: 50 }).filter((item) => !["completed", "failed", "cancelled"].includes(item.state)).length;
-    if (["completed", "cancelled"].includes(candidate.state) && this.#terminalTimer === undefined) this.#terminalTimer = setTimeout(() => { this.#terminalTimer = undefined; if (this.#overlayId !== undefined) void this.#manager.dismiss(this.#overlayId); this.#overlayId = undefined; }, Math.min(300_000, Math.max(0, this.#options.terminalAutoHideMs)));
+    if (["completed", "failed", "cancelled"].includes(candidate.state) && this.#terminalTimer === undefined) this.#terminalTimer = setTimeout(() => { this.#terminalTimer = undefined; if (this.#overlayId !== undefined) void this.#manager.dismiss(this.#overlayId); this.#overlayId = undefined; }, Math.min(300_000, Math.max(0, this.#options.terminalAutoHideMs)));
     const progress = candidate.progress?.kind === "exact" && this.#options.showProgress ? candidate.progress : undefined;
     const components = [
       { type: "heading" as const, text: "AgentHost working" },

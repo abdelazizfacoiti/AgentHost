@@ -19,6 +19,7 @@ import type { z } from "zod";
 import type { GrantStore } from "./grants.js";
 import { validateToolExecutionMetadata } from "./tool-metadata.js";
 import { isStopRequested, isTakeoverActive } from "./stop-flag.js";
+import { activeTaskApproval, approvalCoversRisk } from "./task-approval.js";
 import type { RuntimeActivityService } from "./runtime-activity-service.js";
 
 export interface ToolExecutionContext {
@@ -189,8 +190,67 @@ function centralFailure<TData>(input: {
   });
 }
 
-function centralSafetyActionType(definition: AnyAgentHostToolDefinition, execution: ToolExecutionMetadata): SafetyInput["actionType"] {
-  const declared = definition.safety?.actionType;
+/**
+ * Operator task pre-approval eligibility. Only routine effects qualify: low
+ * or medium risk within the approval cap, no external/destructive effects,
+ * no grant-mandated approval. High/critical effects always keep per-action
+ * confirmation. The approval itself originates from operator paths only.
+ */
+async function useOperatorTaskApproval(
+  definition: AnyAgentHostToolDefinition,
+  context: ToolExecutionContext,
+  safetyDecision: SafetyDecision | undefined,
+  governedEffect: GovernedActionEffect | undefined
+): Promise<{ approvalId: string; taskId: string } | undefined> {
+  if (safetyDecision === undefined || !safetyDecision.allowed || safetyDecision.guideOnly) return undefined;
+  if (safetyDecision.blocked || !["observe", "low", "medium"].includes(safetyDecision.riskLevel)) return undefined;
+  if (safetyDecision.grantDecision.requiresApproval) return undefined;
+  if (governedEffect !== undefined && (governedEffect.externalEffect || governedEffect.destructive)) return undefined;
+  if (definition.name === "speech.transmission_execute") return undefined;
+  const home = (context as unknown as { config?: { agentHostDir?: string } }).config?.agentHostDir;
+  if (home === undefined) return undefined;
+  const approval = await activeTaskApproval(home).catch(() => undefined);
+  if (approval === undefined || !approvalCoversRisk(approval, safetyDecision.riskLevel)) return undefined;
+  return { approvalId: approval.approvalId, taskId: approval.taskId };
+}
+
+async function runWithTaskApproval<TInput, TData, TContext extends ToolExecutionContext>(
+  definition: AgentHostToolDefinition<TInput, TData, TContext>,
+  rawInput: TInput,
+  context: TContext,
+  safetyDecision: SafetyDecision | undefined,
+  effectFingerprint: string | undefined,
+  actionDecision: import("@agenthost/core").ActionEffectDecisionSummary | undefined,
+  approval: { approvalId: string; taskId: string }
+): Promise<{ result: ToolResult<TData> }> {
+  const dryInput = { ...(rawInput as Record<string, unknown>), dryRun: true };
+  const dryResult = await definition.handler(dryInput as TInput, context, {
+    isDryRun: true, safetyDecision,
+    ...(effectFingerprint === undefined ? {} : { effectFingerprint }),
+    ...(actionDecision === undefined ? {} : { actionDecision })
+  });
+  const token = (dryResult.data as { confirmationToken?: unknown } | null)?.confirmationToken;
+  if (!dryResult.ok || dryResult.preview !== true || typeof token !== "string") {
+    return { result: dryResult };
+  }
+  const finalInput = { ...(rawInput as Record<string, unknown>), confirmationToken: token };
+  const final = await definition.handler(finalInput as TInput, context, {
+    isDryRun: false, safetyDecision,
+    ...(effectFingerprint === undefined ? {} : { effectFingerprint }),
+    ...(actionDecision === undefined ? {} : { actionDecision })
+  });
+  return {
+    result: {
+      ...final,
+      observations: [
+        ...(final.observations ?? []),
+        `Executed under operator task pre-approval ${approval.approvalId} (task ${approval.taskId}); exact-target dry-run chained server-side.`
+      ]
+    }
+  };
+}
+
+function centralSafetyActionType(definition: AnyAgentHostToolDefinition, execution: ToolExecutionMetadata): SafetyInput["actionType"] {  const declared = definition.safety?.actionType;
   if (execution.executionClass !== "state_changing" || declared !== "inspect") {
     return declared ?? "unknown";
   }
@@ -373,6 +433,24 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
                   : "Tool execution requires approval before it can run.",
                 safetyDecision
               });
+            } else if (!isDryRun && !hasConfirmationToken(parsed.data) && definition.preview !== undefined && safetyDecision !== undefined && ((execution.requiresDryRun || grantRequiresDryRun) || requiresConfirmation)) {
+              // Operator pre-approved this task's routine effects. The handler
+              // still runs its exact dry-run + single-use confirmation binding,
+              // chained server-side, so one model turn replaces two.
+              const preApproval = await useOperatorTaskApproval(definition, context, safetyDecision, governedEffect);
+              if (preApproval === undefined) {
+                result = centralFailure({
+                  definition: definition as AgentHostToolDefinition<unknown, TData>,
+                  code: (execution.requiresDryRun || grantRequiresDryRun) ? "dry_run_required" : "confirmation_required",
+                  message: (execution.requiresDryRun || grantRequiresDryRun)
+                    ? "A successful dry-run and its confirmation token are required before execution."
+                    : "A confirmation token is required before this tool can execute.",
+                  ...(safetyDecision === undefined ? {} : { safetyDecision })
+                });
+              } else {
+                const chained = await runWithTaskApproval(definition, parsed.data, context, safetyDecision, effectFingerprint, actionDecision, preApproval);
+                result = chained.result;
+              }
             } else if (!isDryRun && (execution.requiresDryRun || grantRequiresDryRun) && !hasConfirmationToken(parsed.data)) {
               result = centralFailure({
                 definition: definition as AgentHostToolDefinition<unknown, TData>,

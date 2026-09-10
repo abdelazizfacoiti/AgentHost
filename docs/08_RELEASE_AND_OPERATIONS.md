@@ -51,14 +51,14 @@ agenthost setup [--resume]
 agenthost start [--background]
 agenthost stop
 agenthost status
-agenthost task [list|status|pause|resume|stop]
+agenthost task [list|status|pause|resume|stop|approve]
 agenthost capabilities
 agenthost permissions
 agenthost skills
 agenthost sessions
 agenthost control-room
-agenthost browser setup|status|reset
-agenthost overlay doctor
+agenthost browser setup|status|reset [--auto]
+agenthost overlay doctor|hide
 agenthost speech doctor
 agenthost integrations codex add|status|remove [--preview|--apply]
 agenthost config validate|show

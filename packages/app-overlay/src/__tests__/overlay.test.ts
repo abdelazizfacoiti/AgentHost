@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { redactOverlayText, validateOverlayAnimation, validateOverlayWidget, type OverlayTargetBinding, type OverlayWidget } from "@agenthost/core";
 import { HeadlessOverlayRenderer } from "../headless-renderer.js";
 import { OverlayManager } from "../manager.js";
@@ -15,6 +15,24 @@ describe("overlay foundation", () => {
     expect((await manager.state()).overlays).toHaveLength(1);
     expect((await manager.dismiss(shown.overlay!.overlayId)).ok).toBe(true);
     expect((await manager.state()).overlays).toHaveLength(0);
+  });
+
+  it("sweeps expired overlays without state polling", async () => {
+    vi.useFakeTimers();
+    try {
+      class TrackingRenderer extends HeadlessOverlayRenderer {
+        dismissed: string[] = [];
+        override dismiss(overlayId: string) { this.dismissed.push(overlayId); return super.dismiss(overlayId); }
+      }
+      const renderer = new TrackingRenderer();
+      const manager = new OverlayManager(renderer, { sessionId: "overlay-sweep-test" });
+      try {
+        const shown = await manager.showPrimitive({ type: "tooltip", text: "short-lived", sensitivity: "public", ttlMs: 1000 });
+        expect(shown.ok).toBe(true);
+        await vi.advanceTimersByTimeAsync(6000);
+        expect(renderer.dismissed).toContain(shown.overlay!.overlayId);
+      } finally { await manager.close(); }
+    } finally { vi.useRealTimers(); }
   });
 
   it("expires overlays and emergency hide clears all", async () => {

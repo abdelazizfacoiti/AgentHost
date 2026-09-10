@@ -175,6 +175,7 @@ async function start(flags: ReturnType<typeof parseFlags>): Promise<Output> {
 }
 async function stop(): Promise<Output> {
   await safeWrite(path.join(agentHome, "run", "stop.requested"), JSON.stringify({ stopped: true, reason: "cli_stop", at: new Date().toISOString() }) + "\n");
+  await rm(path.join(agentHome, "tasks", "approvals", "active.json"), { force: true }).catch(() => undefined);
   const lock = await readLock(); const pid = typeof lock?.pid === "number" ? lock.pid : undefined;
   if (pid === undefined || !processAlive(pid)) { await unlink(lockPath).catch(() => undefined); return { ok: true, command: "stop", data: { stopped: true, background: false, reason: "stop_flag_written" } }; }
   try { process.kill(pid, "SIGTERM"); } catch { return fail("stop", "process_stop_failed"); }
@@ -199,11 +200,31 @@ async function taskCommand(args: ReturnType<typeof parseFlags>): Promise<Output>
     if (action !== "status") { await rm(path.join(agentHome, "run", "stop.requested"), { force: true }).catch(() => undefined); }
     return { ok: true, command: `task ${action}`, data: action === "status" ? record : { taskId: safe, resumed: action === "resume" } };
   }
-  if (action === "stop") { await safeWrite(path.join(agentHome, "run", "stop.requested"), JSON.stringify({ stopped: true, reason: "cli_task_stop", at: new Date().toISOString() }) + "\n"); return { ok: true, command: "task stop", data: { stopped: true } }; }
-  return fail("task", "usage: agenthost task [list|status <id>|pause <id>|resume <id>|stop]");
+  if (action === "stop") { await safeWrite(path.join(agentHome, "run", "stop.requested"), JSON.stringify({ stopped: true, reason: "cli_task_stop", at: new Date().toISOString() }) + "\n"); await rm(path.join(agentHome, "tasks", "approvals", "active.json"), { force: true }).catch(() => undefined); return { ok: true, command: "task stop", data: { stopped: true } }; }
+  if (action === "approve" && id) {
+    const safe = id.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 200);
+    const record = await readJson(path.join(taskDir, `${safe}.json`));
+    if (!record) return fail("task approve", "task_not_found");
+    const maxRisk = args.values.get("max-risk") ?? "medium";
+    if (maxRisk !== "low" && maxRisk !== "medium") return fail("task approve", "usage: agenthost task approve <id> [--max-risk low|medium]");
+    const approval = { approvalId: `task_approval_cli_${Date.now()}`, taskId: safe, maxRisk, origin: "cli", createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 30 * 60_000).toISOString() };
+    await safeMkdir(path.join(taskDir, "approvals"));
+    await safeWrite(path.join(taskDir, "approvals", "active.json"), JSON.stringify(approval, null, 2) + "\n");
+    return { ok: true, command: "task approve", data: { taskId: safe, maxRisk, expiresAt: approval.expiresAt, note: "Routine low/medium effects chain server-side; high/critical still need per-action confirmation." } };
+  }
+  return fail("task", "usage: agenthost task [list|status <id>|pause <id>|resume <id>|stop|approve <id>]");
 }
-async function capabilitiesCommand(): Promise<Output> {
-  return { ok: true, command: "capabilities", data: { families: ["computer", "browser", "filesystem", "shell", "applications", "mcp", "network", "vision", "ocr", "speech", "skills"], note: "Authoritative live list: system.list_capabilities over MCP. Permissions: agenthost permissions." } };
+async function capabilitiesCommand(args?: ReturnType<typeof parseFlags>): Promise<Output> {
+  if (args?.flags.has("markdown") === true) {
+    const { buildCapabilityMarkdown } = await import("@agenthost/core");
+    return {
+      ok: true,
+      command: "capabilities",
+      data: buildCapabilityMarkdown({ version: AGENTHOST_VERSION, profile: "general" })
+        + "\nLive counts: call system.list_capabilities over MCP, or read agenthost://capabilities.\n"
+    };
+  }
+  return { ok: true, command: "capabilities", data: { families: ["computer", "browser", "filesystem", "shell", "applications", "mcp", "network", "vision", "ocr", "speech", "skills"], note: "Authoritative live list: system.list_capabilities over MCP. Fast brief: agenthost capabilities --markdown, or MCP resources agenthost://capabilities.md and agenthost://skills. Permissions: agenthost permissions." } };
 }
 async function permissionsCommand(): Promise<Output> {
   return { ok: true, command: "permissions", data: { model: "LOW->automatic, MEDIUM->logged, HIGH->approval, CRITICAL->explicit confirmation; blocked stays blocked", capabilities: { computer: "allow", browser: "allow", filesystem: "allow", shell: "allow", applications: "allow", mcp: "allow", network: "approval_required", vision: "allow", ocr: "allow", speech: "allow", skills: "allow" }, hardStop: "agenthost stop halts state-changing tools via run/stop.requested" } };
@@ -214,6 +235,52 @@ async function skillsCommand(): Promise<Output> {
 async function sessionsCommand(): Promise<Output> {
   const lock = await readLock();
   return { ok: true, command: "sessions", data: { background: lock ?? null, tasksDir: "[agenthost-home]/tasks", stopRequested: existsSync(path.join(agentHome, "run", "stop.requested")), takeoverActive: existsSync(path.join(agentHome, "run", "takeover.active")) } };
+}
+async function overlayCommand(sub: string | undefined): Promise<Output> {
+  if (sub === "hide") {
+    // Remove stuck always-on-top widgets: terminate orphaned AgentHost
+    // renderer children (matched by our own script path, never anything else)
+    // when their MCP parent is already gone. Live renderers owned by a running
+    // server are left alone.
+    const pattern = "app-overlay/runtime/gtk3-renderer.py --protocol";
+    let pids: number[] = [];
+    try {
+      const found = spawnSync("pgrep", ["-f", pattern], { encoding: "utf8" });
+      pids = found.stdout.split(/\s+/).map(Number).filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+    } catch {
+      pids = [];
+    }
+    const killed: number[] = [];
+    const skippedLive: number[] = [];
+    for (const pid of pids) {
+      let parentAlive = false;
+      try {
+        const ppid = Number(spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim());
+        if (Number.isInteger(ppid) && ppid > 1) {
+          try {
+            process.kill(ppid, 0);
+            parentAlive = true;
+          } catch {
+            parentAlive = false;
+          }
+        }
+      } catch {
+        parentAlive = false;
+      }
+      if (parentAlive) {
+        skippedLive.push(pid);
+        continue;
+      }
+      try {
+        process.kill(pid, "SIGTERM");
+        killed.push(pid);
+      } catch {
+        /* Already exited. */
+      }
+    }
+    return { ok: true, command: "overlay hide", data: { hidden: killed.length > 0, terminatedRenderers: killed, skippedLiveRenderers: skippedLive } };
+  }
+  return await doctor();
 }
 async function doctor(): Promise<Output> {
   const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: pythonModuleExists("import gi; from gi.repository import Gtk"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, browserArtifacts: existsSync(extensionDir) || packagedBrowserArtifactsAvailable(), codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
@@ -544,7 +611,7 @@ async function main(): Promise<number> {
     else if (top === "stop") result = await stop();
     else if (top === "status") result = await status();
     else if (top === "task") result = await taskCommand(args);
-    else if (top === "capabilities") result = await capabilitiesCommand();
+    else if (top === "capabilities") result = await capabilitiesCommand(args);
     else if (top === "permissions") result = await permissionsCommand();
     else if (top === "skills") result = await skillsCommand();
     else if (top === "sessions") result = await sessionsCommand();
@@ -554,7 +621,8 @@ async function main(): Promise<number> {
     else if (top === "update") result = await update(args);
     else if (top === "uninstall") result = await uninstall(args);
     else if (top === "control-room") result = await start({ ...args, values: new Map([...args.values, ["control-room", "1"]]) });
-    else if (top === "overlay" || top === "speech") result = await doctor();
+    else if (top === "overlay") result = await overlayCommand(sub);
+    else if (top === "speech") result = await doctor();
     else result = fail(top, "unknown_command");
   } catch (error) { result = fail(top ?? "agenthost", error instanceof Error ? error.message : "command_failed"); }
   await print(result, json); return result.ok ? 0 : 1;

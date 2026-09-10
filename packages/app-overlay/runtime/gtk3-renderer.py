@@ -751,4 +751,19 @@ if __name__ == "__main__":
         raise SystemExit(78)
     renderer = Renderer()
     GLib.io_add_watch(sys.stdin, GLib.IO_IN | GLib.IO_HUP, stdin_watch)
+    # Orphan guard: Node parents can die without the stdin HUP ever firing
+    # (inherited fds, SIGKILL). A reparented renderer would otherwise keep its
+    # always-on-top windows mapped forever, blocking the user's screen.
+    _starter_ppid = os.getppid()
+
+    def _parent_watch():
+        try:
+            if os.getppid() != _starter_ppid:
+                renderer.close()
+                return False
+        except Exception:
+            pass
+        return True
+
+    GLib.timeout_add_seconds(5, _parent_watch)
     Gtk.main()

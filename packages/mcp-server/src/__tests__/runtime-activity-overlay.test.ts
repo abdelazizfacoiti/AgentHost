@@ -41,6 +41,34 @@ describe("global runtime activity overlay", () => {
     } finally { await controller.close(); }
   });
 
+  it("auto-hides failed terminal work and supports immediate hide", async () => {
+    const renderer = new FakeRenderer();
+    const manager = new OverlayManager(renderer, { sessionId: "owner" });
+    const store = new RuntimeActivityStore("/tmp/agenthost-runtime-overlay-failed-test", { ownerSessionId: "owner" });
+    await store.ensureStructure();
+    const service = new RuntimeActivityService(store);
+    const controller = new RuntimeActivityOverlayController(manager, service, { enabled: true, position: "top_left", reducedMotion: true, terminalAutoHideMs: 60, maxLabelChars: 80, showElapsed: true, showProgress: true, interactiveControls: false, screenshotSuppression: true, multiTaskSummary: true });
+    controller.start();
+    try {
+      const record = service.begin({ taskId: "task_failed", source: "desktop", labelKey: "verifying_result", actionKey: "verifying_result", operation: "click" });
+      await flush();
+      expect((await controller.projection()).visible).toBe(true);
+      service.finish(record.activityId, "failed", { verified: false, source: "tool_result" });
+      await flush();
+      expect((await controller.projection()).visible).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await flush();
+      expect((await controller.projection()).visible).toBe(false);
+      expect(renderer.records.size).toBe(0);
+      const again = service.begin({ taskId: "task_hide_now", source: "desktop", labelKey: "reading_visible_text", actionKey: "reading_visible_text", operation: "type" });
+      expect(again.activityId.length).toBeGreaterThan(0);
+      await flush();
+      expect((await controller.projection()).visible).toBe(true);
+      await controller.hideNow();
+      expect((await controller.projection()).visible).toBe(false);
+    } finally { await controller.close(); }
+  });
+
   it("hides overlay before screenshot capture and restores after capture", async () => {
     const renderer = new FakeRenderer();
     const manager = new OverlayManager(renderer, { sessionId: "owner" });

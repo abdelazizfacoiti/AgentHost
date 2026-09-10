@@ -21,7 +21,24 @@ export class OverlayManager {
   readonly #targets = new Map<string, { binding: OverlayTargetBinding; resolver?: OverlayTargetResolver | undefined }>();
   #emergencyHidden = false;
   #rendererEpoch = 0;
-  constructor(renderer: OverlayRenderer, owner: OverlayOwner) { this.#renderer = renderer; this.#owner = owner; }
+  #sweeper: ReturnType<typeof setInterval> | undefined;
+  constructor(renderer: OverlayRenderer, owner: OverlayOwner) {
+    this.#renderer = renderer;
+    this.#owner = owner;
+    // TTLs must hide windows even when nobody polls state(). Without this
+    // sweeper, an expired overlay stayed mapped on screen indefinitely while
+    // the runtime sat idle. Unref'd so test/CLi processes exit cleanly.
+    const sweeper = setInterval(() => {
+      try {
+        this.#expire();
+      } catch {
+        /* Expiry never breaks rendering. */
+      }
+    }, 5_000);
+    const maybeUnref = sweeper as unknown as { unref?: () => void };
+    if (typeof maybeUnref.unref === "function") maybeUnref.unref();
+    this.#sweeper = sweeper;
+  }
   capabilities(): Promise<OverlayCapabilityReport> | OverlayCapabilityReport { return this.#renderer.capabilities(); }
   async diagnostics(): Promise<OverlayRendererDiagnostics> { const diagnostics = await this.#renderer.diagnostics?.(); if (diagnostics !== undefined) return { ...diagnostics, activeOverlayCount: this.#records.size }; const capabilities = await this.#renderer.capabilities(); return { requestedMode: "headless", effectiveBackend: "headless", rendererStatus: "headless", sessionType: "unknown", displayPresent: false, waylandDisplayPresent: false, pythonExecutable: "not_used", gtk3Available: false, rendererScriptPresent: false, childState: "stopped", handshake: "not_attempted", capabilities, activeOverlayCount: this.#records.size, restartCount: 0, restartAllowed: false, recommendedAction: "Use headless renderer." }; }
   async state(): Promise<OverlayStateSnapshot> { this.#expire(); await this.#revalidateTargets(); const renderer = await this.#renderer.state(); return { ...renderer, overlays: [...this.#records.values()].filter((item) => item.visible), emergencyHidden: this.#emergencyHidden }; }
@@ -74,7 +91,7 @@ export class OverlayManager {
   async dismiss(overlayId: string): Promise<OverlayOperationResult> { const current = this.#records.get(overlayId); if (current !== undefined && current.ownerSessionId !== this.#owner.sessionId) return { ok: false, reason: "overlay_owner_mismatch" }; this.#records.delete(overlayId); this.#payloads.delete(overlayId); this.#targets.delete(overlayId); return this.#renderer.dismiss(overlayId); }
   async clear(): Promise<OverlayOperationResult> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); this.#rendererEpoch += 1; return this.#renderer.clear(); }
   async emergencyHide(): Promise<OverlayOperationResult> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); this.#rendererEpoch += 1; this.#emergencyHidden = true; return this.#renderer.emergencyHide(); }
-  async close(): Promise<void> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); this.#rendererEpoch += 1; await this.#renderer.close?.(); }
+  async close(): Promise<void> { if (this.#sweeper !== undefined) clearInterval(this.#sweeper); this.#sweeper = undefined; this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); this.#rendererEpoch += 1; await this.#renderer.close?.(); }
   async restartRenderer(): Promise<OverlayRendererRestartResult> { this.#records.clear(); this.#payloads.clear(); this.#targets.clear(); this.#rendererEpoch += 1; const result = await this.#renderer.restart?.(); if (result === undefined) return { ok: false, reason: "overlay_renderer_restart_unsupported" }; return result; }
   rendererEpoch(): number { return this.#rendererEpoch; }
   ownerId(): string { return this.#owner.sessionId; }

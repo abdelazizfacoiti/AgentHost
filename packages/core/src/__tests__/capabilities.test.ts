@@ -257,7 +257,30 @@ describe("CapabilityRegistry", () => {
       "guide.explain_strategy",
       "adapter.list",
       "adapter.get_capabilities",
-      "adapter.detect_for_app"
+      "adapter.detect_for_app",
+      "computer.observe_state",
+      "computer.wait_for",
+      "agent.status",
+      "agent.stop",
+      "agent.resume",
+      "agent.takeover_begin",
+      "agent.takeover_end",
+      "agent.discover_capabilities",
+      "task.create",
+      "task.status",
+      "task.update",
+      "task.log_event",
+      "task.pause",
+      "task.resume",
+      "task.complete",
+      "skills.list",
+      "skills.get",
+      "file.copy",
+      "file.move",
+      "file.delete",
+      "overlay.guide_present",
+      "overlay.guide_advance",
+      "overlay.guide_dismiss"
     ]);
   });
 
