@@ -59,6 +59,37 @@ async function runningCommands(): Promise<Set<string>> {
   return commands;
 }
 
+/**
+ * Isolated background browser profile. Background automation must never reuse
+ * the user's foreground profile: separate cookies, windows, and focus.
+ */
+export function backgroundBrowserProfileDir(agentHostDir: string): string {
+  return path.join(agentHostDir, "browser", "profiles", "background");
+}
+
+export interface BackgroundChromiumLaunch {
+  profileDir: string;
+  headless: boolean;
+  args: string[];
+}
+
+/**
+ * Pure argument builder for an offscreen Chromium run. No process is spawned
+ * here; the caller (or a future background worker) spawns it. Headless + a
+ * dedicated user-data-dir keeps the user screen untouched.
+ */
+export function backgroundChromiumArgs(input: { profileDir: string; extensionDir?: string; headless?: boolean }): BackgroundChromiumLaunch {
+  const headless = input.headless ?? true;
+  const args = [
+    ...(headless ? ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check"] : []),
+    `--user-data-dir=${input.profileDir}`,
+    "--no-first-run",
+    "--disable-background-timer-throttling",
+    ...(input.extensionDir === undefined ? [] : [`--load-extension=${input.extensionDir}`])
+  ];
+  return { profileDir: input.profileDir, headless, args };
+}
+
 export async function detectLinuxBrowsers(
   env: NodeJS.ProcessEnv = process.env
 ): Promise<LinuxBrowserProbe[]> {

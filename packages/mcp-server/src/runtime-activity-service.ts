@@ -25,6 +25,7 @@ const sourceForTool = (tool: string): RuntimeActivitySource => {
 
 const labelForTool = (tool: string): RuntimeActivityLabelKey => {
   if (tool === "browser.open_url") return "opening_browser";
+  if (tool === "browser.background_status") return "checking_strategy";
   if (tool.startsWith("browser.")) return tool.includes("wait") ? "waiting_for_page" : "inspecting_page";
   if (tool === "desktop.screenshot") return "preparing_screenshot";
   if (tool.startsWith("vision.")) return "analyzing_screenshot";

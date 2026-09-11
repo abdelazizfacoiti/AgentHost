@@ -262,4 +262,21 @@ describe("loadAgentHostConfig", () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-control-room-path-"));
     await expect(loadAgentHostConfig({ env: { AGENTHOST_CONTROL_ROOM_TOKEN_FILE: "/tmp/control-room-token" }, homeDir })).rejects.toThrow("control_room_token_path_outside_agenthost");
   });
+
+  it("defaults execution placement to foreground", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-placement-"));
+    const config = await loadAgentHostConfig({ env: {}, homeDir });
+    expect(config.execution).toEqual({ placement: "foreground" });
+  });
+
+  it("allows background execution placement from file and environment", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-placement-bg-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    await writeFile(path.join(agentHostDir, "config.json"), JSON.stringify({ execution: { placement: "background" } }), "utf8");
+    const fromFile = await loadAgentHostConfig({ env: {}, homeDir, configPath: path.join(agentHostDir, "config.json") });
+    expect(fromFile.execution).toEqual({ placement: "background" });
+    const fromEnv = await loadAgentHostConfig({ env: { AGENTHOST_EXECUTION_PLACEMENT: "foreground" }, homeDir, configPath: path.join(agentHostDir, "config.json") });
+    expect(fromEnv.execution).toEqual({ placement: "foreground" });
+  });
 });

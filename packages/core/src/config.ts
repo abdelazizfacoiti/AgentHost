@@ -49,6 +49,7 @@ const browserBridgeSchema = z.object({
   pairingStateFile: z.string().min(1).optional()
 }).strict();
 const controlRoomSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), accessTokenFile: z.string().min(1).optional() }).strict();
+const executionSchema = z.object({ placement: z.enum(["foreground", "background"]).optional() }).strict();
 const speechSchema = z.object({
   enabled: z.boolean().optional(),
   providerPreference: z.array(z.enum(["espeak-ng", "piper", "speech-dispatcher"])).min(1).max(3).optional(),
@@ -174,6 +175,7 @@ const configFileSchema = z
     runtimeActivityOverlay: runtimeActivityOverlaySchema.optional(),
     browserBridge: browserBridgeSchema.optional(),
     controlRoom: controlRoomSchema.optional(),
+    execution: executionSchema.optional(),
     speech: speechSchema.optional(),
     optionalAdapters: z.record(z.object({ enabled: z.boolean() }).strict()).optional(),
     grants: z.array(capabilityGrantSchema).max(500).optional()
@@ -348,6 +350,8 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const controlRoomEnabled = env.AGENTHOST_CONTROL_ROOM_ENABLED === undefined ? fileConfig.controlRoom?.enabled ?? false : env.AGENTHOST_CONTROL_ROOM_ENABLED === "1";
   const controlRoomPort = env.AGENTHOST_CONTROL_ROOM_PORT === undefined ? fileConfig.controlRoom?.port ?? 43118 : Number(env.AGENTHOST_CONTROL_ROOM_PORT);
   const controlRoom = { enabled: controlRoomEnabled, port: z.number().int().min(1024).max(65535).parse(controlRoomPort), accessTokenFile: resolveAgentHostPath(env.AGENTHOST_CONTROL_ROOM_TOKEN_FILE ?? fileConfig.controlRoom?.accessTokenFile ?? path.join(agentHostDir, "control-room", "access-token"), homeDir, agentHostDir) };
+  const placement = z.enum(["foreground", "background"]).parse(env.AGENTHOST_EXECUTION_PLACEMENT ?? fileConfig.execution?.placement ?? "foreground");
+  const execution = { placement };
   const speech = {
     enabled: fileConfig.speech?.enabled ?? true,
     providerPreference: fileConfig.speech?.providerPreference ?? ["espeak-ng", "piper", "speech-dispatcher"] as Array<"espeak-ng" | "piper" | "speech-dispatcher">,
@@ -376,6 +380,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     runtimeActivityOverlay,
     browserBridge,
     controlRoom,
+    execution,
     speech,
     optionalAdapters: fileConfig.optionalAdapters ?? {},
     policy: getPolicyProfile(parsedProfile, { grants })

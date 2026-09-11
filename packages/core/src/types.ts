@@ -752,6 +752,11 @@ export interface ControlRoomDashboardProjection {
   health: ControlRoomHealthProjection;
 }
 
+export type ExecutionPlacement = "foreground" | "background";
+export interface ExecutionConfig {
+  /** Background runs browser/desktop work offscreen so the user keeps their screen. */
+  placement: ExecutionPlacement;
+}
 export interface AgentHostConfig {
   /** Public configuration schema version. Loader accepts legacy files without this field. */
   schemaVersion?: 1;
@@ -759,6 +764,7 @@ export interface AgentHostConfig {
   configPath: string;
   logFile: string;
   profile: PolicyProfileName;
+  execution?: ExecutionConfig;
   /** Undefined only for older in-memory callers; loader always supplies `auto` by default. */
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
   overlayRendererMode?: import("./overlay.js").OverlayRendererMode;

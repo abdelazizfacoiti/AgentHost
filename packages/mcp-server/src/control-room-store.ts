@@ -1,7 +1,7 @@
 import { appendFile, chmod, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ActionEffectDecisionSummary, ActionVerificationSummary, ControlRoomDashboardProjection, ControlRoomHealthProjection, ControlRoomScreenshotProjection, ControlRoomTaskProjection, ControlRoomTimelineEvent, RiskLevel, RuntimeActivityProjection } from "@agenthost/core";
+import type { ActionEffectDecisionSummary, ActionVerificationSummary, ControlRoomDashboardProjection, ControlRoomHealthProjection, ControlRoomScreenshotProjection, ControlRoomTaskProjection, ControlRoomTimelineEvent, RiskLevel, RuntimeActivityProjection, RuntimeActivityRecord } from "@agenthost/core";
 import type { ControlRoomReportProvider, ControlRoomScreenshotQuery, ControlRoomTaskQuery } from "@agenthost/app-control-room";
 import { clearStop, isStopRequested, isTakeoverActive, requestStop } from "./stop-flag.js";
 
@@ -140,6 +140,7 @@ export class ControlRoomStore {
       tasks: (input) => this.tasks(input),
       task: (id) => this.task(id),
       timeline: (id, input) => this.timeline(id, input),
+      activity: (input) => this.activity(input),
       screenshots: (input) => this.screenshots(input),
       screenshot: (id) => this.screenshot(id),
       health: () => this.health(),
@@ -186,6 +187,15 @@ export class ControlRoomStore {
     const start = Math.max(0, Number(input.cursor ?? "0") || 0);
     const events = all.slice(start, start + limit(input.limit));
     return { events, ...(start + events.length < all.length ? { nextCursor: String(start + events.length) } : {}), truncated: start + events.length < all.length };
+  }
+  async activity(input: ControlRoomTaskQuery): Promise<{ activities: RuntimeActivityRecord[]; nextCursor?: string; truncated: boolean }> {
+    if (this.#sources.runtimeActivity === undefined) return { activities: [], truncated: false };
+    const projection = await this.#sources.runtimeActivity.projection().catch(() => undefined);
+    if (projection === undefined) return { activities: [], truncated: false };
+    const all = [...projection.activities].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.activityId.localeCompare(a.activityId));
+    const start = Math.max(0, Number(input.cursor ?? "0") || 0);
+    const activities = all.slice(start, start + limit(input.limit));
+    return { activities, ...(start + activities.length < all.length ? { nextCursor: String(start + activities.length) } : {}), truncated: start + activities.length < all.length };
   }
   async screenshots(input: ControlRoomScreenshotQuery): Promise<{ screenshots: ControlRoomScreenshotProjection[]; nextCursor?: string; truncated: boolean }> {
     let all = [...this.#screenshots.values()].filter((value) => this.#owns(value.sessionId) && (input.taskId === undefined || value.taskId === input.taskId)).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt) || b.screenshotId.localeCompare(a.screenshotId));

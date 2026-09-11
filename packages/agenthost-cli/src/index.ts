@@ -201,6 +201,45 @@ async function taskCommand(args: ReturnType<typeof parseFlags>): Promise<Output>
     return { ok: true, command: `task ${action}`, data: action === "status" ? record : { taskId: safe, resumed: action === "resume" } };
   }
   if (action === "stop") { await safeWrite(path.join(agentHome, "run", "stop.requested"), JSON.stringify({ stopped: true, reason: "cli_task_stop", at: new Date().toISOString() }) + "\n"); await rm(path.join(agentHome, "tasks", "approvals", "active.json"), { force: true }).catch(() => undefined); return { ok: true, command: "task stop", data: { stopped: true } }; }
+  if (action === "watch" && id) {
+    // Live progress tail: what the agent is doing in the background, without
+    // watching its windows. Polls the redacted task event log; --follow keeps
+    // polling until a terminal state, --notify sends a desktop notification.
+    const safe = id.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 200);
+    const follow = args.flags.has("follow");
+    const notify = args.flags.has("notify");
+    const readTask = async () => readJson(path.join(taskDir, `${safe}.json`)) as Promise<{ taskId?: string; goal?: string; status?: string; phase?: string; currentAction?: string; updatedAt?: string; events?: Array<{ at?: string; kind?: string; summary?: string }> } | undefined>;
+    let record = await readTask();
+    if (!record) return fail("task watch", "task_not_found");
+    let seen = 0;
+    const render = (current: NonNullable<Awaited<ReturnType<typeof readTask>>>) => {
+      const events = Array.isArray(current.events) ? current.events : [];
+      const fresh = events.slice(seen);
+      seen = events.length;
+      const header = `task ${safe} [${current.status ?? "?"}] phase=${current.phase ?? "?"} action=${current.currentAction ?? "?"}`;
+      const lines = fresh.map((event) => `  ${event.at ?? "?"} ${event.kind ?? "?"} ${String(event.summary ?? "").slice(0, 160)}`);
+      return { header, lines, status: current.status, eventCount: events.length };
+    };
+    let first = render(record);
+    process.stdout.write(`${first.header}\n${first.lines.slice(-10).join("\n")}${first.lines.length > 0 ? "\n" : ""}`);
+    if (follow) {
+      for (let i = 0; i < 150; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const current = await readTask();
+        if (!current) return fail("task watch", "task_not_found");
+        const update = render(current);
+        if (update.lines.length > 0) process.stdout.write(`${update.lines.join("\n")}\n`);
+        if (current.status === "completed" || current.status === "cancelled") {
+          process.stdout.write(`task ${safe} ${current.status}\n`);
+          if (notify) { try { spawnSync("notify-send", ["AgentHost", `Task ${current.status}: ${String(current.goal ?? safe).slice(0, 120)}`], { stdio: "ignore" }); } catch { /* notifications are best effort */ } }
+          return { ok: true, command: "task watch", data: { taskId: safe, status: current.status, phase: current.phase, eventCount: update.eventCount } };
+        }
+      }
+      return { ok: true, command: "task watch", data: { taskId: safe, status: record.status, note: "follow window expired (5 min); rerun to keep watching." } };
+    }
+    if (notify) { try { spawnSync("notify-send", ["AgentHost", `Task ${record.status}: ${String(record.goal ?? safe).slice(0, 120)}`], { stdio: "ignore" }); } catch { /* notifications are best effort */ } }
+    return { ok: true, command: "task watch", data: { taskId: safe, goal: record.goal, status: record.status, phase: record.phase, currentAction: record.currentAction, updatedAt: record.updatedAt, recentEvents: (Array.isArray(record.events) ? record.events : []).slice(-10) } };
+  }
   if (action === "approve" && id) {
     const safe = id.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 200);
     const record = await readJson(path.join(taskDir, `${safe}.json`));
@@ -212,7 +251,7 @@ async function taskCommand(args: ReturnType<typeof parseFlags>): Promise<Output>
     await safeWrite(path.join(taskDir, "approvals", "active.json"), JSON.stringify(approval, null, 2) + "\n");
     return { ok: true, command: "task approve", data: { taskId: safe, maxRisk, expiresAt: approval.expiresAt, note: "Routine low/medium effects chain server-side; high/critical still need per-action confirmation." } };
   }
-  return fail("task", "usage: agenthost task [list|status <id>|pause <id>|resume <id>|stop|approve <id>]");
+  return fail("task", "usage: agenthost task [list|status <id>|watch <id> [--follow] [--notify]|pause <id>|resume <id>|stop|approve <id>]");
 }
 async function capabilitiesCommand(args?: ReturnType<typeof parseFlags>): Promise<Output> {
   if (args?.flags.has("markdown") === true) {

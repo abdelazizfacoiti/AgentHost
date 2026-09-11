@@ -56,6 +56,8 @@ packages/
 | `npm run smoke:mcp` | Smoke test |
 | `npm run browser:pair` | Pair browser bridge |
 | `npm run control-room` | Start Control Room |
+| `agenthost task watch <id> [--follow] [--notify]` | Tail redacted task progress; notify on done |
+| `AGENTHOST_EXECUTION_PLACEMENT=background` | Run browser/desktop work offscreen (isolated profile) |
 
 **Test order**: `build → lint → test`. Run a single test file: `npx vitest run packages/core/src/__tests__/<file>.test.ts`. Tests live in `__tests__/` dirs inside each package's `src/`.
 
@@ -93,6 +95,7 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 - **Firefox bridge**: Paired but connection can be unstable. `--auto` works for Chromium, fails closed for Firefox.
 - **Second Firefox window**: `xdotool windowactivate` may fail with `BadWindow`. Use `xdotool search --name <pattern>` to find correct window ID.
 - **Control Room screenshot limit**: Default pagination limit is **50** (`limit()` in `control-room-store.ts` caps at `Math.min(100, Math.max(1, Math.floor(value)))`). Do not exceed 50 screenshots in a single query to avoid truncation errors.
+- **Live progress without watching apps**: `GET /api/v1/activity?limit=20` (same pagination bounds) feeds the Control Room “Live background work” panel; `browser.background_status` reports placement + isolated headless profile args without launching anything.
 
 ## Browser extension
 

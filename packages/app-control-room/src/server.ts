@@ -116,6 +116,7 @@ export class ControlRoomServer {
       }
       if (parsed.pathname === "/api/v1/dashboard") return json(response, 200, await this.provider.dashboard({ ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) }));
       if (parsed.pathname === "/api/v1/health") return json(response, 200, await this.provider.health());
+      if (parsed.pathname === "/api/v1/activity") return json(response, 200, await this.provider.activity({ limit, ...(cursor === 0 ? {} : { cursor: String(cursor) }), ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) }));
       if (parsed.pathname === "/api/v1/tasks") { const status = parsed.searchParams.get("status"); return json(response, 200, await this.provider.tasks({ limit, ...(cursor === 0 ? {} : { cursor: String(cursor) }), ...(status === null ? {} : { status }), ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) })); }
       if (parsed.pathname === "/api/v1/screenshots") { const taskId = parsed.searchParams.get("taskId"); return json(response, 200, await this.provider.screenshots({ limit, ...(cursor === 0 ? {} : { cursor: String(cursor) }), ...(taskId === null ? {} : { taskId }), ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) })); }
       const taskMatch = /^\/api\/v1\/tasks\/([^/]+)(?:\/(timeline))?$/.exec(parsed.pathname);

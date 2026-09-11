@@ -354,6 +354,7 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "browser.reset_pairing", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated browser pairing reset." },
     { name: "browser.get_extension_install_instructions", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Returns explicit public or development browser-extension install steps." },
     { name: "browser.verify_pairing", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Verifies active paired extension connection without page access." },
+    { name: "browser.background_status", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Reports background browser placement and isolated headless profile; spawns nothing." },
     { name: "browser.list_tabs", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Lists sanitized tabs from the paired local browser." },
     { name: "browser.get_active_tab", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Returns the active paired-browser tab metadata." },
     { name: "browser.current_url", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Returns a sanitized paired-browser URL." },

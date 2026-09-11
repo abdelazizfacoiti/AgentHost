@@ -9,7 +9,7 @@ function provider(): ControlRoomReportProvider {
   const health = { service: "available" as const, stores: { activity: "available" as const, workflows: "available" as const, forge: "available" as const, scheduler: "available" as const }, limitations: ["Read-only reporting."] };
   return {
     dashboard: async () => ({ generatedAt: new Date().toISOString(), range: { from: "", to: "" }, counts: { active: 0, recent: 0, completed: 0, failed: 0, cancelled: 0, blocked: 0, toolExecutions: 0, screenshotCaptures: 0, confirmationRequests: 0 }, recentActivity: [], health }),
-    tasks: async () => ({ tasks: [], truncated: false }), task: async () => { throw new Error("control_room_task_not_found"); }, timeline: async () => ({ events: [], truncated: false }), screenshots: async () => ({ screenshots: [], truncated: false }), screenshot: async () => { throw new Error("control_room_screenshot_not_found"); }, health: async () => health
+    tasks: async () => ({ tasks: [], truncated: false }), task: async () => { throw new Error("control_room_task_not_found"); }, timeline: async () => ({ events: [], truncated: false }), activity: async () => ({ activities: [], truncated: false }), screenshots: async () => ({ screenshots: [], truncated: false }), screenshot: async () => { throw new Error("control_room_screenshot_not_found"); }, health: async () => health
   };
 }
 async function get(port: number, url: string, headers: Record<string, string> = {}): Promise<{ status: number; body: string }> { return new Promise((resolve, reject) => { const req = request({ hostname: "127.0.0.1", port, path: url, method: "GET", headers }, (res) => { const chunks: Buffer[] = []; res.on("data", (chunk) => chunks.push(Buffer.from(chunk))); res.on("end", () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") })); }); req.on("error", reject); req.end(); }); }
@@ -29,6 +29,8 @@ describe("ControlRoomServer", () => {
     expect((await get(43180, "/api/v1/tasks?cursor=bad", { authorization: "Bearer " + token })).status).toBe(400);
     expect((await get(43180, "/api/v1/tasks?from=not-a-date", { authorization: "Bearer " + token })).status).toBe(400);
     expect((await get(43180, "/api/v1/tasks?limit=10000", { authorization: "Bearer " + token })).status).toBe(200);
+    expect((await get(43180, "/api/v1/activity", { authorization: "Bearer " + token })).status).toBe(200);
+    expect((await get(43180, "/api/v1/activity?limit=10000", { authorization: "Bearer " + token })).status).toBe(200);
     await server.close();
     await expect(readFile(started.tokenFile, "utf8")).rejects.toThrow();
   });
