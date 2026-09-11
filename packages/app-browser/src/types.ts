@@ -5,8 +5,16 @@ export interface BrowserElementQuery { text?: string; role?: string; label?: str
 export interface BrowserCheckpoint { expectedUrlContains?: string; expectedText?: string; expectedElement?: BrowserElementQuery; expectedFocusedElementId?: string; timeoutMs?: number; }
 export interface BridgeBrowserInfo { family: BrowserFamily; version?: string; }
 export interface BridgeTab extends BrowserTabSummary { rawUrl?: string; }
+export interface BrowserSessionHolder {
+  family: BridgeBrowserInfo["family"];
+  deviceIdSuffix: string;
+  connectedAt: string;
+  lastSeenAt: string;
+}
 export interface BrowserBridgeAdapter {
-  detect(): Promise<{ enabled: boolean; connected: boolean; paired: boolean; browser?: BridgeBrowserInfo; reason: string }>;
+  detect(): Promise<{ enabled: boolean; connected: boolean; paired: boolean; browser?: BridgeBrowserInfo; session?: BrowserSessionHolder; reason: string }>;
+  /** Drops the active session so another paired device (e.g. the background worker) can connect next. */
+  releaseSession(): Promise<{ released: boolean; previousDeviceSuffix?: string }>;
   listTabs(limit: number): Promise<BridgeTab[]>;
   activeTab(): Promise<BridgeTab>;
   currentUrl(tabId?: string): Promise<BridgeTab>;

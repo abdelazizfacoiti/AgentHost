@@ -27,10 +27,12 @@ const labelForTool = (tool: string): RuntimeActivityLabelKey => {
   if (tool === "browser.open_url") return "opening_browser";
   if (tool === "browser.background_status") return "checking_strategy";
   if (tool === "browser.background_launch") return "background_work";
+  if (tool === "browser.release_session") return "background_work";
   if (tool.startsWith("browser.")) return tool.includes("wait") ? "waiting_for_page" : "inspecting_page";
   if (tool === "desktop.screenshot") return "preparing_screenshot";
   if (tool.startsWith("vision.")) return "analyzing_screenshot";
   if (tool.startsWith("workflow.")) return "running_workflow";
+  if (tool === "task.execute_plan") return "running_workflow";
   if (tool.startsWith("overlay.assistance") || tool.startsWith("overlay.control_surface")) return "visual_assistance";
   if (tool.startsWith("forge.")) return tool.includes("run") || tool.includes("dispatch") ? "validating_generated_tool" : "background_work";
   if (tool.startsWith("scheduler.")) return "checking_scheduler";

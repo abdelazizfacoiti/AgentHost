@@ -392,6 +392,19 @@ export class BrowserBridgeServer {
     return this.#valid();
   }
 
+  /**
+   * Drops the active extension session and any queued commands so another
+   * paired device can connect next. The bridge holds exactly one session:
+   * whoever reconnects first after release wins it. Returns the previous
+   * holder's device suffix for verification loops.
+   */
+  releaseSession(): { released: boolean; previousDeviceSuffix?: string } {
+    const previous = this.#session;
+    this.#clearSession();
+    if (previous !== undefined) this.#lastError = undefined;
+    return { released: true, ...(previous === undefined ? {} : { previousDeviceSuffix: previous.deviceId.slice(-8) }) };
+  }
+
   async #loadBootstrapToken(): Promise<void> {
     try {
       const [value, metadata] = await Promise.all([

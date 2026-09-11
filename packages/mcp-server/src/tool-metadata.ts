@@ -25,10 +25,10 @@ declare([
   "overlay.assistance_session_cancel", "overlay.assistance_session_complete", "overlay.assistance_session_create", "overlay.guide_advance", "overlay.guide_dismiss", "overlay.guide_present", "overlay.assistance_session_get", "overlay.assistance_session_list", "overlay.assistance_session_pause", "overlay.assistance_session_start", "overlay.assistance_step_advance", "overlay.assistance_step_apply_event", "overlay.assistance_step_show", "overlay.assistance_target_refresh", "overlay.clear", "overlay.control_surface_apply_event", "overlay.control_surface_get", "overlay.control_surface_hide", "overlay.control_surface_show", "overlay.control_surface_update", "overlay.dismiss", "overlay.emergency_hide", "overlay.get_capabilities", "overlay.get_state", "overlay.highlight_target", "overlay.renderer_diagnose", "overlay.renderer_restart", "overlay.renderer_setup_instructions", "overlay.renderer_status", "overlay.show_pointer", "overlay.show_tooltip", "overlay.show_widget", "overlay.update"
 ], visualOnly());
 declare([
-  "browser.generate_pairing_token", "browser.reset_pairing"
+  "browser.generate_pairing_token", "browser.reset_pairing", "task.execute_plan"
 ], stateChanging());
 declare([
-  "accessibility.focus_element", "accessibility.invoke_action", "accessibility.set_value", "app.open", "browser.background_launch", "browser.click_element", "browser.fill_text", "browser.focus_element", "browser.open_url", "desktop.click", "desktop.double_click", "desktop.drag", "desktop.hotkey", "desktop.move_mouse", "desktop.right_click", "desktop.scroll", "desktop.type_text", "file.copy", "file.delete", "file.ensure_dir", "file.move", "file.write", "shell.run_safe", "window.focus"
+  "accessibility.focus_element", "accessibility.invoke_action", "accessibility.set_value", "app.open", "browser.background_launch", "browser.click_element", "browser.fill_text", "browser.focus_element", "browser.open_url", "browser.release_session", "desktop.click", "desktop.double_click", "desktop.drag", "desktop.hotkey", "desktop.move_mouse", "desktop.right_click", "desktop.scroll", "desktop.type_text", "file.copy", "file.delete", "file.ensure_dir", "file.move", "file.write", "shell.run_safe", "window.focus"
 ], stateChanging(true));
 declare(["browser.setup_begin", "browser.setup_approve", "browser.setup_cancel"], stateChanging(true));
 declare(["speech.play", "speech.stop", "speech.synthesize", "speech.transmission_execute"], stateChanging(true));

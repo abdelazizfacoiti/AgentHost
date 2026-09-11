@@ -52,7 +52,7 @@ describe("general-purpose computer agent", () => {
       "computer.observe_state",
       "file.copy", "file.move", "file.delete",
       "agent.status", "agent.stop", "agent.resume", "agent.takeover_begin", "agent.takeover_end", "agent.discover_capabilities",
-      "task.create", "task.status", "task.update", "task.log_event", "task.pause", "task.resume", "task.complete",
+      "task.create", "task.status", "task.update", "task.log_event", "task.pause", "task.resume", "task.complete", "task.execute_plan",
       "skills.list", "skills.get"
     ]) {
       expect(names).toContain(expected);
@@ -62,6 +62,7 @@ describe("general-purpose computer agent", () => {
     expect(find("file.copy")).toMatchObject({ executionClass: "state_changing", requiresExactTarget: true });
     expect(find("file.delete")).toMatchObject({ executionClass: "state_changing", requiresExactTarget: true });
     expect(find("task.create")).toMatchObject({ executionClass: "metadata_only" });
+    expect(find("task.execute_plan")).toMatchObject({ executionClass: "state_changing", requiresDryRun: true, requiresConfirmationToken: true });
     expect(find("agent.stop")).toMatchObject({ executionClass: "metadata_only" });
   });
 

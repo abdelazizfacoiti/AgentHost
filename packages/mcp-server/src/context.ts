@@ -59,6 +59,7 @@ import type { AdaptiveActionRouter } from "./adaptive-action-router.js";
 import type { SpeechService } from "./speech-service.js";
 import type { RuntimeActivityService } from "./runtime-activity-service.js";
 import type { RuntimeActivityOverlayController } from "./runtime-activity-overlay.js";
+import type { AnyAgentHostToolDefinition } from "./tool-runner.js";
 import type { BrowserSetupService } from "./browser-setup-service.js";
 import type { CapabilityGraphService } from "./capability-graph-service.js";
 import type { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
@@ -191,5 +192,7 @@ export interface AgentHostMcpContext {
   runtimeActivityOverlay?: RuntimeActivityOverlayController;
   /** Shared bridge probe cache — deduplicates browser.detect() across concurrent callers. */
   bridgeProbeCache?: BridgeProbeCache;
+  /** Live tool definitions for governed nested execution (plan executor). */
+  tools?: Map<string, AnyAgentHostToolDefinition<any>>;
   linux: LinuxAutomation;
 }

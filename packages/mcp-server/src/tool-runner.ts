@@ -52,6 +52,8 @@ export interface ToolExecutionContext {
   workflowTrace?: { capture(event: { sessionId: string; step: WorkflowTraceStep }): Promise<void> };
   controlRoom?: { recordToolActivity(input: { sessionId: string; timestamp: string; tool: string; strategy?: string; riskLevel: RiskLevel; preview: boolean; ok: boolean; errorCode?: string; durationMs: number; confirmation: boolean; receiptId?: string; actionDecision?: import("@agenthost/core").ActionEffectDecisionSummary; verification?: import("@agenthost/core").ActionVerificationSummary }): Promise<void> | void };
   runtimeActivity?: RuntimeActivityService;
+  /** Live tool definitions for governed nested execution (plan executor). Each nested call still runs the full pipeline. */
+  tools?: Map<string, AnyAgentHostToolDefinition<any>>;
 }
 
 export interface ToolExecutionRuntime {

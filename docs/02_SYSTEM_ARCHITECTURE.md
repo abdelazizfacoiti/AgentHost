@@ -75,6 +75,29 @@ Headless/disabled renderers plus optional GTK3/X11 renderer child. Renderer comm
 
 `packages/core/src/runtime-activity.ts` defines strict lifecycle/source/label/progress contracts and legal transitions. `runtime-activity-store.ts` persists bounded owner-scoped redacted JSONL under `~/.agenthost/runtime-activity/`; `runtime-activity-service.ts` normalizes tool results; `runtime-activity-overlay.ts` projects the highest-priority activity through `OverlayManager`. Renderer bindings contain ephemeral overlay IDs and epochs and are invalidated on restart. Control Room consumes same projection, avoiding direct-activity double counting. Screenshot capture is serialized and requires acknowledged overlay suppression before capture and acknowledged restoration after capture.
 
+### Governed plan execution boundary
+
+`task.execute_plan` runs a bounded (max 10 steps, 8 KB inputs) tool sequence
+against one active task: dry-run validation first, then one confirmation
+token for the plan, with each step still passing the full
+schema → policy → confirmation pipeline (mint each step's token with dry-runs
+first). Stop/takeover gates are checked before every step, per-step progress
+is logged to the task event log (`task watch` tails it), and execution halts
+at the first failure with the failing step, error code, and a replan hint.
+`task.execute_plan` never nests (recursion is rejected at validation), and the
+live tool map on the MCP context is the only way steps resolve — unknown tool
+names fail the plan before anything executes.
+
+### Browser session handoff boundary
+
+The bridge holds exactly one extension session (5-minute `lastSeen`
+stickiness; a second device gets `browser_busy`). `browser.detect` reports the
+session holder (family + device suffix), and confirmation-gated
+`browser.release_session` drops the session and queued commands so another
+paired device — e.g. the background worker — can connect next. Whoever
+reconnects first wins; verify the holder with `browser.detect` before acting.
+Placement changes visibility, never permission.
+
 ### Background execution and live progress boundary
 
 `execution.placement` (`foreground` default, `background` opt-in via config or `AGENTHOST_EXECUTION_PLACEMENT`) declares where browser/desktop work runs. Background runs use an isolated Chromium profile under `~/.agenthost/browser/profiles/background/` (`browser.background_status` reports the headless launch args; it spawns nothing). Foreground `xdotool` remains last-resort fallback. Live progress never requires watching the app: `GET /api/v1/activity` exposes the bounded redacted runtime-activity feed (same 50-default/100-max pagination as other Control Room queries, rendered in the “Live background work” panel), and `agenthost task watch <id> [--follow] [--notify]` tails the redacted task event log with an optional desktop notification on terminal state. Background work passes the identical safety pipeline and stop/takeover gates; placement changes visibility, never permission.

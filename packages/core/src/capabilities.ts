@@ -356,6 +356,7 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "browser.verify_pairing", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Verifies active paired extension connection without page access." },
     { name: "browser.background_status", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Reports background browser placement and isolated headless profile; spawns nothing." },
     { name: "browser.background_launch", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated launch of a detached headless Chromium in the isolated background profile." },
+    { name: "browser.release_session", riskLevel: "medium" as const, strategy: "browser_automation" as const, description: "Confirmation-gated release of the active bridge session so another paired device can connect." },
     { name: "browser.list_tabs", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Lists sanitized tabs from the paired local browser." },
     { name: "browser.get_active_tab", riskLevel: "observe" as const, strategy: "browser_automation" as const, description: "Returns the active paired-browser tab metadata." },
     { name: "browser.current_url", riskLevel: "low" as const, strategy: "browser_automation" as const, description: "Returns a sanitized paired-browser URL." },
@@ -798,6 +799,11 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       name: "task.resume",
       riskLevel: "low" as const,
       description: "Resumes a paused task."
+    },
+    {
+      name: "task.execute_plan",
+      riskLevel: "medium" as const,
+      description: "Executes a bounded tool sequence against one active task with stop gates and fail-fast recovery."
     },
     {
       name: "task.complete",

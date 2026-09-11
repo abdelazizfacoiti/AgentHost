@@ -280,4 +280,19 @@ describe("BrowserBridgeServer", () => {
     await expect(stat(config.pairingTokenFile)).rejects.toMatchObject({ code: "ENOENT" });
     await bridge.close();
   });
+
+  it("releases the active session so another paired device can connect next", async () => {
+    const { bridge } = await fixture();
+    const enrolled = await enroll(bridge);
+    expect(bridge.status()).toMatchObject({ connected: true });
+    const released = bridge.releaseSession();
+    expect(released).toMatchObject({ released: true, previousDeviceSuffix: enrolled.deviceId.slice(-8) });
+    expect(JSON.stringify(released)).not.toContain(enrolled.deviceId);
+    expect(JSON.stringify(released)).not.toContain(enrolled.refreshSecret);
+    expect(bridge.status()).toMatchObject({ connected: false });
+    await expect(bridge.command("list_tabs", {})).rejects.toThrow("browser_pairing_required");
+    const idle = bridge.releaseSession();
+    expect(idle).toEqual({ released: true });
+    await bridge.close();
+  });
 });

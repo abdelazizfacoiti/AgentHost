@@ -57,6 +57,7 @@ packages/
 | `npm run browser:pair` | Pair browser bridge |
 | `npm run control-room` | Start Control Room |
 | `agenthost task watch <id> [--follow] [--notify]` | Tail redacted task progress; notify on done |
+| `task.execute_plan` | Bounded tool sequence per task; dry-run each step for tokens first; fail-fast with replan hint |
 | `AGENTHOST_EXECUTION_PLACEMENT=background` | Run browser/desktop work offscreen (isolated profile) |
 
 **Test order**: `build → lint → test`. Run a single test file: `npx vitest run packages/core/src/__tests__/<file>.test.ts`. Tests live in `__tests__/` dirs inside each package's `src/`.

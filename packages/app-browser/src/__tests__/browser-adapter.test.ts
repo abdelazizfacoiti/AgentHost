@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createBrowserAdapter } from "../browser-adapter.js";
 import { browserSensitivity, sanitizeBrowserUrl } from "../url-sensitivity.js";
 import { redactBrowserText } from "../page-redaction.js";
 
@@ -13,5 +14,17 @@ describe("browser adapter safety helpers", () => {
     expect(value.text).not.toContain("a@example.com");
     expect(value.text).not.toContain("secret-value");
     expect(value.counts.email).toBe(1);
+  });
+  it("surfaces the session holder for background handoff decisions", async () => {
+    const adapter = createBrowserAdapter({
+      status: () => ({ enabled: true, paired: true, connected: true, browser: { family: "chromium" as const }, deviceIdSuffix: "abcdef12", connectedAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:01:00.000Z", reason: "paired" }),
+      command: async () => { throw new Error("unused"); },
+      releaseSession: () => ({ released: true as const })
+    } as never);
+    await expect(adapter.detect()).resolves.toMatchObject({
+      connected: true,
+      session: { family: "chromium", deviceIdSuffix: "abcdef12" }
+    });
+    await expect(adapter.releaseSession()).resolves.toMatchObject({ released: true });
   });
 });

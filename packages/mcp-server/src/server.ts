@@ -387,6 +387,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
 
   const loadedTools = materializeToolDefinitions(applyProductionExecutionMetadata(tools));
   registry.syncTools(toolCapabilities(loadedTools));
+  context.tools = new Map(loadedTools.map((tool) => [tool.name, tool]));
 
   let controlRoomServer: { start(): Promise<{ url: string }>; close(): Promise<void> } | undefined;
   if (config.controlRoom?.enabled === true) {
