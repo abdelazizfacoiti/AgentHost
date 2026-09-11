@@ -14,6 +14,9 @@
       "path": "./packages/app-control-room"
     },
     {
+      "path": "./packages/app-ssh"
+    },
+    {
       "path": "./packages/core"
     },
     {

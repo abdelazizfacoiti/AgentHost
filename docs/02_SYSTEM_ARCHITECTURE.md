@@ -106,6 +106,34 @@ Placement changes visibility, never permission.
 
 `packages/app-blender` is the current experimental reference adapter. Optional external-process adapters are loaded only when explicitly enabled and must declare the generic execution policy.
 
+### Device mesh boundary
+
+`packages/app-ssh` is the second adapter and the first *device* adapter:
+same `AppAdapter` interface, same policy validation, same dry-run +
+confirmation-token flow, but the capability (`ssh.run_command`) executes on
+another machine over OpenSSH instead of a local app. Device targeting is
+strict argv (no shell metacharacters reach the local command line), key
+authentication only (`BatchMode=yes`, never password prompts), blocked remote
+patterns stay blocked via the shared shell classifier, and output is bounded
+(64 KB). Enable with `optionalAdapters.ssh.enabled`; pair with
+`ssh.run_command` dry-run envelopes exactly like `blender.run_python`. A
+device is therefore just an adapter behind identical capability families —
+adding a phone or VM later means a new package implementing the same
+interface, not a new safety model. The MCP tool deliberately passes no local
+app identity to the safety classifier (no local app is automated); the remote
+device is bound in the confirmation target and adapter bindings instead.
+
+### Episodic memory boundary
+
+`episodic-memory-store.ts` persists bounded redacted learning episodes
+(`goalCategory`, `strategyId`, verified outcome, secret-scrubbed lesson,
+30-day TTL) under `~/.agenthost/memory/`. `strategyScore` takes an optional
+per-strategy success/failure count (capped bonus, linear failure penalty);
+`strategy.select` consults the store and notes the adjustment in the
+selection explanation. `strategy.record_episode` / `strategy.recall_episodes`
+are the explicit write/read tools; policy blocks, cancellations, and aborts
+are never learning evidence. Raw task content never enters the store.
+
 Core goal-planning contracts are advisory and app-agnostic. They validate a
 bounded goal/plan/step/route/checkpoint/outcome model and deterministic
 safety-first selection, but they do not persist raw task content, invoke tools,

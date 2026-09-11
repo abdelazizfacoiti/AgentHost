@@ -42,6 +42,7 @@ const labelForTool = (tool: string): RuntimeActivityLabelKey => {
   if (tool === "speech.play") return "playing_speech";
   if (tool === "speech.transmission_prepare") return "preparing_transmission";
   if (tool === "speech.transmission_execute") return "transmitting_speech";
+  if (tool.startsWith("ssh.")) return "background_work";
   if (tool.startsWith("speech.")) return "checking_permissions";
   return "agenthost_working";
 };

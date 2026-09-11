@@ -29,6 +29,8 @@ describe("CapabilityRegistry", () => {
       "strategy.goal_plan_preview",
       "strategy.capability_graph",
       "strategy.failure_memory",
+      "strategy.record_episode",
+      "strategy.recall_episodes",
       "speech.list_providers",
       "speech.get_capabilities",
       "speech.list_voices",

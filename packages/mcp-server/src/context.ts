@@ -63,6 +63,7 @@ import type { AnyAgentHostToolDefinition } from "./tool-runner.js";
 import type { BrowserSetupService } from "./browser-setup-service.js";
 import type { CapabilityGraphService } from "./capability-graph-service.js";
 import type { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
+import type { EpisodicMemoryStore } from "./episodic-memory-store.js";
 import type { BridgeProbeCache } from "./decision-cache.js";
 
 export interface LinuxAutomation {
@@ -178,6 +179,7 @@ export interface AgentHostMcpContext {
   browserSetup?: BrowserSetupService;
   capabilityGraph?: CapabilityGraphService;
   failureMemory?: SafeFailureMemoryStore;
+  episodicMemory?: EpisodicMemoryStore;
   overlay?: OverlayManager;
   overlayAssistance?: OverlayAssistanceStore;
   overlayAssistanceTemplates?: OverlayAssistanceTemplateStore;

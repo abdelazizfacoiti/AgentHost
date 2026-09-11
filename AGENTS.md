@@ -97,6 +97,8 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 - **Firefox bridge**: Paired but connection can be unstable. `--auto` works for Chromium, fails closed for Firefox.
 - **Second Firefox window**: `xdotool windowactivate` may fail with `BadWindow`. Use `xdotool search --name <pattern>` to find correct window ID.
 - **Focus-safe desktop**: `window.focus` returns `previousWindow` (best effort) so agents can restore user focus; focus changes are reported, never silent.
+- **Learning loop**: `strategy.record_episode` / `strategy.recall_episodes` feed redacted episodes (30-day TTL) that `strategy.select` scores; never store raw task content or secrets in lessons.
+- **SSH device adapter**: second adapter, first remote device (`packages/app-ssh`, `ssh.run_command`, dry-run + token like Blender). Enable via `optionalAdapters.ssh.enabled`. Key auth only; blocked remote patterns stay blocked.
 - **Control Room screenshot limit**: Default pagination limit is **50** (`limit()` in `control-room-store.ts` caps at `Math.min(100, Math.max(1, Math.floor(value)))`). Do not exceed 50 screenshots in a single query to avoid truncation errors.
 - **Live progress without watching apps**: `GET /api/v1/activity?limit=20` (same pagination bounds) feeds the Control Room “Live background work” panel; `browser.background_status` reports placement + isolated headless profile args without launching anything.
 

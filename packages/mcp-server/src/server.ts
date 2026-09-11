@@ -68,6 +68,7 @@ import { createAdapterTools } from "./tools/adapter.js";
 import { createAccessibilityTools } from "./tools/accessibility.js";
 import { createAppTools } from "./tools/app.js";
 import { createBlenderTools } from "./tools/blender.js";
+import { createSshTools } from "./tools/ssh.js";
 import { createDesktopTools } from "./tools/desktop.js";
 import { createComputerTools } from "./tools/computer.js";
 import { createAgentTools } from "./tools/agent.js";
@@ -127,6 +128,7 @@ import { RuntimeActivityOverlayController } from "./runtime-activity-overlay.js"
 import { BrowserSetupService } from "./browser-setup-service.js";
 import { CapabilityGraphService } from "./capability-graph-service.js";
 import { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
+import { EpisodicMemoryStore } from "./episodic-memory-store.js";
 import { GoalPlanningService } from "./goal-planning-service.js";
 import { BridgeProbeCache } from "./decision-cache.js";
 
@@ -141,6 +143,33 @@ function blenderModuleSpecifier(): string {
   const target = isSource ? "../../app-blender/src/index.js" : "../../app-blender/dist/index.js";
 
   return pathToFileURL(path.resolve(currentDir, target)).href;
+}
+
+function sshModuleSpecifier(): string {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const isSource = currentDir.includes(`${path.sep}src`);
+  const target = isSource ? "../../app-ssh/src/index.js" : "../../app-ssh/dist/index.js";
+
+  return pathToFileURL(path.resolve(currentDir, target)).href;
+}
+
+async function registerOptionalSshRuntime(config: AgentHostConfig, adapters: AdapterRegistry): Promise<boolean> {
+  if (config.optionalAdapters?.ssh?.enabled !== true) {
+    return false;
+  }
+
+  if (adapters.get("ssh") === undefined) {
+    const sshModule = (await import(sshModuleSpecifier())) as {
+      createSshAdapter?: () => { id: string; optionalExecutionPolicy?: unknown };
+    };
+
+    if (typeof sshModule.createSshAdapter === "function") {
+      const adapter = sshModule.createSshAdapter();
+      validateOptionalAdapterExecutionPolicy(adapter as never);
+      adapters.register(adapter as never);
+    }
+  }
+  return adapters.get("ssh") !== undefined;
 }
 
 async function registerOptionalBlenderRuntime(config: AgentHostConfig, adapters: AdapterRegistry): Promise<boolean> {
@@ -199,6 +228,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const registry = options.registry ?? createBaseCapabilityRegistry();
   const adapters = options.adapters ?? createAdapterRegistry();
   const blenderEnabled = await registerOptionalBlenderRuntime(config, adapters);
+  const sshEnabled = await registerOptionalSshRuntime(config, adapters);
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
   const policy = options.policy ?? config.policy;
   const confirmations = new ConfirmationManager();
@@ -217,6 +247,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const capabilityGraph = new CapabilityGraphService(registry, adapters);
   const failureMemory = new SafeFailureMemoryStore(config.agentHostDir);
   await failureMemory.ensureStructure();
+  const episodicMemory = new EpisodicMemoryStore(config.agentHostDir);
+  await episodicMemory.ensureStructure();
   const goalPlanning = new GoalPlanningService();
   // Shared bridge probe cache: deduplicates browser.detect() calls that fire
   // concurrently from route_preview + strategy.select within the same agent turn.
@@ -339,6 +371,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...(browserSetup === undefined ? {} : { browserSetup }),
     capabilityGraph,
     failureMemory,
+    episodicMemory,
     goalPlanning,
     bridgeProbeCache,
     linux
@@ -371,6 +404,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createSpeechTools(),
     ...createAdapterTools(),
     ...(blenderEnabled ? createBlenderTools() : []),
+    ...(sshEnabled ? createSshTools() : []),
     ...createAppTools(),
     ...createShellTools(),
     ...createFileTools(),

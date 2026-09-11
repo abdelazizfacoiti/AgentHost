@@ -76,7 +76,7 @@ export function validateToolExecutionMetadata(metadata: ToolExecutionMetadata, t
 
 function bootstrapExecutionMetadata(name: string): ToolExecutionMetadata {
   if (name.startsWith("strategy.")) {
-    const executionClass = name === "strategy.health" || name === "strategy.verify_outcome" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.route_preview" || name === "strategy.goal_plan_preview" || name === "strategy.capability_graph" || name === "strategy.failure_memory" ? "read_only" : "metadata_only";
+    const executionClass = name === "strategy.health" || name === "strategy.verify_outcome" ? "diagnostic" : name === "strategy.list" || name === "strategy.get" || name === "strategy.explain_selection" || name === "strategy.route_preview" || name === "strategy.goal_plan_preview" || name === "strategy.capability_graph" || name === "strategy.failure_memory" || name === "strategy.recall_episodes" ? "read_only" : "metadata_only";
     return { executionClass, externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
   }
   if (name === "overlay.assistance_step_preview" || name === "overlay.assistance_session_explain" || name === "overlay.assistance_template_validate" || name === "overlay.assistance_template_preview" || name === "overlay.assistance_template_get" || name === "overlay.assistance_template_list") return { executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source: "base", availability: "available" };
@@ -205,6 +205,8 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     { name: "strategy.goal_plan_preview", riskLevel: "observe" as const, description: "Previews a bounded redacted goal, plan, route, checkpoint, decision level, and visual surface without executing a plan." },
     { name: "strategy.capability_graph", riskLevel: "observe" as const, description: "Returns a bounded structural capability graph without executing probes." },
     { name: "strategy.failure_memory", riskLevel: "observe" as const, description: "Lists bounded verified route evidence without private task data." },
+    { name: "strategy.record_episode", riskLevel: "low" as const, description: "Records one bounded redacted learning episode for future strategy selection." },
+    { name: "strategy.recall_episodes", riskLevel: "observe" as const, description: "Recalls bounded redacted learning episodes the planner consults." },
     { name: "speech.list_providers", riskLevel: "observe" as const, description: "Lists detected local offline speech providers." },
     { name: "speech.get_capabilities", riskLevel: "observe" as const, description: "Reports local speech and routing capability health." },
     { name: "speech.list_voices", riskLevel: "observe" as const, description: "Lists local speech voices and languages." },

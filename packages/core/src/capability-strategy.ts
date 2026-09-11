@@ -203,7 +203,7 @@ export function shouldDegradeStrategy(strategy: CapabilityStrategyDefinition): b
   return strategy.consecutiveFailureCount >= 2 || (strategy.successCount + strategy.failureCount >= 2 && strategy.confidence < 0.5);
 }
 
-export function strategyScore(input: { strategy: CapabilityStrategyDefinition; goalCategory: CapabilityStrategyGoal; appId?: string; adapterId?: string; verifiedCheckpoint: boolean; recent: boolean }): number {
+export function strategyScore(input: { strategy: CapabilityStrategyDefinition; goalCategory: CapabilityStrategyGoal; appId?: string; adapterId?: string; verifiedCheckpoint: boolean; recent: boolean; memory?: { success: number; failure: number } }): number {
   const strategy = input.strategy;
   let score = 0;
   if (strategy.goalCategory === input.goalCategory) score += 100;
@@ -214,6 +214,10 @@ export function strategyScore(input: { strategy: CapabilityStrategyDefinition; g
   if (input.verifiedCheckpoint) score += 10;
   score += Math.max(0, 6 - strategy.preferredSteps.length);
   score -= strategy.consecutiveFailureCount * 12;
+  if (input.memory !== undefined) {
+    score += Math.min(8, Math.max(0, input.memory.success) * 2);
+    score -= Math.max(0, input.memory.failure) * 6;
+  }
   return score;
 }
 

@@ -81,6 +81,22 @@ describe("persistent capability strategies", () => {
     expect(liveVerification.status).toBe("verified_success");
   });
 
+  it("adjusts selection with recorded episodic memory", async () => {
+    const { service, context } = await fixture();
+    const plain = await service.select(context, { goalCategory: "browser_navigation", mode: "normal" });
+    expect(plain.explanation.join(" ")).toContain("No recorded episodes");
+    const remembered = await service.select({
+      ...context,
+      episodicMemory: {
+        list: async () => [
+          { outcome: "verified_failure", strategyId: plain.strategyId },
+          { outcome: "verified_success", strategyId: plain.strategyId }
+        ]
+      }
+    } as never, { goalCategory: "browser_navigation", mode: "normal" });
+    expect(remembered.explanation.join(" ")).toContain("Episodic memory: 1 success / 1 failure");
+  });
+
   it("reuses the persisted strategy from a new service/session without persisting destination input", async () => {
     const first = await fixture();
     const firstSelection = await first.service.select(first.context, { goalCategory: "browser_navigation", destination: "https://example.test/private-path", mode: "normal" });
