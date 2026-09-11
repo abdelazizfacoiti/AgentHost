@@ -1241,6 +1241,8 @@ export interface DesktopTypeTextResult {
   typed: boolean;
   characterCount: number;
   activeWindow: DesktopWindowContext;
+  /** direct = xdotool type (ASCII letters/digits/space); clipboard = layout-independent paste. */
+  method?: "direct" | "clipboard";
   reason: string;
 }
 
@@ -1363,6 +1365,8 @@ export interface WindowFocusResult {
   backend: string;
   focused: boolean;
   window: DesktopWindowContext;
+  /** Window that was active before focusing, so the agent can restore user focus. */
+  previousWindow?: DesktopWindowContext;
   reason: string;
 }
 

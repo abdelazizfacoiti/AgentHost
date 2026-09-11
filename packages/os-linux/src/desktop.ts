@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -609,6 +610,82 @@ export function xdotoolHotkeyArguments(keys: string[]): string[] {
   return ["key", keys.join("+")];
 }
 
+export type TypingMethod = "direct" | "clipboard";
+
+/**
+ * xdotool `type` maps keysyms through the active layout: letters, digits and
+ * space are safe, but layout-dependent characters (`:/#` and other AltGr or
+ * dead-key characters on AZERTY) mistype. Those go through clipboard paste,
+ * which is layout-independent.
+ */
+export function describeTypingStrategy(text: string): TypingMethod {
+  return /^[A-Za-z0-9 ]*$/.test(text) ? "direct" : "clipboard";
+}
+
+async function feedClipboard(command: string, args: string[], text: string, context: LinuxDesktopContext): Promise<boolean> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, args, { env: context.env ?? process.env });
+    } catch {
+      resolve(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* best effort */ }
+      resolve(false);
+    }, 5_000);
+    child.on("error", () => { clearTimeout(timer); resolve(false); });
+    child.on("close", (code) => { clearTimeout(timer); resolve(code === 0); });
+    try {
+      if (child.stdin === null) {
+        clearTimeout(timer);
+        resolve(false);
+        return;
+      }
+      child.stdin.write(text);
+      child.stdin.end();
+    } catch {
+      clearTimeout(timer);
+      resolve(false);
+    }
+  });
+}
+
+async function pasteViaClipboard(
+  xdotoolPath: string,
+  text: string,
+  context: LinuxDesktopContext
+): Promise<{ ok: boolean; reason: string }> {
+  const xclip = await findCommandPath("xclip", context);
+  const xsel = xclip === undefined ? await findCommandPath("xsel", context) : undefined;
+  if (xclip === undefined && xsel === undefined) {
+    return { ok: false, reason: "Layout-unsafe characters require a clipboard backend; install xclip or xsel for non-ASCII typing." };
+  }
+  const fed = xclip !== undefined
+    ? await feedClipboard(xclip, ["-selection", "clipboard", "-i"], text, context)
+    : await feedClipboard(xsel!, ["--clipboard", "--input"], text, context);
+  if (!fed) return { ok: false, reason: "The clipboard backend did not accept the text." };
+  const paste = await runDesktopCommand(xdotoolPath, ["key", "ctrl+v"], context);
+  return paste.exitCode === 0
+    ? { ok: true, reason: "Pasted text via the clipboard (layout-independent); window clipboard now holds the typed text." }
+    : { ok: false, reason: "The clipboard paste hotkey did not complete successfully." };
+}
+
+/** Best-effort read of the currently active window id for focus restoration. */
+async function previousActiveWindowId(
+  xdotoolPath: string | undefined,
+  context: LinuxDesktopContext
+): Promise<string | undefined> {
+  if (xdotoolPath === undefined) return undefined;
+  try {
+    const id = (await runDesktopCommand(xdotoolPath, ["getactivewindow"], context)).stdout.trim();
+    return /^[0-9]+$/.test(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function sendLinuxHotkey(
   input: LinuxDesktopHotkeyInput,
   context: LinuxDesktopContext = {}
@@ -642,6 +719,7 @@ export async function typeLinuxText(
   input: LinuxDesktopTypeTextInput,
   context: LinuxDesktopContext = {}
 ): Promise<DesktopTypeTextResult> {
+  const method = describeTypingStrategy(input.text);
   const verification = await verifyX11ActionContext(input.activeWindow, context);
 
   if (!verification.ok) {
@@ -651,7 +729,21 @@ export async function typeLinuxText(
       typed: false,
       characterCount: input.text.length,
       activeWindow: input.activeWindow,
+      method,
       reason: verification.reason
+    };
+  }
+
+  if (method === "clipboard") {
+    const paste = await pasteViaClipboard(verification.xdotoolPath, input.text, context);
+    return {
+      supported: paste.ok,
+      backend: verification.backend,
+      typed: paste.ok,
+      characterCount: input.text.length,
+      activeWindow: verification.activeWindow,
+      method,
+      reason: paste.reason
     };
   }
 
@@ -663,6 +755,7 @@ export async function typeLinuxText(
     typed: result.exitCode === 0,
     characterCount: input.text.length,
     activeWindow: verification.activeWindow,
+    method,
     reason: result.exitCode === 0 ? "Typed text into the active X11 window." : "The type-text backend did not complete successfully."
   };
 }
@@ -937,12 +1030,14 @@ export async function focusLinuxWindow(
     if (directPath === undefined) {
       return { supported: false, backend: "unavailable", focused: false, window: requestedWindow, reason: "Window focus requires wmctrl on X11." };
     }
+    const previousId = await previousActiveWindowId(await findCommandPath("xdotool", context), context);
     const direct = await runDesktopCommand(directPath, ["-i", "-a", input.windowId], context);
     return {
       supported: true,
       backend: "wmctrl",
       focused: direct.exitCode === 0,
       window: summarizeWindow({ windowId: input.windowId }, true),
+      ...(previousId === undefined ? {} : { previousWindow: { windowId: previousId } }),
       reason: direct.exitCode === 0 ? "Focused the requested X11 window through wmctrl." : "wmctrl could not focus the requested window."
     };
   }
@@ -1005,6 +1100,7 @@ export async function focusLinuxWindow(
     };
   }
 
+  const previousId = await previousActiveWindowId(await findCommandPath("xdotool", context), context);
   const result = await runDesktopCommand(wmctrlPath, ["-i", "-a", target.windowId], context);
   const summarized = summarizeWindow(target, true);
 
@@ -1013,6 +1109,7 @@ export async function focusLinuxWindow(
     backend: "wmctrl",
     focused: result.exitCode === 0,
     window: summarized,
+    ...(previousId === undefined ? {} : { previousWindow: { windowId: previousId } }),
     reason: result.exitCode === 0 ? "Focused the requested X11 window through wmctrl." : "wmctrl could not focus the requested window."
   };
 }

@@ -29,4 +29,19 @@ describe("browser.background_status", () => {
     const result = await runTool(createBrowserTools().find((tool) => tool.name === "browser.background_status")!, {}, value);
     expect(result).toMatchObject({ ok: true, data: { placement: "background" } });
   });
+  it("reports worker absence before any launch", async () => {
+    const value = context("foreground");
+    const result = await runTool(createBrowserTools().find((tool) => tool.name === "browser.background_status")!, {}, value);
+    expect(result).toMatchObject({ ok: true, data: { worker: { running: false } } });
+  });
+  it("previews background launch without spawning a browser", async () => {
+    const value = context("background");
+    const tools = createBrowserTools();
+    expect(tools.map((tool) => tool.name)).toContain("browser.background_launch");
+    const preview = await runTool(tools.find((tool) => tool.name === "browser.background_launch")!, { dryRun: true }, value);
+    expect(preview).toMatchObject({ ok: true, preview: true, tool: "browser.background_launch" });
+    const data = preview.data as { targetSummary?: string; confirmationRequired?: boolean };
+    expect(data.targetSummary).toContain("isolated profile");
+    expect(data.confirmationRequired).toBe(true);
+  });
 });

@@ -28,7 +28,7 @@ declare([
   "browser.generate_pairing_token", "browser.reset_pairing"
 ], stateChanging());
 declare([
-  "accessibility.focus_element", "accessibility.invoke_action", "accessibility.set_value", "app.open", "browser.click_element", "browser.fill_text", "browser.focus_element", "browser.open_url", "desktop.click", "desktop.double_click", "desktop.drag", "desktop.hotkey", "desktop.move_mouse", "desktop.right_click", "desktop.scroll", "desktop.type_text", "file.copy", "file.delete", "file.ensure_dir", "file.move", "file.write", "shell.run_safe", "window.focus"
+  "accessibility.focus_element", "accessibility.invoke_action", "accessibility.set_value", "app.open", "browser.background_launch", "browser.click_element", "browser.fill_text", "browser.focus_element", "browser.open_url", "desktop.click", "desktop.double_click", "desktop.drag", "desktop.hotkey", "desktop.move_mouse", "desktop.right_click", "desktop.scroll", "desktop.type_text", "file.copy", "file.delete", "file.ensure_dir", "file.move", "file.write", "shell.run_safe", "window.focus"
 ], stateChanging(true));
 declare(["browser.setup_begin", "browser.setup_approve", "browser.setup_cancel"], stateChanging(true));
 declare(["speech.play", "speech.stop", "speech.synthesize", "speech.transmission_execute"], stateChanging(true));

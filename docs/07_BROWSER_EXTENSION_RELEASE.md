@@ -62,6 +62,27 @@ One-time token pairing remains available only as a legacy repair path through
 
 Reconnect uses bounded exponential backoff with jitter, maximum 30-second interval and five-minute retry bursts. Existing browser alarm checks reset one bounded burst approximately once per minute while the extension remains installed, so AgentHost restarts recover without a permanent `reconnect_exhausted` dead-end. Operator Retry remains available for immediate recovery.
 
+## Background profile pairing (isolated offscreen work)
+
+Foreground pairing steals the user's screen. For background work, pair once
+inside the isolated profile, then run headless:
+
+1. Launch Chromium with the background profile headful once:
+   `chromium --user-data-dir=~/.agenthost/browser/profiles/background
+   --load-extension=~/.local/share/agenthost/browser-extension/chromium`
+   (or `browser.background_launch` with `headless:false` via a dry-run +
+   confirmation envelope).
+2. Complete the normal Pair with AgentHost flow in that window. The extension
+   reconnect secret persists inside the background profile only.
+3. Later headless launches (`browser.background_launch`, headless default)
+   reconnect automatically; `browser.background_status` reports worker
+   aliveness. The foreground profile is never touched.
+
+Firefox cannot serve as the background worker: its unsigned artifact needs
+`about:debugging` loading per session, and `--auto` fails closed. Chromium
+with `--load-extension` auto-enrolls and is the supported background path
+until store-signed releases exist.
+
 ## Uninstall
 
 1. Run confirmation-gated `browser.reset_pairing`.

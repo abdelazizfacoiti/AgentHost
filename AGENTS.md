@@ -90,10 +90,12 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 
 ## Environment gotchas
 
-- **AZERTY keyboard**: `xdotool type` breaks for special chars (`:/#`). Use `xdotool key` or clipboard paste instead.
+- **AZERTY keyboard**: `desktop.type_text` auto-routes ASCII letters/digits/space through `xdotool type` and everything else through clipboard paste. Install `xclip` or `xsel` or non-ASCII typing reports `clipboard backend missing` instead of mistyping.
+- **Background browser worker**: `browser.background_launch` (dry-run + confirmation) spawns detached headless Chromium in `~/.agenthost/browser/profiles/background/`; `browser.background_status` reports worker aliveness. Pair once headful in that profile, then headless launches reconnect. Firefox can't be the worker (`--auto` fails closed, unsigned XPI needs `about:debugging` per session).
 - **Draw.io**: Requires account/signup prompt that blocks automation. Use **Excalidraw** for quick drawing tasks.
 - **Firefox bridge**: Paired but connection can be unstable. `--auto` works for Chromium, fails closed for Firefox.
 - **Second Firefox window**: `xdotool windowactivate` may fail with `BadWindow`. Use `xdotool search --name <pattern>` to find correct window ID.
+- **Focus-safe desktop**: `window.focus` returns `previousWindow` (best effort) so agents can restore user focus; focus changes are reported, never silent.
 - **Control Room screenshot limit**: Default pagination limit is **50** (`limit()` in `control-room-store.ts` caps at `Math.min(100, Math.max(1, Math.floor(value)))`). Do not exceed 50 screenshots in a single query to avoid truncation errors.
 - **Live progress without watching apps**: `GET /api/v1/activity?limit=20` (same pagination bounds) feeds the Control Room “Live background work” panel; `browser.background_status` reports placement + isolated headless profile args without launching anything.
 

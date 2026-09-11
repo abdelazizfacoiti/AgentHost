@@ -179,6 +179,7 @@ describe("CapabilityRegistry", () => {
       "browser.get_extension_install_instructions",
       "browser.verify_pairing",
       "browser.background_status",
+      "browser.background_launch",
       "browser.list_tabs",
       "browser.get_active_tab",
       "browser.current_url",

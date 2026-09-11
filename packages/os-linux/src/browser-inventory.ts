@@ -1,4 +1,5 @@
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import path from "node:path";
 
@@ -88,6 +89,99 @@ export function backgroundChromiumArgs(input: { profileDir: string; extensionDir
     ...(input.extensionDir === undefined ? [] : [`--load-extension=${input.extensionDir}`])
   ];
   return { profileDir: input.profileDir, headless, args };
+}
+
+export interface BackgroundWorkerRecord {
+  pid: number;
+  profileDir: string;
+  executable: string;
+  args: string[];
+  startedAt: string;
+}
+
+export interface BackgroundWorkerStatus {
+  running: boolean;
+  profileDir: string;
+  pid?: number;
+  executable?: string;
+  startedAt?: string;
+  reason: string;
+}
+
+const CHROMIUM_EXECUTABLES = ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"] as const;
+
+async function firstExecutable(names: readonly string[], env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  for (const name of names) {
+    for (const directory of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+      try {
+        await access(path.join(directory, name), constants.X_OK);
+        return name;
+      } catch {
+        // Keep scanning PATH.
+      }
+    }
+  }
+  return undefined;
+}
+
+function workerFile(profileDir: string): string {
+  return path.join(profileDir, "worker.json");
+}
+
+/**
+ * Spawns a detached headless Chromium bound to the isolated background
+ * profile. Pairing is completed once, headful, in this same profile; the
+ * extension reconnect secret persists there so later headless launches
+ * reconnect without touching the user's screen. Records the worker pid under
+ * the profile dir for status checks. Never touches the foreground profile.
+ */
+export async function spawnBackgroundChromium(input: {
+  agentHostDir: string;
+  profileDir?: string;
+  extensionDir?: string;
+  headless?: boolean;
+  env?: NodeJS.ProcessEnv;
+}): Promise<{ pid: number; profileDir: string; executable: string; args: string[] }> {
+  const env = input.env ?? process.env;
+  const executable = await firstExecutable(CHROMIUM_EXECUTABLES, env);
+  if (executable === undefined) throw new Error("chromium_not_installed:No Chromium executable was found on PATH.");
+  const profileDir = input.profileDir ?? backgroundBrowserProfileDir(input.agentHostDir);
+  await mkdir(profileDir, { recursive: true, mode: 0o700 });
+  const launch = backgroundChromiumArgs({ profileDir, ...(input.extensionDir === undefined ? {} : { extensionDir: input.extensionDir }), headless: input.headless ?? true });
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(executable, launch.args, { detached: true, stdio: "ignore", env });
+  } catch {
+    throw new Error("background_worker_spawn_failed:Chromium could not be started.");
+  }
+  if (child.pid === undefined) throw new Error("background_worker_spawn_failed:Chromium did not report a pid.");
+  child.unref();
+  const record: BackgroundWorkerRecord = { pid: child.pid, profileDir, executable, args: launch.args, startedAt: new Date().toISOString() };
+  await writeFile(workerFile(profileDir), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  return { pid: record.pid, profileDir, executable, args: record.args };
+}
+
+/** Reads the recorded background worker and checks pid aliveness via /proc. */
+export async function backgroundWorkerStatus(
+  agentHostDir: string,
+  procfsRoot = "/proc"
+): Promise<BackgroundWorkerStatus> {
+  const profileDir = backgroundBrowserProfileDir(agentHostDir);
+  let record: BackgroundWorkerRecord;
+  try {
+    record = JSON.parse(await readFile(workerFile(profileDir), "utf8")) as BackgroundWorkerRecord;
+  } catch {
+    return { running: false, profileDir, reason: "No background worker has been launched in this profile." };
+  }
+  if (!Number.isInteger(record.pid) || record.pid <= 0) {
+    return { running: false, profileDir, reason: "Recorded background worker pid is invalid." };
+  }
+  try {
+    await access(path.join(procfsRoot, String(record.pid), "comm"), constants.R_OK);
+  } catch {
+    return { running: false, profileDir, pid: record.pid, ...(record.executable === undefined ? {} : { executable: record.executable }), reason: "Recorded background worker process is no longer running." };
+  }
+  return { running: true, profileDir, pid: record.pid, ...(record.executable === undefined ? {} : { executable: record.executable }), ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }), reason: "Background worker process is alive." };
 }
 
 export async function detectLinuxBrowsers(

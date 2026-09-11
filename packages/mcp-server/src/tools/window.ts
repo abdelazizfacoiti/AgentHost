@@ -153,7 +153,7 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
 
   const focus: AgentHostToolDefinition<FocusInput, WindowFocusResult | ActionPreviewResult, AgentHostMcpContext> = {
     name: "window.focus",
-    description: "Focuses a window when a safe backend and policy allow it.",
+    description: "Focuses a window when a safe backend and policy allow it. Returns previousWindow so the agent can restore user focus.",
     riskLevel: "medium",
     inputSchema: focusInputSchema,
     mcpInputSchema: {
