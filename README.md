@@ -36,7 +36,7 @@ Consequence tiers replace the old per-tool confirmation tax: LOW executes
 automatically, MEDIUM executes with logging, HIGH requires approval, CRITICAL
 requires explicit confirmation. `agenthost stop` (or Control Room Stop)
 halts state-changing tools immediately, independent of the model. Workflow
-replay and scheduler records remain metadata-only. Visual surfaces never
+replay and scheduler records are metadata-only. Visual surfaces never
 control target applications.
 
 ## Fastest start: release archive

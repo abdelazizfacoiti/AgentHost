@@ -82,7 +82,7 @@ export class ControlRoomServer {
       const origin = request.headers.origin;
       if (origin !== undefined && origin !== "http://127.0.0.1:" + this.config.port) return json(response, 403, { error: "control_room_origin_rejected" });
       if (request.method === "GET" && (request.url === "/" || request.url === "/index.html")) {
-        response.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" });
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "cache-control": "no-store" });
         response.end(CONTROL_ROOM_HTML);
         return;
       }

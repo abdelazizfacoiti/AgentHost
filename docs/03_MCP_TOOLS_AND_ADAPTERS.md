@@ -20,7 +20,7 @@ Each loaded definition has:
 
 ### Capability strategy registry
 
-`strategy.list`, `strategy.get`, `strategy.health`, `strategy.select`, and `strategy.explain_selection` expose redacted structural strategy metadata. `strategy.select` uses deterministic goal/profile/capability/adapter/Browser Bridge health filtering and stable scoring, then returns at most three bounded fallback IDs. Route tie order is native adapter, Browser Bridge, structured browser, accessibility, local OCR/vision, desktop, then guide. `strategy.verify_outcome` performs one fixed read-only verification checkpoint. `strategy.propose`, `strategy.review`, `strategy.activate`, `strategy.record_outcome`, `strategy.revalidate`, `strategy.disable`, and `strategy.archive` change local strategy metadata only. No strategy tool invokes browser, desktop, accessibility, file, shell, Forge, workflow, or scheduler execution. Local strategy activation requires explicit review and two independently verified signed-receipt outcomes; built-ins are trusted structural definitions.
+`strategy.list`, `strategy.get`, `strategy.health`, `strategy.select`, and `strategy.explain_selection` expose redacted structural strategy metadata. `strategy.select` uses deterministic goal/profile/capability/adapter/Browser Bridge health filtering and stable scoring, then returns at most three bounded fallback IDs. Recorded episodic memory adjusts the score (capped success bonus, linear failure penalty) and is named in the explanation. `strategy.record_episode` / `strategy.recall_episodes` write and read those bounded redacted episodes (30-day TTL; policy aborts are never evidence). Route tie order is native adapter, Browser Bridge, structured browser, accessibility, local OCR/vision, desktop, then guide. `strategy.verify_outcome` performs one fixed read-only verification checkpoint. `strategy.propose`, `strategy.review`, `strategy.activate`, `strategy.record_outcome`, `strategy.revalidate`, `strategy.disable`, and `strategy.archive` change local strategy metadata only. No strategy tool invokes browser, desktop, accessibility, file, shell, Forge, workflow, or scheduler execution. Local strategy activation requires explicit review and two independently verified signed-receipt outcomes; built-ins are trusted structural definitions.
 
 Missing/contradictory metadata and duplicate names fail closed. Disabled optional tools and generated Forge tool names are absent from both callable inventories.
 
@@ -69,6 +69,11 @@ Class: read-only or diagnostic. External effect: none. Dry-run/confirmation: not
 gate), and `agent.discover_capabilities` (runtime families, counts, adapters,
 browser/desktop availability). `task.create/status/update/log_event/pause/
 resume/complete` persist long-running goal state under `tasks/`.
+`task.execute_plan` runs a bounded (10-step, 8 KB) tool sequence against one
+active task: dry-run validation plus one plan token, stop/takeover gates
+before every step, per-step event logging, fail-fast with a replan hint.
+`agenthost task watch <id> [--follow] [--notify]` tails that log without
+watching the app.
 `agenthost task approve <id> [--max-risk low|medium]` (operator-only, no MCP
 tool) pre-approves a task's routine effects for 30 minutes: the central
 runner chains the exact dry-run + single-use confirmation server-side, so one
@@ -95,11 +100,11 @@ State-changing calls require a declared dry-run, policy/grant approval, and sess
 
 Examples: `desktop.get_active_window`, `desktop.get_capabilities`, `desktop.screenshot`, `desktop.click`, `desktop.type_text`, `desktop.hotkey`, `desktop.move_mouse`, `desktop.scroll`, `desktop.double_click`, `desktop.right_click`, `desktop.drag`, `window.list`, `window.focus`, `accessibility.get_tree`, `accessibility.find_element`, `accessibility.inspect_element`, `accessibility.invoke_action`, `accessibility.set_value`, `accessibility.focus_element`.
 
-Observation tools are read-only. Pointer, window, accessibility actions, and the current `desktop.screenshot` registration are classified state-changing by the loaded metadata and therefore use dry-run/confirmation baseline. Actions require active-window or exact accessibility/coordinate context where applicable. X11 is primary; Wayland returns clean unsupported/guide results.
+Observation tools are read-only. Pointer, window, accessibility actions, and the current `desktop.screenshot` registration are classified state-changing by the loaded metadata and therefore use dry-run/confirmation baseline. Actions require active-window or exact accessibility/coordinate context where applicable. `desktop.type_text` routes ASCII letters/digits/space through `xdotool type` and everything else through clipboard paste (install `xclip`/`xsel`); `window.focus` returns the previous window for focus restoration. X11 is primary; Wayland returns clean unsupported/guide results.
 
 ### Browser setup, observation, and actions
 
-Setup/diagnostics: `browser.detect`, `browser.setup_status`, `browser.diagnose_bridge`, `browser.generate_pairing_token`, `browser.reset_pairing`, `browser.get_extension_install_instructions`, `browser.verify_pairing`.
+Setup/diagnostics: `browser.detect` (includes the session holder for handoff decisions), `browser.setup_status`, `browser.diagnose_bridge`, `browser.generate_pairing_token`, `browser.reset_pairing`, `browser.get_extension_install_instructions`, `browser.verify_pairing`, `browser.background_status` (placement, isolated profile, worker aliveness; spawns nothing).
 
 Observation: `browser.list_tabs`, `browser.get_active_tab`, `browser.current_url`, `browser.get_page_context`, `browser.extract_text`, `browser.find_element`, `browser.wait_for_state`, `browser.get_form_state`, `browser.get_selected_text`.
 
@@ -111,7 +116,7 @@ Enrollment is browser-family scoped, identity/protocol/version checked, and
 stored as redacted local lifecycle metadata. Setup never returns reconnect
 secrets through status or logs; pairing approval remains explicit.
 
-Actions: `browser.open_url`, `browser.click_element`, `browser.fill_text`, `browser.focus_element` — website-agnostic. Financial and system-settings contexts are approval-gated instead of blanket-blocked (external/destructive financial effects still have no governed route); only credential/security contexts, password inputs, authentication, and CAPTCHA remain hard-blocked. Checkpoint failures now carry recovery guidance (re-observe, re-find, alternative capability).
+Actions: `browser.open_url`, `browser.click_element`, `browser.fill_text`, `browser.focus_element` — website-agnostic. `browser.background_launch` (confirmation-gated) spawns the detached headless worker in the isolated profile; `browser.release_session` (confirmation-gated) drops the single bridge session so the next paired device to reconnect — e.g. the worker — holds it (verify with `browser.detect`). Financial and system-settings contexts are approval-gated instead of blanket-blocked (external/destructive financial effects still have no governed route); only credential/security contexts, password inputs, authentication, and CAPTCHA remain hard-blocked. Checkpoint failures now carry recovery guidance (re-observe, re-find, alternative capability).
 
 The bridge is disabled by default, loopback-only, paired, fixed-command, bounded, and redacted. Actions require short-lived opaque tab/page-bound `elementId` references; direct selectors cannot execute actions. Navigation/action calls use dry-run and confirmation. Password, secret, login, CAPTCHA, MFA, and credential/security operations remain protected. Send, submit, upload, delete, and payment effects are governed by exact target/content/route bindings when a supported route exists; otherwise they return `action_unsupported` or guide-only. Communication reads require grants; financial/credential/admin content is protected.
 
@@ -160,6 +165,8 @@ V2 surface projection uses a versioned envelope and fixed trusted component regi
 ## Optional adapters
 
 `packages/app-blender` supplies `blender.run_python` only when `optionalAdapters.blender.enabled` is explicitly true. It is experimental, source `optional_adapter`, state-changing, reviewed-script, dry-run, confirmation-gated, bounded, output-root restricted, shell-free, and redacted. It is not a core product feature. Other adapters must declare the same generic execution policy before loading.
+
+`packages/app-ssh` is the second adapter and the first remote device: `ssh.run_command` runs one reviewed shell command on another machine over OpenSSH when `optionalAdapters.ssh.enabled` is explicitly true. Targets are strict argv (plain hostname/IP, login name, port), key authentication only (`BatchMode=yes`, no password prompts), blocked remote patterns stay blocked via the shared shell classifier, and output is bounded. The tool passes no local app identity to the classifier (no local app is automated); the device is bound in the confirmation target instead.
 
 ## Confirmation and result model
 

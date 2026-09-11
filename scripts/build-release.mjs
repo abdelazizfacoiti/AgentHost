@@ -39,7 +39,7 @@ if (browserBuild.status !== 0) throw new Error("browser_release_artifact_build_f
 await rm(stage, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 await mkdir(stage, { recursive: true, mode: 0o755 });
 async function copy(source, destination, options = {}) { await mkdir(path.dirname(destination), { recursive: true }); await cp(source, destination, { recursive: true, force: true, ...options }); }
-for (const packageName of ["core", "mcp-server", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "agenthost-cli"]) {
+for (const packageName of ["core", "mcp-server", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "app-ssh", "agenthost-cli"]) {
   await copy(path.join(root, "packages", packageName, "dist"), path.join(stage, "packages", packageName, "dist"));
   await copy(path.join(root, "packages", packageName, "package.json"), path.join(stage, "packages", packageName, "package.json"));
 }
@@ -58,7 +58,7 @@ for (const legalFile of LEGAL_FILES) {
 }
 if (await stat(path.join(root, "node_modules")).then(() => true).catch(() => false)) await copy(path.join(root, "node_modules"), path.join(stage, "node_modules"));
 await mkdir(path.join(stage, "node_modules", "@agenthost"), { recursive: true });
-for (const packageName of ["core", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "mcp-server"]) {
+for (const packageName of ["core", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "app-ssh", "mcp-server"]) {
   const link = path.join(stage, "node_modules", "@agenthost", packageName);
   await rm(link, { recursive: true, force: true }).catch(() => undefined);
   await symlink(path.join("..", "..", "packages", packageName), link, "junction");
@@ -83,7 +83,7 @@ await removeDanglingSymlinks(stage);
 const wrapper = `#!/usr/bin/env node\nimport { fileURLToPath } from "node:url";\nprocess.env.AGENTHOST_RELEASE_ROOT = fileURLToPath(new URL("..", import.meta.url));\nawait import(new URL("../packages/agenthost-cli/dist/index.js", import.meta.url));\n`;
 await mkdir(path.join(stage, "bin"), { recursive: true });
 await writeFile(path.join(stage, "bin", "agenthost.mjs"), wrapper, { mode: 0o755 }); await chmod(path.join(stage, "bin", "agenthost.mjs"), 0o755);
-for (const packageName of ["core", "mcp-server", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "agenthost-cli"]) {
+for (const packageName of ["core", "mcp-server", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "app-ssh", "agenthost-cli"]) {
   const packageManifest = JSON.parse(await readFile(path.join(stage, "packages", packageName, "package.json"), "utf8"));
   if (packageManifest.license !== PROJECT_LICENSE) {
     throw new Error(`release_package_license_invalid:${packageName}`);

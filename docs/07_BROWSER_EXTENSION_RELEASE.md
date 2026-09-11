@@ -77,6 +77,11 @@ inside the isolated profile, then run headless:
 3. Later headless launches (`browser.background_launch`, headless default)
    reconnect automatically; `browser.background_status` reports worker
    aliveness. The foreground profile is never touched.
+4. If the foreground browser holds the single bridge session instead,
+   hand control over explicitly: `browser.release_session`
+   (confirmation-gated), then `browser.detect` to verify the worker holds
+   it. Whoever reconnects first wins; queued commands are dropped with
+   the released session.
 
 Firefox cannot serve as the background worker: its unsigned artifact needs
 `about:debugging` loading per session, and `--auto` fails closed. Chromium
