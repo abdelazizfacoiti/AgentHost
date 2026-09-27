@@ -180,7 +180,10 @@ describe("Linux desktop helpers", () => {
 
   it("types ASCII directly and reports the previous window on focus", async () => {
     const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-bin-"));
-    await writeFile(bin + "/xdotool", "#!/bin/sh\nif [ \"$1\" = \"getactivewindow\" ]; then\n  if [ \"$2\" = \"getwindowpid\" ]; then\n    echo \"99999\"\n    echo \"$$\"\n    echo \"Test Window\"\n    exit 0\n  fi\n  echo \"99999\"\n  exit 0\nfi\nexit 0\n", "utf8");
+    // Emulates real xdotool: getactivewindow prints the wid on its own, while
+    // getwindowpid/getwindowname print with an explicit wid. (Chained
+    // `getactivewindow getwindowpid getwindowname` prints pid/title only.)
+    await writeFile(bin + "/xdotool", "#!/bin/sh\nif [ \"$1\" = \"getactivewindow\" ]; then\n  echo \"99999\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowpid\" ]; then\n  echo \"$$\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowname\" ]; then\n  echo \"Test Window\"\n  exit 0\nfi\nexit 0\n", "utf8");
     await writeFile(bin + "/wmctrl", "#!/bin/sh\nexit 0\n", "utf8");
     await chmod(bin + "/xdotool", 0o700);
     await chmod(bin + "/wmctrl", 0o700);
@@ -205,5 +208,36 @@ describe("Linux desktop helpers", () => {
     );
     expect(result).toMatchObject({ supported: false, typed: false, method: "clipboard" });
     expect(result.reason).toContain("xclip");
+  });
+
+  it("reads wid/pid/title from separate spawns and normalizes wmctrl hex ids", async () => {
+    const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-ids-"));
+    await writeFile(
+      bin + "/xdotool",
+      "#!/bin/sh\nif [ \"$1\" = \"getactivewindow\" ]; then\n  echo \"77777\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowpid\" ]; then\n  echo \"4242\"\n  if [ \"$3\" = \"getwindowname\" ]; then\n    echo \"Some Title\"\n  fi\n  exit 0\nfi\nexit 0\n",
+      "utf8"
+    );
+    // 0x1234 == 4660: wmctrl hex ids must fold to the decimal xdotool form.
+    await writeFile(bin + "/wmctrl", "#!/bin/sh\necho \"0x0001234 0 4242 0 0 800 600 N Some Title\"\nexit 0\n", "utf8");
+    await chmod(bin + "/xdotool", 0o700);
+    await chmod(bin + "/wmctrl", 0o700);
+    const env = { PATH: bin, DISPLAY: ":0", XDG_SESSION_TYPE: "x11" };
+
+    await expect(getLinuxActiveWindow({ env })).resolves.toMatchObject({
+      supported: true,
+      backend: "xdotool",
+      activeWindow: { windowId: "77777", pid: 4242, title: "Some Title" }
+    });
+
+    const listed = await listLinuxWindows({ includeTitles: true }, { env });
+    expect(listed.windows).toHaveLength(1);
+    expect(listed.windows[0]).toMatchObject({ windowId: "4660", pid: 4242 });
+
+    // Hex input focuses the same decimal window without a mismatch.
+    await expect(focusLinuxWindow({ windowId: "0x0001234" }, { env })).resolves.toMatchObject({
+      supported: true,
+      focused: true,
+      window: { windowId: "4660" }
+    });
   });
 });

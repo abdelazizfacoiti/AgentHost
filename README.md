@@ -1,47 +1,43 @@
 # AgentHost
 
-AgentHost is a local general-purpose computer-use agent runtime. It gives Codex
-and other agents a governed body on a Linux workstation: the model reasons
-about a goal and composes computer, browser, filesystem, shell, application,
-MCP, vision/OCR, speech, and skill capabilities to accomplish it — observing
-each result, verifying outcomes, and recovering from failures.
+[![ci](https://github.com/abdelazizfacoiti/AgentHost/actions/workflows/ci.yml/badge.svg)](https://github.com/abdelazizfacoiti/AgentHost/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![platform](https://img.shields.io/badge/platform-linux%20x86__64-lightgrey.svg)](docs/08_RELEASE_AND_OPERATIONS.md)
+[![node](https://img.shields.io/badge/node-20%2B-green.svg)](docs/08_RELEASE_AND_OPERATIONS.md)
 
-The runtime exposes capabilities; the model decides how to use them.
-Permissions are capability-based and configurable; safety (isolation, secrets,
-audit, emergency stop) is enforced by the runtime.
+**Give any AI agent a safe, visible body on a real computer.** AgentHost is a
+local, provider-agnostic computer-use runtime: the model reasons about a goal
+and composes computer, browser, filesystem, shell, application, vision/OCR,
+speech, and skill capabilities to accomplish it — observing each result,
+verifying outcomes, and recovering from failures. Every action passes through
+schema validation → risk classification → policy check → approval handling →
+execution → audit logging. And unlike other computer-use tools, **you can see
+every step as it happens**: an on-screen widget narrates each action and every
+click flashes a highlight ring at its target.
 
-AgentHost is universal and provider-agnostic. Gmail, WhatsApp, Slack, Blender,
-and other application names are examples only—not built-in product targets.
+## It really works — Hespress run, unedited screenshots
 
-## Status and support
+Asked to *"check the local news on Hespress"*, the agent focused Firefox,
+searched, clicked the first result, and verified the homepage:
 
-The current public boundary is a Linux x86_64 source checkout or verified
-Linux archive/CLI release.
+![Google results for hespress](.github/assets/demo-search-results.png)
 
-- Node.js 20+ and Python 3 are required host prerequisites.
-- X11 is the verified visible-overlay path; Wayland reports honest limitations.
-- Firefox and Chromium Browser Bridge extensions are currently unpacked/manual
-  development artifacts until signed/store releases are published.
-- The MCP server is stdio-based; browser and Control Room listeners are
-  loopback-only and disabled unless explicitly enabled.
-- The root npm package remains private; npm publication is not promised.
+![Hespress homepage](.github/assets/demo-hespress-home.png)
 
-The agent works in a loop: understand → plan → inspect → act → observe →
-verify → recover. Every important action has an observation path
-(`computer.observe_state`, screenshots, accessibility, browser state, command
-output). Tool errors are recoverable, not terminal; repeated identical
-failures trigger a change of capability, not a blind retry.
+While it worked, the operator saw this — no extra calls, no delay:
 
-Consequence tiers replace the old per-tool confirmation tax: LOW executes
-automatically, MEDIUM executes with logging, HIGH requires approval, CRITICAL
-requires explicit confirmation. `agenthost stop` (or Control Room Stop)
-halts state-changing tools immediately, independent of the model. Workflow
-replay and scheduler records are metadata-only. Visual surfaces never
-control target applications.
+```text
+Focusing window Firefox          ✓ completed
+Sending hotkey ctrl+t            ✓ completed
+Typing text 8 chars              ✓ completed
+Sending hotkey Enter             ✓ completed
+Clicking target (970, 130)       ✓ completed
+Clicking target (530, 365)       ✓ completed
+```
 
-## Fastest start: release archive
+Full sequence with exact tool calls: [`examples/web-research/`](examples/web-research/).
 
-For a downloaded, checksum-verified Linux archive:
+## 60-second start (release archive)
 
 ```bash
 sha256sum -c agenthost-v0.1.0-linux-x64.tar.gz.sha256
@@ -53,25 +49,85 @@ cd agenthost-v0.1.0-linux-x64
 ./bin/agenthost.mjs start
 ```
 
-The archive wrapper can be run directly. A local release install can instead
-create the `agenthost` command under `~/.local/bin`:
+No `sudo`, no system services, no silent installs — AgentHost writes only its
+own user directories. Then point any MCP client at it:
 
-```bash
-npm run release:install -- release/agenthost-v0.1.0-linux-x64.tar.gz
-agenthost doctor
-agenthost setup
-agenthost integrations codex add --apply
-agenthost start
+```json
+{
+  "mcpServers": {
+    "agenthost": { "command": "agenthost", "args": ["start"] }
+  }
+}
 ```
 
-AgentHost writes only its own user directories. These commands do not use
-`sudo`, install system packages, create a system service, or install a browser
-extension silently. See [release operations](docs/08_RELEASE_AND_OPERATIONS.md)
-for updates, rollback, and diagnostics.
+Works with Codex, Claude Code, Copilot, OpenCode, and any MCP client. Agent
+clients: don't ingest all 250+ tool schemas up front — pull
+`agenthost://capabilities.md` first, or paste `agenthost capabilities --markdown`
+into static configs. Contributors: [`git clone` path below](#source-checkout).
+
+## Why AgentHost
+
+| | AgentHost |
+|---|---|
+| **Safety model** | Risk tiers (LOW→auto, MEDIUM→logged, HIGH→approval, CRITICAL→explicit) + capability grants + exact-target confirmations + audit receipts on *every* tool |
+| **Visibility** | Working widget narrates each action (`Clicking target (520, 340)`); clicks flash a highlight ring; `task watch --follow` + Control Room live feed |
+| **Speed** | WindowId focus skips re-listing; 2s window-list cache; cached PATH lookups (see numbers below) |
+| **Provider-agnostic** | Any model via MCP stdio; lazy capability/skill resources keep system prompts small |
+| **Private by construction** | Loopback-only listeners, redacted logs/traces/overlays, emergency stop independent of the model |
+| **Verified** | 580+ tests, `build → lint → test`, CI on every push, smoke-tested MCP handshake |
+
+Browser control without the Browser Bridge? Structured DOM/tab access over a
+loopback bridge with explicit pairing — no cookies, passwords, storage, or
+arbitrary JS. When the bridge is unavailable, AgentHost degrades honestly to
+accessibility, OCR/vision, pointer fallback, or guide mode — never silently.
+
+## Honest performance numbers
+
+`npm run benchmark:desktop` on a live X11 workstation (non-destructive subset,
+21 iterations, real backends):
+
+| backend operation | median | p95 |
+|---|---|---|
+| active_window | 20.7 ms | 27.7 ms |
+| window_list (cold) | 17.1 ms | 24.5 ms |
+| window_list (warm cache) | 0.0 ms | 0.1 ms |
+| focus by windowId (no listing) | 20.8 ms | 26.9 ms |
+| screen geometry | 9.5 ms | 13.1 ms |
+| screenshot | 278.4 ms | 305.8 ms |
+
+No external benchmark claims — run it yourself and compare.
+
+## How it compares
+
+- **vs browser-only agents** (e.g. BrowserUse): AgentHost drives the whole
+  desktop — any app, terminal, files, hotkeys — not just web pages. Browser
+  work uses a paired extension bridge; everything else uses OS adapters.
+- **vs terminal coding agents** (e.g. OpenInterpreter, Cline): same local-first
+  spirit, but AgentHost adds GUI grounding (click/type/focus with active-window
+  verification), visual narration, and a uniform confirmation/audit pipeline
+  across *all* tools instead of shell-only approvals.
+- **vs cloud computer-use** (e.g. Claude/OpenAI operator-style products):
+  AgentHost runs on your machine, under your policy, with your data never
+  leaving the loopback interface. No account, no per-action API meter.
+
+## CLI
+
+```text
+agenthost doctor [--json]
+agenthost setup [--resume]
+agenthost start [--background] / stop / status
+agenthost control-room
+agenthost browser setup|status|reset
+agenthost task watch <id> [--follow] [--notify]
+agenthost task export <id> [--format md|html] [--out <path>]
+agenthost task approve <id> [--max-risk low|medium]
+```
+
+`task export` renders a run's redacted event log to shareable Markdown or
+self-contained HTML — post your agent's runs in issues and PRs.
+[Sample report](examples/task-reports/sample-hespress-run.md).
 
 ## Source checkout
-
-Use this path for contributors and local development:
 
 ```bash
 git clone https://github.com/abdelazizfacoiti/AgentHost.git
@@ -79,10 +135,10 @@ cd AgentHost
 npm install
 npm run build
 npm run smoke:mcp
+npm test && npm run lint && npm run benchmark:desktop
 ```
 
-Start the MCP server in a separate terminal. An isolated home keeps development
-state out of your normal AgentHost installation:
+Isolated dev home so experiments never touch your install:
 
 ```bash
 export AGENTHOST_HOME="$PWD/.agenthost"
@@ -90,216 +146,49 @@ export AGENTHOST_CONFIG="$PWD/.agenthost/config.json"
 npm run start:mcp
 ```
 
-Run the complete local verification suite with:
+## Browser Bridge pairing
 
 ```bash
-npm test
-npm run lint
-npm run benchmark:routing
-```
-
-## MCP client configuration
-
-After a release install, an MCP client can start AgentHost with:
-
-```json
-{
-  "mcpServers": {
-    "agenthost": {
-      "command": "agenthost",
-      "args": ["start"]
-    }
-  }
-}
-```
-
-For a source checkout, use the built MCP entrypoint and set the isolated home
-and config in the client environment:
-
-```json
-{
-  "mcpServers": {
-    "agenthost": {
-      "command": "node",
-      "args": ["/absolute/path/to/AgentHost/packages/mcp-server/dist/index.js"],
-      "env": {
-        "AGENTHOST_HOME": "/absolute/path/to/AgentHost/.agenthost",
-        "AGENTHOST_CONFIG": "/absolute/path/to/AgentHost/.agenthost/config.json"
-      }
-    }
-  }
-}
-```
-
-The server keeps normal diagnostics off stdout so MCP stdio remains valid.
-
-### For Codex, Claude Code, Copilot, OpenCode, and other agent clients
-
-Do not ingest all 250+ tool schemas up front. Pull the lazy MCP resources
-first — `agenthost://capabilities.md` (one condensed brief for system
-prompts), `agenthost://capabilities`, `agenthost://skills`, and
-`agenthost://status` — then `agent.discover_capabilities` and
-`skills.list/get` for detail. For static config files, paste the output of:
-
-```bash
-agenthost capabilities --markdown
-```
-
-## Browser Bridge: get connected quickly
-
-The Browser Bridge gives AgentHost structured tab and DOM information without
-cookies, passwords, browser storage, arbitrary JavaScript, or direct selector
-execution. It is disabled by default and binds only to `127.0.0.1`.
-
-### Installed release
-
-Choose one browser and run the explicit setup flow:
-
-```bash
-agenthost browser setup --browser firefox --apply
-# or:
-agenthost browser setup --browser chromium --apply
-# or (Chromium only): let AgentHost launch and pair the browser itself —
-# no manual extension install, no popup click:
 agenthost browser setup --browser chromium --auto --apply --approve
+# ..or Firefox (manual one-time load, then pair):
+agenthost browser setup --browser firefox --apply
 ```
 
-The command prepares the unpacked extension, enables the local bridge, waits
-for enrollment, verifies reconnect, and prints the exact extension directory.
-While it waits:
-
-1. Firefox: open `about:debugging#/runtime/this-firefox`, choose **Load
-   Temporary Add-on…**, and select the printed `manifest.json`.
-2. Chromium: open `chrome://extensions`, enable **Developer mode**, and choose
-   **Load unpacked** on the printed browser directory.
-3. Open the AgentHost extension popup and confirm the loopback port (default
-   `43117`).
-4. Choose **Pair with AgentHost**.
-5. Approve the exact extension identity in the AgentHost terminal prompt.
-6. Wait for reconnect verification, then run `agenthost browser status`.
-
-### Source checkout
-
-Prepare an isolated source setup, then start MCP in the same environment:
-
-```bash
-export AGENTHOST_HOME="$PWD/.agenthost"
-export AGENTHOST_CONFIG="$PWD/.agenthost/config.json"
-export AGENTHOST_BROWSER_EXTENSION_DIR="$PWD/.agenthost/browser-extension"
-npm run browser:setup
-```
-
-`npm run browser:setup` prepares both unpacked artifacts and prints their exact
-paths. It does not start enrollment. Choose one browser, then run the pairing
-command in Terminal 1:
-
-```bash
-npm run build
-npm run browser:pair -- --browser firefox --apply --approve
-# or: npm run browser:pair -- --browser chromium --apply --approve
-```
-
-Leave that command running. It starts the bounded local enrollment session and
-prints the exact manifest/directory to load. In Firefox use
-`about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…**; in
-Chromium use `chrome://extensions` → **Developer mode** → **Load unpacked**.
-Open the extension popup and click **Pair with AgentHost**. After the command
-reports that the Browser Bridge is ready, start normal MCP in Terminal 2:
-
-```bash
-npm run start:mcp
-```
-
-Do not use `npm run start:mcp` as the pairing command: it serves MCP but does
-not create an enrollment session. Use `browser.setup_status`,
-`browser.diagnose_bridge`, and `browser.verify_pairing` for recovery and live
-status. Fresh setup uses browser-side enrollment; one-time tokens are only a
-legacy repair path.
-
-Browser-side enrollment is the normal pairing path. One-time token pairing is
-retained only as a legacy repair flow; it is never required for a fresh setup.
-Pairing credentials are not logged, and a second browser session is rejected.
-
-### First safe browser check
-
-Use a public or user-controlled local test page—not a communication, financial,
-credential, MFA, CAPTCHA, or administration page—then call these fixed MCP
-tools in order:
-
-```text
-browser.detect
-browser.setup_status
-browser.verify_pairing
-browser.list_tabs
-browser.get_active_tab
-browser.current_url
-browser.get_page_context
-browser.find_element
-```
-
-Grant site access explicitly from the extension popup for the test origin.
-Element actions require short-lived opaque `elementId` references and remain
-subject to policy, grants, dry-run, confirmation, and verification. If the
-extension is unavailable, AgentHost reports a clean failure and may recommend
-accessibility, local OCR/vision, pointer fallback, or guide mode; it never
-switches silently.
-
-See [Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md) and
-[Browser Extension Release](docs/07_BROWSER_EXTENSION_RELEASE.md) for reset,
-reconnect, signing, and troubleshooting details.
-
-## Visual Copilot demo
-
-The demo uses authoritative redacted runtime activity and never clicks, types,
-navigates, moves the real pointer, or controls a target application:
-
-```bash
-npm run demo:visual-copilot -- --diagnose
-npm run demo:visual-copilot -- --headless
-npm run demo:visual-copilot -- --require-gui
-```
-
-Use `--diagnose` first on X11. `--require-gui` fails closed unless handshake,
-transparency, mapping, draw-ready, epoch, live-registration, and visibility
-acknowledgements all succeed. See [DEMO.md](DEMO.md) for manual checks.
+Load the printed unpacked extension directory, choose **Pair with AgentHost**,
+approve the exact identity in the terminal, and wait for reconnect
+verification. Full steps and recovery:
+[Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md).
 
 ## Safety boundary
 
-AgentHost is designed to be explicit and inspectable:
+- No public listeners, hidden persistence, or autonomous background work.
+- No credential extraction, CAPTCHA/MFA/login/payment bypass, or sudo.
+- No silent send/submit/upload/delete/pay/buy; no arbitrary generated code.
+- No browser cookies/storage/debugger access; no scheduler execution.
+- No raw private content, tokens, or secrets in logs, receipts, overlays, or
+  Control Room. Visual surfaces never control target applications.
 
-- no public network listener, hidden persistence, or autonomous background work;
-- no credential/secret extraction, CAPTCHA/MFA/login/payment bypass, or sudo;
-- no silent send, submit, upload, delete, archive, pay, buy, or publish;
-- no arbitrary generated JavaScript/Python execution;
-- no browser cookies/storage/debugger access;
-- no scheduler execution or workflow replay workers;
-- no raw private page text, OCR, screenshots, tokens, or secrets in logs,
-  receipts, metrics, overlays, or Control Room projections.
+Details: [Security, permissions, and logging](docs/04_SECURITY_PERMISSIONS_AND_LOGGING.md).
 
-Supported external or destructive effects remain exact-target, grant,
-confirmation, verification, and receipt governed. Unsupported, protected,
-ambiguous, or unverifiable effects return precise diagnostics or guide mode.
+## Roadmap
+
+- **P1 — less friction:** one-command pairing everywhere, `doctor --fix` for
+  missing system deps, Control Room first-run tour, hosted docs site.
+- **P2 — more humans:** macOS/Windows adapters (the `LinuxAutomation`
+  interface is already the portability contract), `npx`/brew/Docker
+  distribution, OSWorld-style eval harness, skill marketplace.
+- If you want any of these, open an issue — P2 order follows demand.
 
 ## Documentation and contribution
 
-- [Canonical documentation index](docs/INDEX.md)
-- [Product specification](docs/01_PRODUCT_SPEC.md)
-- [System architecture](docs/02_SYSTEM_ARCHITECTURE.md)
-- [MCP tools and adapters](docs/03_MCP_TOOLS_AND_ADAPTERS.md)
-- [Security, permissions, and logging](docs/04_SECURITY_PERMISSIONS_AND_LOGGING.md)
-- [Release operations](docs/08_RELEASE_AND_OPERATIONS.md)
-- [Privacy and support](docs/11_PRIVACY_AND_SUPPORT.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security reporting](SECURITY.md)
-- [Support](SUPPORT.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Documentation index](docs/INDEX.md) · [Product spec](docs/01_PRODUCT_SPEC.md) · [Architecture](docs/02_SYSTEM_ARCHITECTURE.md) · [MCP tools](docs/03_MCP_TOOLS_AND_ADAPTERS.md) · [Security](docs/04_SECURITY_PERMISSIONS_AND_LOGGING.md) · [Release ops](docs/08_RELEASE_AND_OPERATIONS.md) · [Privacy](docs/11_PRIVACY_AND_SUPPORT.md)
+- [Examples](examples/web-research/) · [Contributing](CONTRIBUTING.md) · [Security reporting](SECURITY.md) · [Support](SUPPORT.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
-Provider names in examples are illustrative only. New capabilities must remain
-app-agnostic, schema-validated, policy-gated, redacted, and auditable.
+If AgentHost does something cool on your machine, star the repo and post the
+`task export` — shared runs are how this gets better.
 
 ## License
 
-AgentHost is licensed under Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE),
-and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Host programs such as GTK3,
-Tesseract, eSpeak NG, and Bubblewrap remain separately licensed and are not
-bundled by AgentHost.
+Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE),
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Host programs (GTK3, Tesseract,
+eSpeak NG, Bubblewrap) stay separately licensed and are never bundled.

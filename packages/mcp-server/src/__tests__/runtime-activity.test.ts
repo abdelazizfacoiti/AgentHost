@@ -55,4 +55,33 @@ describe("runtime activity store and projections", () => {
     expect(tasks.filter((task) => task.source === "direct_activity")).toHaveLength(0);
     expect((await controlRoom.provider().health()).runtimeActivity).toMatchObject({ activeCount: 1, redacted: true });
   });
+
+  it("derives specific labels and safe detail without leaking text", () => {
+    const store = new RuntimeActivityStore("/tmp/agenthost-runtime-activity-detail", { ownerSessionId: "owner" });
+    const service = new RuntimeActivityService(store);
+    const click = service.startDirectTool("desktop.click", "owner", { x: 520, y: 340, activeWindow: { windowId: "42" }, dryRun: true });
+    expect(store.get(click.activityId)).toMatchObject({
+      labelKey: "clicking_target",
+      actionKey: "clicking_target",
+      detail: "(520, 340)"
+    });
+    const typing = service.startDirectTool("desktop.type_text", "owner", { text: "s3cr3t-p@ss", activeWindow: { windowId: "42" }, dryRun: true });
+    const typed = store.get(typing.activityId);
+    expect(typed).toMatchObject({ labelKey: "typing_text", detail: "typing 11 chars" });
+    expect(JSON.stringify(typed)).not.toContain("s3cr3t");
+    const focus = service.startDirectTool("window.focus", "owner", { appName: "Firefox" });
+    expect(store.get(focus.activityId)).toMatchObject({ labelKey: "focusing_window", detail: "focusing Firefox" });
+    const hotkey = service.startDirectTool("desktop.hotkey", "owner", { keys: ["ctrl", "l"], activeWindow: { windowId: "42" } });
+    expect(store.get(hotkey.activityId)).toMatchObject({ labelKey: "pressing_hotkey", detail: "ctrl+l" });
+  });
+
+  it("keeps the specific action label through dry-run previews", () => {
+    const store = new RuntimeActivityStore("/tmp/agenthost-runtime-activity-preview", { ownerSessionId: "owner" });
+    const service = new RuntimeActivityService(store);
+    const started = service.startDirectTool("desktop.click", "owner", { x: 10, y: 20, activeWindow: { windowId: "42" } });
+    const previewed = service.finishDirectTool(started.activityId, { ok: true, preview: true, riskLevel: "medium", error: null });
+    expect(previewed.state).toBe("inspecting");
+    expect(previewed.actionKey).toBe("clicking_target");
+    expect(previewed.detail).toBe("(10, 20)");
+  });
 });

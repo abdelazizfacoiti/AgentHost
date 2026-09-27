@@ -86,4 +86,20 @@ describe("global runtime activity overlay", () => {
     expect((await controller.projection()).visible).toBe(true);
     await controller.close();
   });
+
+  it("shows specific action detail in the working widget", async () => {
+    const renderer = new FakeRenderer();
+    const manager = new OverlayManager(renderer, { sessionId: "owner" });
+    const store = new RuntimeActivityStore("/tmp/agenthost-runtime-overlay-detail-test", { ownerSessionId: "owner" });
+    await store.ensureStructure();
+    const service = new RuntimeActivityService(store);
+    const controller = new RuntimeActivityOverlayController(manager, service, { enabled: true, position: "top_left", reducedMotion: true, terminalAutoHideMs: 1000, maxLabelChars: 80, showElapsed: true, showProgress: true, interactiveControls: false, screenshotSuppression: true, multiTaskSummary: true });
+    controller.start();
+    try {
+      service.startDirectTool("desktop.click", "owner", { x: 520, y: 340, activeWindow: { windowId: "42" } });
+      await flush();
+      const payloads = [...renderer.records.values()].map((record) => JSON.stringify(record.payload));
+      expect(payloads.some((payload) => payload.includes("Clicking target") && payload.includes("(520, 340)"))).toBe(true);
+    } finally { await controller.close(); }
+  });
 });

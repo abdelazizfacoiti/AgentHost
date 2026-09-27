@@ -284,7 +284,7 @@ export async function runTool<TInput, TData, TContext extends ToolExecutionConte
   const start = performance.now();
   let result!: ToolResult<TData>;
   let safetyDecision: SafetyDecision | undefined;
-  const runtimeActivity = context.runtimeActivity?.startDirectTool(definition.name, context.sessionId);
+  const runtimeActivity = context.runtimeActivity?.startDirectTool(definition.name, context.sessionId, rawInput);
   const parsed = definition.inputSchema.safeParse(rawInput ?? {});
 
   if (!parsed.success) {

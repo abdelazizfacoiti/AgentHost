@@ -385,4 +385,36 @@ describe("window MCP tools", () => {
       }
     });
   });
+
+  it("focuses by windowId without listing windows", async () => {
+    const context = createContext({
+      allowGenericClick: true
+    });
+    context.linux.checkDependency = async () => ({
+      found: true,
+      kind: "command",
+      name: "wmctrl",
+      commandPath: "/usr/bin/wmctrl",
+      reason: "Fake wmctrl."
+    });
+    const preview = await callTool(context, "window.focus", { windowId: "42", dryRun: true });
+    const token = confirmationTokenOf(preview);
+    const result = await callTool(context, "window.focus", { windowId: "42", confirmationToken: token });
+
+    expect(result).toMatchObject({
+      ok: true,
+      confirmation: {
+        accepted: true
+      },
+      data: {
+        supported: true,
+        focused: true,
+        window: {
+          windowId: "42"
+        }
+      }
+    });
+    // No window.list calls: the exact windowId binds the confirmation target.
+    expect(context.calls).toEqual(["window.focus"]);
+  });
 });

@@ -9,6 +9,7 @@ import readline from "node:readline/promises";
 import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, defaultAgentHostHome, defaultPublicConfigPath, legacyConfigPath, loadAgentHostConfig, normalizeSha256, readSha256Sidecar, redactLocalPath, sha256File } from "@agenthost/core";
 import { BrowserBridgeServer, BrowserSetupStore, browserSetupRecovery, expectedExtensionId, selectBrowserFromInventory, type BrowserInventoryEntry, type BrowserSetupRecord, type SupportedBrowserFamily } from "@agenthost/app-browser";
 import { detectLinuxBrowsers } from "@agenthost/os-linux";
+import { renderTaskHtml, renderTaskMarkdown } from "./task-export.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
@@ -251,7 +252,25 @@ async function taskCommand(args: ReturnType<typeof parseFlags>): Promise<Output>
     await safeWrite(path.join(taskDir, "approvals", "active.json"), JSON.stringify(approval, null, 2) + "\n");
     return { ok: true, command: "task approve", data: { taskId: safe, maxRisk, expiresAt: approval.expiresAt, note: "Routine low/medium effects chain server-side; high/critical still need per-action confirmation." } };
   }
-  return fail("task", "usage: agenthost task [list|status <id>|watch <id> [--follow] [--notify]|pause <id>|resume <id>|stop|approve <id>]");
+  if (action === "export" && id) {
+    return taskExportCommand(args, taskDir, id);
+  }
+  return fail("task", "usage: agenthost task [list|status <id>|watch <id> [--follow] [--notify]|export <id> [--format md|html] [--out <path>]|pause <id>|resume <id>|stop|approve <id>]");
+}
+
+async function taskExportCommand(args: ReturnType<typeof parseFlags>, taskDir: string, id: string): Promise<Output> {
+  // Shareable run report: renders the redacted event log (same bounded
+  // summaries as `task watch`) to Markdown or self-contained HTML.
+  const safe = id.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 200);
+  const record = await readJson(path.join(taskDir, `${safe}.json`));
+  if (!record) return fail("task export", "task_not_found");
+  const format = args.values.get("format") ?? "md";
+  if (format !== "md" && format !== "html") return fail("task export", "usage: agenthost task export <id> [--format md|html] [--out <path>]");
+  const content = format === "html" ? renderTaskHtml(record) : renderTaskMarkdown(record);
+  const out = path.resolve(args.values.get("out") ?? `agenthost-task-${safe}.${format === "html" ? "html" : "md"}`);
+  await safeWrite(out, content);
+  const events = Array.isArray(record.events) ? (record.events as unknown[]).length : 0;
+  return { ok: true, command: "task export", data: { taskId: safe, format, path: out, eventCount: events } };
 }
 async function capabilitiesCommand(args?: ReturnType<typeof parseFlags>): Promise<Output> {
   if (args?.flags.has("markdown") === true) {

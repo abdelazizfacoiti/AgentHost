@@ -77,7 +77,10 @@ function focusIdentity(input: FocusInput): { windowId?: string; appName?: string
   const identity: { windowId?: string; appName?: string; title?: string; pid?: number } = {};
 
   if (input.windowId !== undefined) {
-    identity.windowId = input.windowId;
+    // Canonical decimal form (see desktop.ts): fold wmctrl hex ids.
+    identity.windowId = /^0x[0-9a-fA-F]+$/.test(input.windowId.trim())
+      ? String(parseInt(input.windowId.trim(), 16))
+      : input.windowId;
   }
 
   if (input.appName !== undefined) {
@@ -120,6 +123,124 @@ function initialFocusSafety(runtime: ToolExecutionRuntime | undefined, context: 
     context.policy,
     createSafetyEvaluationContext(context)
   );
+}
+
+/**
+ * WindowId-only focus without a window listing. Both passes bind the exact
+ * `{ windowId }` target so the confirmation token stays exact-target.
+ */
+async function focusByWindowId(
+  windowId: string,
+  input: FocusInput,
+  context: AgentHostMcpContext,
+  runtime: ToolExecutionRuntime | undefined
+): Promise<ToolResult<WindowFocusResult | ActionPreviewResult>> {
+  const target = {
+    windowId: /^0x[0-9a-fA-F]+$/.test(windowId.trim()) ? String(parseInt(windowId.trim(), 16)) : windowId
+  };
+
+  if (runtime?.isDryRun) {
+    const preflightSafety = initialFocusSafety(runtime, context, input);
+    // Cheap honesty probe: a cached PATH lookup, no window enumeration.
+    let backend = "wmctrl";
+    let supported = true;
+    let backendReason = "Direct windowId focus path; window listing skipped.";
+    try {
+      const probe = await context.linux.checkDependency({ name: "wmctrl", kind: "command" });
+      supported = probe.found;
+      backend = probe.found ? "wmctrl" : "unavailable";
+      backendReason = probe.found
+        ? "Direct windowId focus path; window listing skipped."
+        : "Window focus requires wmctrl on X11.";
+    } catch {
+      /* Preview stays best-effort; execution is authoritative. */
+    }
+
+    return buildPreviewResult({
+      tool: "window.focus",
+      riskLevel: "medium",
+      strategy: "gui_control",
+      safety: preflightSafety,
+      targetSummary: summarizeWindow(target),
+      target: toWindowPreviewTarget(target),
+      supported,
+      backend,
+      confirmation: {
+        manager: context.confirmations,
+        sessionId: context.sessionId,
+        input,
+        target,
+        explanation: "Use this token to focus the exact previewed window before it expires.",
+        riskLevel: preflightSafety.riskLevel,
+        appSensitivity: preflightSafety.appSensitivity
+      },
+      reasons: previewReasons(`Would focus window ${windowId} directly. ${backendReason}`, preflightSafety.reasons),
+      saferAlternative: preflightSafety.blocked
+        ? guideAlternative("Sensitive app window focus should stay blocked or guide-only.")
+        : undefined,
+      observations: ["Previewed window focus without moving focus or listing windows."]
+    });
+  }
+
+  const postResolutionSafety = evaluateSafety(
+    {
+      tool: "window.focus",
+      actionType: "gui_click",
+      strategy: "gui_control"
+    },
+    context.policy,
+    createSafetyEvaluationContext(context)
+  );
+
+  if (!postResolutionSafety.allowed) {
+    return safetyFailure("window.focus", postResolutionSafety);
+  }
+
+  if (input.confirmationToken === undefined) {
+    const { code, reason } = missingConfirmationReason(postResolutionSafety);
+    return toolFailure({
+      tool: "window.focus",
+      riskLevel: postResolutionSafety.riskLevel,
+      strategy: "gui_control",
+      confirmation: confirmationRequired(reason),
+      error: {
+        code,
+        message: reason
+      },
+      observations: [reason]
+    });
+  }
+
+  const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
+    sessionId: context.sessionId,
+    tool: "window.focus",
+    input,
+    target,
+    riskLevel: postResolutionSafety.riskLevel
+  });
+
+  if (!verification.ok) {
+    return toolFailure({
+      tool: "window.focus",
+      riskLevel: postResolutionSafety.riskLevel,
+      strategy: "gui_control",
+      confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
+      error: {
+        code: "confirmation_rejected",
+        message: verification.reason
+      },
+      observations: [verification.reason]
+    });
+  }
+
+  return toolSuccess({
+    tool: "window.focus",
+    riskLevel: "medium",
+    strategy: "gui_control",
+    confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and window focus executed."),
+    data: await context.linux.focusWindow({ windowId }),
+    observations: ["Focused a visible window directly by windowId without a window listing."]
+  });
 }
 
 export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
@@ -177,6 +298,23 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
       isDryRun: (input) => input.dryRun === true
     },
     async handler(input, context, runtime): Promise<ToolResult<WindowFocusResult | ActionPreviewResult>> {
+      // Fast path: a windowId alone is already unique. Resolving it through a
+      // full listing (wmctrl plus one /proc read per window) is the dominant
+      // cost of app switching, and the OS backend activates windowIds
+      // directly. The confirmation token binds the exact windowId in both
+      // passes, so the dry-run/execute pair stays exact-target without an
+      // intermediate listing. Note: without a listing there is no resolved
+      // appName for policy refinement in this narrow case; downstream
+      // click/type still re-verify the real active window before acting.
+      const windowIdOnly =
+        input.windowId !== undefined &&
+        input.appName === undefined &&
+        input.title === undefined &&
+        input.pid === undefined;
+      if (windowIdOnly) {
+        return focusByWindowId(input.windowId as string, input, context, runtime);
+      }
+
       const windows = await context.linux.listWindows({
         limit: 500,
         includeTitles: true

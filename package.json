@@ -32,6 +32,7 @@
     "release:scan": "node scripts/scan-release.mjs",
     "release:verify": "node scripts/verify-release.mjs",
     "benchmark:routing": "node scripts/benchmark-routing.mjs",
+    "benchmark:desktop": "node scripts/benchmark-desktop.mjs",
     "release:install": "node scripts/install-release.mjs",
     "agenthost": "node packages/agenthost-cli/dist/index.js",
     "demo:overlay": "node scripts/demo-overlay.mjs",

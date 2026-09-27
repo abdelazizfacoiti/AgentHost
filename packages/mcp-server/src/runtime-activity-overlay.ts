@@ -104,10 +104,14 @@ export class RuntimeActivityOverlayController {
     const activeCount = this.#activity.store().list({ limit: 50 }).filter((item) => !["completed", "failed", "cancelled"].includes(item.state)).length;
     if (["completed", "failed", "cancelled"].includes(candidate.state) && this.#terminalTimer === undefined) this.#terminalTimer = setTimeout(() => { this.#terminalTimer = undefined; if (this.#overlayId !== undefined) void this.#manager.dismiss(this.#overlayId); this.#overlayId = undefined; }, Math.min(300_000, Math.max(0, this.#options.terminalAutoHideMs)));
     const progress = candidate.progress?.kind === "exact" && this.#options.showProgress ? candidate.progress : undefined;
+    const actionLabel = runtimeActivityLabel(candidate.actionKey, this.#options.maxLabelChars);
+    const detail = typeof candidate.detail === "string" && candidate.detail.trim().length > 0
+      ? candidate.detail.slice(0, Math.max(1, Math.min(120, this.#options.maxLabelChars)))
+      : undefined;
     const components = [
       { type: "heading" as const, text: "AgentHost working" },
       { type: "status_badge" as const, status: candidate.state === "blocked" || candidate.state === "failed" ? "danger" as const : candidate.state === "waiting_for_approval" || candidate.state === "paused" ? "warning" as const : candidate.state === "completed" ? "success" as const : "info" as const, text: candidate.state.replaceAll("_", " ") },
-      { type: "key_value" as const, key: "Action", value: runtimeActivityLabel(candidate.actionKey, this.#options.maxLabelChars) },
+      { type: "key_value" as const, key: "Action", value: detail === undefined ? actionLabel : `${actionLabel} ${detail}` },
       ...(this.#options.multiTaskSummary && activeCount > 1 ? [{ type: "key_value" as const, key: "Active tasks", value: String(Math.min(50, activeCount)) }] : []),
       ...(this.#options.showElapsed ? [{ type: "key_value" as const, key: "Elapsed", value: `${Math.floor(candidate.elapsedMs / 1000)}s` }] : []),
       ...(progress === undefined ? [] : [{ type: "progress" as const, value: progress.percent / 100, label: `${progress.completed}/${progress.total}` }]),

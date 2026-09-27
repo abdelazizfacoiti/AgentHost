@@ -20,6 +20,7 @@ import {
 } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
+import { announcePointAction } from "../action-announce.js";
 import type {
   AgentHostToolDefinition,
   AnyAgentHostToolDefinition,
@@ -161,7 +162,11 @@ function toActiveWindowContext(input: {
   const activeWindow: DesktopWindowContext = {};
 
   if (input.windowId !== undefined) {
-    activeWindow.windowId = input.windowId;
+    // Canonical decimal form: xdotool reports decimal ids while wmctrl
+    // listings historically used hex; fold hex so context matching holds.
+    activeWindow.windowId = /^0x[0-9a-fA-F]+$/.test(input.windowId.trim())
+      ? String(parseInt(input.windowId.trim(), 16))
+      : input.windowId;
   }
 
   if (input.appName !== undefined) {
@@ -940,7 +945,17 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         riskLevel: "medium",
         strategy: "gui_control",
         confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and desktop click executed."),
-        data: await context.linux.click(clickInput),
+        data: await (async () => {
+          // Spatial narration runs concurrently with the backend call: the
+          // highlight lands as the click fires and lingers on its TTL as a
+          // "what happened" afterglow. Best effort; never delays the click.
+          const announced = announcePointAction(context, input.x, input.y);
+          try {
+            return await context.linux.click(clickInput);
+          } finally {
+            await announced;
+          }
+        })(),
         observations: ["Clicked desktop coordinates using the generic GUI fallback backend."]
       });
     }
@@ -966,7 +981,9 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         if (input.confirmationToken === undefined) { const { code, reason } = missingConfirmationReason(safety); return toolFailure({ tool: name, riskLevel: safety.riskLevel, confirmation: confirmationRequired(reason), error: { code, message: reason }, observations: [reason] }); }
         const verification = context.confirmations.verifyAndConsume(input.confirmationToken, { sessionId: context.sessionId, tool: name, input, target, riskLevel: safety.riskLevel });
         if (!verification.ok) return toolFailure({ tool: name, riskLevel: safety.riskLevel, confirmation: rejectedConfirmation(verification.tokenId, verification.reason), error: { code: "confirmation_rejected", message: verification.reason }, observations: [verification.reason] });
-        const data = context.linux.pointer === undefined ? { supported: false, backend: "unavailable", performed: false, action, activeWindow: validation.activeWindow, reason: "Pointer backend is unavailable." } : await context.linux.pointer({ action, activeWindow: validation.activeWindow, ...(input.x === undefined ? {} : { x: input.x }), ...(input.y === undefined ? {} : { y: input.y }), ...(input.direction === undefined ? {} : { direction: input.direction }), ...(input.amount === undefined ? {} : { amount: input.amount }), ...(input.startX === undefined ? {} : { startX: input.startX }), ...(input.startY === undefined ? {} : { startY: input.startY }), ...(input.endX === undefined ? {} : { endX: input.endX }), ...(input.endY === undefined ? {} : { endY: input.endY }), ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }) });
+        // Highlight the pointer destination concurrently (drag: end point).
+        const announced = announcePointAction(context, input.x ?? input.endX, input.y ?? input.endY);
+        const data = context.linux.pointer === undefined ? { supported: false, backend: "unavailable", performed: false, action, activeWindow: validation.activeWindow, reason: "Pointer backend is unavailable." } : await context.linux.pointer({ action, activeWindow: validation.activeWindow, ...(input.x === undefined ? {} : { x: input.x }), ...(input.y === undefined ? {} : { y: input.y }), ...(input.direction === undefined ? {} : { direction: input.direction }), ...(input.amount === undefined ? {} : { amount: input.amount }), ...(input.startX === undefined ? {} : { startX: input.startX }), ...(input.startY === undefined ? {} : { startY: input.startY }), ...(input.endX === undefined ? {} : { endX: input.endX }), ...(input.endY === undefined ? {} : { endY: input.endY }), ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }) }).finally(async () => { await announced; });
         return toolSuccess({ tool: name, riskLevel: safety.riskLevel, strategy: "gui_control", confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and pointer action executed."), data, observations: [`${action} on ${summarizeWindow(validation.activeWindow)} executed with bounded pointer parameters.`] });
       }
     };

@@ -52,6 +52,8 @@ agenthost start [--background]
 agenthost stop
 agenthost status
 agenthost task [list|status|pause|resume|stop|approve]
+agenthost task watch <id> [--follow] [--notify]
+agenthost task export <id> [--format md|html] [--out <path>]
 agenthost capabilities
 agenthost permissions
 agenthost skills

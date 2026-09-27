@@ -151,6 +151,23 @@ function trimLine(value: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+/**
+ * Canonical window-id form is the decimal string. xdotool prints decimal
+ * ids while wmctrl prints `0x...` hex for the same window; comparing or
+ * echoing raw values across backends never matches, so hex is folded to
+ * decimal at every boundary. `wmctrl -i -a` accepts decimal ids.
+ */
+function normalizeWindowId(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (/^0x[0-9a-fA-F]+$/.test(trimmed)) {
+    return String(parseInt(trimmed, 16));
+  }
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 async function statBytes(filePath: string): Promise<number | undefined> {
   try {
     const stats = await lstat(filePath);
@@ -235,7 +252,9 @@ function contextMatches(current: DesktopWindowContext | undefined, expected: Des
     return false;
   }
 
-  if (expected.windowId !== undefined && current.windowId !== expected.windowId) {
+  const currentId = normalizeWindowId(current.windowId);
+  const expectedId = normalizeWindowId(expected.windowId);
+  if (expectedId !== undefined && currentId !== expectedId) {
     return false;
   }
 
@@ -385,21 +404,24 @@ async function activeWindowViaXdotool(
   xdotoolPath: string,
   context: LinuxDesktopContext = {}
 ): Promise<DesktopGetActiveWindowResult> {
-  // One spawn instead of three: xdotool chains subcommands against the window
-  // stack, so getactivewindow feeds getwindowpid/getwindowname directly. The
-  // numeric pid stays in the middle; the title (which may span lines) is last.
-  const combined = await runDesktopCommand(xdotoolPath, ["getactivewindow", "getwindowpid", "getwindowname"], context);
-  const lines = combined.stdout.split(/\r?\n/);
-  const windowId = (lines[0] ?? "").trim();
+  // getactivewindow only seeds the window stack when chained and prints
+  // nothing, so the wid needs its own spawn: a chained
+  // `getactivewindow getwindowpid getwindowname` yields `pid/title` and the
+  // pid is then misread as the window id. pid+title share a second spawn
+  // with an explicit wid (both print reliably with explicit args).
+  const widResult = await runDesktopCommand(xdotoolPath, ["getactivewindow"], context);
+  const windowId = normalizeWindowId(widResult.stdout.split(/\r?\n/)[0] ?? "");
 
-  if (combined.exitCode !== 0 || lines.length < 2 || windowId.length === 0) {
+  if (widResult.exitCode !== 0 || windowId === undefined) {
     return unsupportedResult("xdotool", "Unable to determine the active window on X11.", {});
   }
 
-  const pidValue = (lines[1] ?? "").trim();
+  const rest = await runDesktopCommand(xdotoolPath, ["getwindowpid", windowId, "getwindowname", windowId], context);
+  const lines = rest.stdout.split(/\r?\n/);
+  const pidValue = (lines[0] ?? "").trim();
   const pid = /^\d+$/.test(pidValue) ? Number(pidValue) : undefined;
   const appName = pid !== undefined ? await readProcessName(pid) : undefined;
-  const title = redactTitle(lines.slice(2).join("\n").trim() || undefined);
+  const title = redactTitle(lines.slice(1).join("\n").trim() || undefined);
   const activeWindow: DesktopWindowContext = {
     windowId
   };
@@ -679,8 +701,8 @@ async function previousActiveWindowId(
 ): Promise<string | undefined> {
   if (xdotoolPath === undefined) return undefined;
   try {
-    const id = (await runDesktopCommand(xdotoolPath, ["getactivewindow"], context)).stdout.trim();
-    return /^[0-9]+$/.test(id) ? id : undefined;
+    const id = normalizeWindowId((await runDesktopCommand(xdotoolPath, ["getactivewindow"], context)).stdout.trim());
+    return id !== undefined && /^[0-9]+$/.test(id) ? id : undefined;
   } catch {
     return undefined;
   }
@@ -830,7 +852,7 @@ function parseWmctrlLine(line: string): RawWindowSummary | undefined {
     return undefined;
   }
 
-  const windowId = match[1] ?? "";
+  const windowId = normalizeWindowId(match[1] ?? "");
   const pidRaw = match[2];
   const xRaw = match[3];
   const yRaw = match[4];
@@ -843,6 +865,10 @@ function parseWmctrlLine(line: string): RawWindowSummary | undefined {
   const width = Number(widthRaw);
   const height = Number(heightRaw);
   const title = trimLine(titleRaw);
+
+  if (windowId === undefined) {
+    return undefined;
+  }
 
   return {
     windowId,
@@ -977,7 +1003,8 @@ export async function listLinuxWindows(
 }
 
 function matchesWindowIdentity(window: RawWindowSummary, input: LinuxWindowFocusInput): boolean {
-  if (input.windowId !== undefined && window.windowId !== input.windowId) {
+  const wantedId = normalizeWindowId(input.windowId);
+  if (wantedId !== undefined && normalizeWindowId(window.windowId) !== wantedId) {
     return false;
   }
 
@@ -1000,10 +1027,11 @@ export async function focusLinuxWindow(
   input: LinuxWindowFocusInput,
   context: LinuxDesktopContext = {}
 ): Promise<WindowFocusResult> {
+  const normalizedWindowId = normalizeWindowId(input.windowId);
   const requestedWindow: DesktopWindowContext = {};
 
-  if (input.windowId !== undefined) {
-    requestedWindow.windowId = input.windowId;
+  if (normalizedWindowId !== undefined) {
+    requestedWindow.windowId = normalizedWindowId;
   }
 
   if (input.appName !== undefined) {
@@ -1021,7 +1049,8 @@ export async function focusLinuxWindow(
   // Fast path: a windowId is already unique. Activating it directly skips the
   // full wmctrl listing plus one /proc read per window, which is the
   // dominant cost of app switching. wmctrl itself fails on unknown ids.
-  if (input.windowId !== undefined && input.appName === undefined && input.title === undefined && input.pid === undefined) {
+  // Ids are canonical decimal strings; wmctrl -i accepts decimal ids.
+  if (normalizedWindowId !== undefined && input.appName === undefined && input.title === undefined && input.pid === undefined) {
     const focusSupport = await detectWindowFocusSupport(context);
     if (!focusSupport.supported) {
       return { supported: false, backend: focusSupport.backend, focused: false, window: requestedWindow, reason: focusSupport.reason };
@@ -1031,12 +1060,12 @@ export async function focusLinuxWindow(
       return { supported: false, backend: "unavailable", focused: false, window: requestedWindow, reason: "Window focus requires wmctrl on X11." };
     }
     const previousId = await previousActiveWindowId(await findCommandPath("xdotool", context), context);
-    const direct = await runDesktopCommand(directPath, ["-i", "-a", input.windowId], context);
+    const direct = await runDesktopCommand(directPath, ["-i", "-a", normalizedWindowId], context);
     return {
       supported: true,
       backend: "wmctrl",
       focused: direct.exitCode === 0,
-      window: summarizeWindow({ windowId: input.windowId }, true),
+      window: summarizeWindow({ windowId: normalizedWindowId }, true),
       ...(previousId === undefined ? {} : { previousWindow: { windowId: previousId } }),
       reason: direct.exitCode === 0 ? "Focused the requested X11 window through wmctrl." : "wmctrl could not focus the requested window."
     };

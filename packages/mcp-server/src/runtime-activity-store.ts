@@ -31,6 +31,8 @@ export interface RuntimeActivityBeginInput {
   source: RuntimeActivitySource;
   labelKey: RuntimeActivityLabelKey;
   actionKey?: RuntimeActivityLabelKey;
+  /** Short human-readable detail (coordinates, app name, char count). Never secrets. */
+  detail?: string;
   state?: RuntimeActivityState;
   operation?: string;
   progress?: RuntimeActivityProgress;
@@ -39,6 +41,8 @@ export interface RuntimeActivityBeginInput {
 export interface RuntimeActivityPatch {
   labelKey?: RuntimeActivityLabelKey;
   actionKey?: RuntimeActivityLabelKey;
+  /** Short human-readable detail (coordinates, app name, char count). Never secrets. */
+  detail?: string;
   state?: RuntimeActivityState;
   progress?: RuntimeActivityProgress;
   blockerCode?: string;
@@ -105,6 +109,7 @@ export class RuntimeActivityStore {
       source: input.source,
       labelKey: input.labelKey,
       actionKey: input.actionKey ?? input.labelKey,
+      ...(input.detail === undefined ? {} : { detail: bounded(input.detail, 120) }),
       state: input.state ?? "preparing",
       startedAt: timestamp,
       updatedAt: timestamp,
@@ -136,6 +141,7 @@ export class RuntimeActivityStore {
     }
     if (patch.labelKey !== undefined) record.labelKey = patch.labelKey;
     if (patch.actionKey !== undefined) record.actionKey = patch.actionKey;
+    if (patch.detail !== undefined) record.detail = bounded(patch.detail, 120);
     if (patch.progress !== undefined) record.progress = patch.progress;
     if (patch.blockerCode !== undefined) record.blockerCode = bounded(patch.blockerCode, 120);
     if (patch.warningCode !== undefined) record.warningCode = bounded(patch.warningCode, 120);
