@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fixed GTK3 overlay renderer. JSONL stdio only; never executes target-app actions."""
+"""Fixed GTK3 overlay renderer. JSONL stdio only; never executes target-app actions.
+
+Cards are small native GTK windows that update in place. Fullscreen transparent
+surfaces are created only for pointer/highlight primitives so ordinary cards
+never intercept desktop clicks.
+"""
 import hashlib
 import hmac
 import json
@@ -8,7 +13,6 @@ import os
 import sys
 import time
 import uuid
-from xml.sax.saxutils import escape as xml_escape
 
 try:
     import gi
@@ -20,9 +24,6 @@ try:
     except Exception:
         cairo = None
     try:
-        # Optional Debian `python3-gi-cairo` bridge. When absent, use the
-        # bounded GTK-widget renderer below; never create a Cairo callback
-        # that would fail after opening an opaque fullscreen window.
         if cairo is None:
             raise ImportError("pycairo_unavailable")
         gi.require_foreign("cairo")
@@ -35,8 +36,32 @@ except Exception as exc:
 
 VERSION = 1
 MAX_BYTES = 256 * 1024
-COMMANDS = {"hello", "capabilities", "show", "update", "dismiss", "clear", "emergency_hide", "state", "close"}
+COMMANDS = {"hello", "capabilities", "show", "update", "dismiss", "clear", "emergency_hide", "state", "events", "close"}
 EVENTS = {"accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested", "continue", "pause", "resume", "cancel", "acknowledge", "show_details", "hide", "retry_visual_render", "inspect_diagnostics", "open_control_room", "review_prepared_action", "emergency_hide", "close_control_surface"}
+SURFACE_TYPES = {"pointer", "arrow", "highlight", "spotlight"}
+CARD_TYPES = {"widget", "tooltip", "instruction_card", "approval_card", "warning", "progress", "checkpoint_result", "status_toast", "comparison", "cancel_control", "emergency_stop_control"}
+CARD_WIDTH = 380
+CARD_MARGIN = 24
+MAX_CARD_HEIGHT = 620
+CHECK_GLYPHS = {"done": "✓", "failed": "✕", "active": "●", "pending": "○"}
+STATUS_CAIRO = {
+    "neutral": (0.30, 0.36, 0.48, 0.95),
+    "info": (0.11, 0.37, 0.75, 0.95),
+    "success": (0.13, 0.48, 0.26, 0.95),
+    "warning": (0.69, 0.38, 0.02, 0.95),
+    "danger": (0.71, 0.18, 0.18, 0.95),
+}
+STATUS_CLASS = {"neutral": "ah-badge-neutral", "info": "ah-badge-info", "success": "ah-badge-success", "warning": "ah-badge-warning", "danger": "ah-badge-danger"}
+STATUS_HEX = {
+    "neutral": "#4d5a75",
+    "info": "#1d5fc2",
+    "success": "#1f7a42",
+    "warning": "#b06205",
+    "danger": "#c22f2f",
+}
+ICON_GLYPHS = {"info": "i", "success": "✓", "warning": "!", "danger": "×", "check": "✓", "close": "×", "pointer": "➤"}
+DIM_CAIRO = (0.60, 0.64, 0.70, 1)
+WARN_CAIRO = (0.95, 0.70, 0.20, 1)
 
 
 def now_iso():
@@ -60,65 +85,6 @@ def color_for(style, alpha=1.0):
     }
     r, g, b = colors.get(semantic, colors["neutral"])
     return r, g, b, alpha
-
-
-# Pretty live-widget palette. Hex twins feed Pango markup on the
-# GTK-widget fallback path; cairo tuples feed the Cairo path.
-STATUS_CAIRO = {
-    "neutral": (0.30, 0.36, 0.48, 0.95),
-    "info": (0.11, 0.37, 0.75, 0.95),
-    "success": (0.13, 0.48, 0.26, 0.95),
-    "warning": (0.69, 0.38, 0.02, 0.95),
-    "danger": (0.71, 0.18, 0.18, 0.95),
-}
-STATUS_HEX = {
-    "neutral": "#4d5a75",
-    "info": "#1d5fc2",
-    "success": "#1f7a42",
-    "warning": "#b06205",
-    "danger": "#c22f2f",
-}
-ICON_GLYPHS = {
-    "info": "i",
-    "success": "✓",
-    "warning": "!",
-    "danger": "×",
-    "check": "✓",
-    "close": "×",
-    "pointer": "➤",
-}
-DIM_CAIRO = (0.60, 0.64, 0.70, 1)
-DIM_HEX = "#9aa3b2"
-WARN_CAIRO = (0.95, 0.70, 0.20, 1)
-WARN_HEX = "#f0b233"
-
-
-def component_rows(payload):
-    """Bounded trusted-component rows for widget payloads."""
-    if not isinstance(payload, dict):
-        return []
-    components = payload.get("components")
-    if isinstance(components, list):
-        return [c for c in components if isinstance(c, dict)][:12]
-    if isinstance(payload.get("text"), str):
-        return [{"type": "text", "text": payload.get("text")}]
-    return []
-
-
-def card_content_height(payload):
-    """Pretty cards grow with their rows instead of clipping at 160px."""
-    height = 60  # title + padding
-    for component in component_rows(payload):
-        kind = component.get("type")
-        if kind == "progress":
-            height += 46
-        elif kind in {"status_badge", "heading"}:
-            height += 32
-        elif kind == "divider":
-            height += 14
-        else:
-            height += 24
-    return max(120, min(560, height))
 
 
 def rounded_rect(cr, x, y, width, height, radius):
@@ -153,13 +119,85 @@ def draw_text(cr, text, x, y, size=16, color=(1, 1, 1, 1), max_width=520, weight
     return line_y + size * 1.35
 
 
+def component_rows(payload):
+    if not isinstance(payload, dict):
+        return []
+    components = payload.get("components")
+    if isinstance(components, list):
+        return [c for c in components if isinstance(c, dict)][:30]
+    if isinstance(payload.get("text"), str):
+        return [{"type": "text", "text": payload.get("text")}]
+    return []
+
+
+def card_content_height(payload):
+    height = 60
+    for component in component_rows(payload):
+        kind = component.get("type")
+        if kind == "progress":
+            height += 46
+        elif kind == "checklist":
+            items = component.get("items") if isinstance(component.get("items"), list) else []
+            height += 26 + 24 * max(1, min(8, len(items)))
+        elif kind in {"status_badge", "heading", "spinner"}:
+            height += 32
+        elif kind == "divider":
+            height += 14
+        else:
+            height += 24
+    return max(120, min(MAX_CARD_HEIGHT, height))
+
+
+_XSHAPE = {"ready": None, "x11": None, "xext": None, "display": None}
+
+
+def clear_x11_input_shape(gdk_window):
+    try:
+        xid = int(gdk_window.get_xid())
+    except Exception:
+        return False
+    try:
+        import ctypes
+        import ctypes.util
+
+        state = _XSHAPE
+        if state["ready"] is None:
+            x11 = ctypes.CDLL(ctypes.util.find_library("X11"))
+            xext = ctypes.CDLL(ctypes.util.find_library("Xext"))
+            x11.XOpenDisplay.restype = ctypes.c_void_p
+            x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            x11.XFlush.argtypes = [ctypes.c_void_p]
+            xext.XShapeCombineRectangles.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_ulong,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_void_p,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+            ]
+            xext.XShapeCombineRectangles.restype = None
+            display = x11.XOpenDisplay(None)
+            state.update(x11=x11, xext=xext, display=display)
+            state["ready"] = bool(display)
+        if not state["ready"]:
+            return False
+        state["xext"].XShapeCombineRectangles(state["display"], xid, 2, 0, 0, None, 0, 0, 0)
+        state["x11"].XFlush(state["display"])
+        return True
+    except Exception:
+        return False
+
+
 class Renderer:
     def __init__(self):
         self.token = None
         self.session_id = "renderer"
-        self.windows = []
-        self.surface_roots = []
-        self.interactive = {}
+        self.cards = {}
+        self.surface_windows = []
+        self.surface_fixed = []
         self.records = {}
         self.events = []
         self.emergency_hidden = False
@@ -168,7 +206,7 @@ class Renderer:
         self.renderer_epoch = 0
         self.last_render_reason = None
         self.widget_css_ready = False
-        self.tick_source = GLib.timeout_add(33, self.tick)
+        self.monitor_source = GLib.timeout_add_seconds(2, self.monitor_tick)
 
     def capability(self):
         display = Gdk.Display.get_default()
@@ -214,7 +252,7 @@ class Renderer:
             "drawingBackend": "cairo" if CAIRO_FOREIGN_AVAILABLE else "gtk3-widgets",
             "cairoCallbacks": CAIRO_FOREIGN_AVAILABLE,
             "reason": reason,
-            "limitations": limitations + ([] if CAIRO_FOREIGN_AVAILABLE else ["PyGObject Cairo foreign bindings are unavailable; bounded GTK widgets render cards and targets."]),
+            "limitations": limitations + ([] if CAIRO_FOREIGN_AVAILABLE else ["PyGObject Cairo foreign bindings are unavailable; pointer primitives use GTK widgets with X11 input shaping."]),
         }
 
     def monitor_geometries(self):
@@ -228,266 +266,42 @@ class Renderer:
             result.append((geometry.x, geometry.y, geometry.width, geometry.height, monitor.get_scale_factor()))
         return result
 
-    def destroy_windows(self):
-        for window in self.windows:
-            window.destroy()
-        self.windows = []
-        self.surface_roots = []
-        self.draw_ready = set()
-        for window in list(self.interactive.values()):
-            window.destroy()
-        self.interactive = {}
-
-    def rebuild(self):
-        self.destroy_windows()
-        capability = self.capability()
-        if not capability.get("supported"):
-            self.last_render_reason = capability.get("reason", "overlay_transparency_unavailable")
-            self.monitor_signature = tuple(self.monitor_geometries())
-            return False
-        self.last_render_reason = None
-        geometries = self.monitor_geometries()
-        signature = tuple(geometries)
-        self.monitor_signature = signature
-        for monitor_index, geometry in enumerate(geometries):
-            window = Gtk.Window(type=Gtk.WindowType.POPUP)
-            window.set_decorated(False)
-            window.set_keep_above(True)
-            window.set_skip_taskbar_hint(True)
-            window.set_accept_focus(False)
-            window.set_focus_on_map(False)
-            window.set_app_paintable(True)
-            # Resolve visual from default X11 screen before realization. Some
-            # GTK builds return no visual from an unrealized popup window,
-            # which otherwise leaves an opaque black fullscreen surface.
-            screen = Gdk.Screen.get_default()
-            if screen is not None:
-                window.set_screen(screen)
-            visual = screen.get_rgba_visual() if screen is not None else None
-            if screen is None:
-                self.last_render_reason = "overlay_screen_unavailable"
-                self.destroy_windows()
-                return False
-            self.ensure_widget_css(screen)
-            if visual is None:
-                self.last_render_reason = "overlay_transparency_unavailable"
-                self.destroy_windows()
-                return False
-            window.set_visual(visual)
-            if CAIRO_FOREIGN_AVAILABLE:
-                area = Gtk.DrawingArea()
-                area.set_app_paintable(True)
-                area.connect("draw", self.draw_surface, (monitor_index,) + geometry)
-                window.add(area)
-            else:
-                root = Gtk.Fixed()
-                root.set_app_paintable(True)
-                root.get_style_context().add_class("agenthost-overlay-surface")
-                window.add(root)
-                self.surface_roots.append((root, (monitor_index,) + geometry))
-            window.move(geometry[0], geometry[1])
-            window.set_default_size(geometry[2], geometry[3])
-            window.show_all()
-            window.get_window().set_keep_above(True) if window.get_window() is not None else None
-            gdk_window = window.get_window()
-            if gdk_window is not None:
-                if CAIRO_FOREIGN_AVAILABLE:
-                    try:
-                        gdk_window.input_shape_combine_region(cairo.Region(), 0, 0)
-                    except Exception:
-                        gdk_window.set_pass_through(True)
-                else:
-                    gdk_window.set_pass_through(True)
-            self.windows.append(window)
-        if not CAIRO_FOREIGN_AVAILABLE:
-            for root, geometry in self.surface_roots:
-                self.render_widget_surface(root, geometry)
-                self.draw_ready.add(geometry[0])
-        for record in self.records.values():
-            if self.is_interactive(record):
-                self.create_interactive(record)
-        return True
-
-    def ensure_widget_css(self, screen):
-        if self.widget_css_ready or screen is None:
-            return
-        provider = Gtk.CssProvider()
-        provider.load_from_data(b"""
-        .agenthost-overlay-surface { background-color: rgba(0,0,0,0); }
-        .agenthost-overlay-card { background-color: rgba(10,13,21,0.96); border: 2px solid #4d8dff; border-radius: 12px; padding: 12px; color: #f5f7ff; }
-        .agenthost-overlay-warning { border-color: #e3a82b; }
-        .agenthost-overlay-danger { border-color: #e05b5b; }
-        .agenthost-overlay-highlight { background-color: rgba(45,126,255,0.10); border: 3px solid #4d8dff; border-radius: 10px; }
-        .agenthost-overlay-pointer { color: #75aaff; font-size: 30px; }
-        .agenthost-overlay-title { color: #f5f7ff; font-weight: bold; font-size: 16px; }
-        .agenthost-overlay-text { color: #d5dbea; font-size: 13px; }
-        .agenthost-overlay-progress trough { background-color: rgba(30,35,48,0.92); border-radius: 8px; min-height: 16px; }
-        .agenthost-overlay-progress progress { background-color: #4d8dff; border-radius: 8px; }
-        """, -1)
-        Gtk.StyleContext.add_provider_for_screen(screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        self.widget_css_ready = True
-
-    def widget_label(self, text, style_class="agenthost-overlay-text"):
-        label = Gtk.Label(label=safe_text(text, 500))
-        label.set_xalign(0.0)
-        label.set_line_wrap(True)
-        label.set_max_width_chars(80)
-        label.get_style_context().add_class(style_class)
-        return label
-
-    def widget_markup(self, markup, style_class="agenthost-overlay-text"):
-        label = Gtk.Label()
-        label.set_markup(markup)
-        label.set_xalign(0.0)
-        label.set_line_wrap(True)
-        label.set_max_width_chars(80)
-        label.get_style_context().add_class(style_class)
-        return label
-
-    def widget_row(self, component):
-        """Pretty per-component widget for the no-Cairo fallback path."""
-        if not isinstance(component, dict):
+    def workarea(self):
+        display = Gdk.Display.get_default()
+        if display is None:
             return None
-        kind = component.get("type")
-        if kind == "heading":
-            return self.widget_markup("<b><span size='larger'>%s</span></b>" % xml_escape(safe_text(component.get("text", ""), 200)))
-        if kind == "status_badge":
-            status = component.get("status") if component.get("status") in STATUS_HEX else "neutral"
-            return self.widget_markup("<span background='%s' foreground='white'><b> %s </b></span>" % (
-                STATUS_HEX[status], xml_escape(safe_text(component.get("text", ""), 80))))
-        if kind == "key_value":
-            key = xml_escape(safe_text(component.get("key", ""), 60))
-            value = xml_escape(safe_text(component.get("value", ""), 200))
-            return self.widget_markup("<span foreground='%s'>%s:</span> %s" % (DIM_HEX, key, value) if key else value)
-        if kind == "progress":
-            try:
-                value = max(0.0, min(1.0, float(component.get("value", 0.0))))
-            except Exception:
-                value = 0.0
-            bar = Gtk.ProgressBar()
-            bar.get_style_context().add_class("agenthost-overlay-progress")
-            bar.set_fraction(value)
-            bar.set_show_text(False)
-            label = component.get("label")
-            if isinstance(label, str) and label:
-                row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-                row.pack_start(bar, False, False, 0)
-                row.pack_start(self.widget_markup("<small>%s</small>" % xml_escape(safe_text(label, 120))), False, False, 0)
-                return row
-            return bar
-        if kind == "warning":
-            return self.widget_markup("<span foreground='%s'><b>! %s</b></span>" % (
-                WARN_HEX, xml_escape(safe_text(component.get("text", ""), 300))))
-        if kind == "divider":
-            return Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        if kind == "icon":
-            token = component.get("token") if component.get("token") in STATUS_HEX else "neutral"
-            glyph = ICON_GLYPHS.get(component.get("token"), "i")
-            return self.widget_markup("<span background='%s' foreground='white' size='large'><b> %s </b></span>" % (
-                STATUS_HEX[token], xml_escape(glyph)))
-        text = component.get("text") or component.get("label") or ""
-        if isinstance(text, str) and text:
-            return self.widget_label(text)
-        return None
+        monitor = display.get_primary_monitor()
+        if monitor is None:
+            monitor = display.get_monitor(0)
+        if monitor is None:
+            return None
+        try:
+            return monitor.get_workarea()
+        except Exception:
+            return None
 
-    def render_widget_surface(self, root, geometry):
-        monitor_index, ox, oy, monitor_width, monitor_height, _scale = geometry
-        for record in list(self.records.values()):
-            policy = (record.get("payload") or {}).get("displayPolicy", "primary")
-            if policy != "all" and monitor_index != 0:
-                continue
-            if not self.is_interactive(record):
-                self.render_widget_record(root, record, ox, oy, monitor_width, monitor_height)
-
-    def render_widget_record(self, root, record, ox, oy, monitor_width, monitor_height):
-        payload = record.get("payload") or {}
-        kind = payload.get("type", "widget")
-        bounds = self.target_bounds(record)
-        x, y, width, height = bounds
-        target = payload.get("target") if isinstance(payload, dict) else {}
-        if not isinstance(target, dict) or (target.get("bounds") is None and target.get("point") is None):
-            placement = payload.get("placement", "top_left")
-            width, height, margin = 360, 160, 24
-            x = (monitor_width - width) / 2 if placement in {"top_center", "bottom_center"} else monitor_width - width - margin if placement in {"top_right", "bottom_right"} else margin
-            y = monitor_height - height - margin if placement in {"bottom_left", "bottom_center", "bottom_right"} else margin
-        x, y = int(x - ox), int(y - oy)
-        width, height = int(max(32, min(width, monitor_width))), int(max(32, min(height, monitor_height)))
-        if kind in {"pointer", "arrow"}:
-            widget = self.widget_label("➤", "agenthost-overlay-pointer")
-            width, height = 48, 48
-        elif kind in {"highlight", "spotlight"}:
-            widget = Gtk.Frame()
-            widget.get_style_context().add_class("agenthost-overlay-highlight")
-        elif kind == "progress":
-            widget = Gtk.ProgressBar()
-            widget.get_style_context().add_class("agenthost-overlay-progress")
-            try:
-                widget.set_fraction(max(0.0, min(1.0, float(payload.get("progress", payload.get("value", 0.0))))))
-            except Exception:
-                widget.set_fraction(0.0)
-            height = 18
-        else:
-            frame = Gtk.Frame()
-            frame.get_style_context().add_class("agenthost-overlay-card")
-            style = payload.get("style") if isinstance(payload.get("style"), dict) else {}
-            if style.get("semantic") == "warning": frame.get_style_context().add_class("agenthost-overlay-warning")
-            if style.get("semantic") == "danger": frame.get_style_context().add_class("agenthost-overlay-danger")
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-            title = payload.get("label") or payload.get("title") or payload.get("text") or kind
-            box.pack_start(self.widget_label(title, "agenthost-overlay-title"), False, False, 0)
-            for component in component_rows(payload):
-                row = self.widget_row(component)
-                if row is not None:
-                    box.pack_start(row, False, False, 0)
-            frame.add(box); widget = frame
-            width, height = max(width, 280), max(height, card_content_height(payload))
-        root.put(widget, x, y)
-        widget.set_size_request(width, height)
-        widget.show_all()
-
-    def visibility_counts(self):
-        for _index in range(8):
+    def pump(self, iterations=8):
+        for _index in range(iterations):
             while Gtk.events_pending():
                 Gtk.main_iteration_do(False)
-        visible = 0
-        for window in self.windows:
-            gdk_window = window.get_window()
-            if gdk_window is not None and (not hasattr(gdk_window, "get_mapped") or gdk_window.get_mapped()):
-                visible += 1
-        interactive = 0
-        for window in self.interactive.values():
-            gdk_window = window.get_window()
-            if gdk_window is not None and (not hasattr(gdk_window, "get_mapped") or gdk_window.get_mapped()):
-                interactive += 1
-        return visible, interactive
 
-    def operation_ack(self, command, acknowledgement, overlay_id=None, reason=None):
-        visible, interactive = self.visibility_counts()
-        transparent = 0
-        for window in self.windows:
-            try:
-                if window.get_visual() is not None:
-                    transparent += 1
-            except Exception:
-                pass
-        return {
-            "command": command,
-            "acknowledgement": acknowledgement,
-            "rendererEpoch": self.renderer_epoch,
-            "visibleWindowCount": visible,
-            "interactiveWindowCount": interactive,
-            "transparentWindowCount": transparent,
-            "drawReadyCount": len(self.draw_ready),
-            "visible": bool(visible > 0 and len(self.draw_ready) >= len(self.windows) and transparent >= visible),
-            "liveSurfaceRegistered": bool(overlay_id is not None and overlay_id in self.records),
-            **({"overlayId": overlay_id} if overlay_id is not None else {}),
-            **({"reason": reason} if reason is not None else {}),
-        }
+    def destroy_cards(self):
+        for card in list(self.cards.values()):
+            window = card.get("window")
+            if window is not None:
+                window.destroy()
+        self.cards = {}
 
-    def is_interactive(self, record):
-        payload = record.get("payload") if isinstance(record, dict) else {}
-        interaction = payload.get("interaction") if isinstance(payload, dict) else {}
-        return isinstance(interaction, dict) and interaction.get("interactive") is True
+    def destroy_surfaces(self):
+        for window in self.surface_windows:
+            window.destroy()
+        self.surface_windows = []
+        self.surface_fixed = []
+
+    def destroy_windows(self):
+        self.destroy_cards()
+        self.destroy_surfaces()
+        self.draw_ready = set()
 
     def target_bounds(self, record):
         payload = record.get("payload") if isinstance(record, dict) else {}
@@ -503,112 +317,590 @@ class Renderer:
             return float(point.get("x", 0)) - 24, float(point.get("y", 0)) - 24, 48, 48
         return 100, 100, 360, 180
 
-    def create_interactive(self, record):
-        bounds = self.target_bounds(record)
-        x, y, width, height = bounds
-        width = min(max(width, 180), 640)
-        height = min(max(height, 80), 420)
+    def is_interactive(self, record):
+        payload = record.get("payload") if isinstance(record, dict) else {}
+        interaction = payload.get("interaction") if isinstance(payload, dict) else {}
+        return isinstance(interaction, dict) and interaction.get("interactive") is True
+
+    def allowed_events(self, record):
+        payload = record.get("payload") if isinstance(record, dict) else {}
+        interaction = payload.get("interaction") if isinstance(payload, dict) else {}
+        values = interaction.get("allowedEvents") if isinstance(interaction, dict) else None
+        return set(value for value in values if isinstance(value, str) and value in EVENTS) if isinstance(values, list) else set()
+
+    def dismiss_event(self, record):
+        payload = record.get("payload") if isinstance(record, dict) else {}
+        interaction = payload.get("interaction") if isinstance(payload, dict) else {}
+        if not isinstance(interaction, dict) or interaction.get("dismissible") is not True:
+            return None
+        allowed = self.allowed_events(record)
+        if "dismissed" in allowed:
+            return "dismissed"
+        if "hide" in allowed:
+            return "hide"
+        return None
+
+    def ensure_widget_css(self, screen):
+        if self.widget_css_ready or screen is None:
+            return
+        provider = Gtk.CssProvider()
+        provider.load_from_data(b"""
+        window { background-color: rgba(0,0,0,0); }
+        .ah-card { background-image: linear-gradient(145deg, rgba(24,28,39,0.98), rgba(13,16,24,0.98)); border-width: 1px; border-style: solid; border-color: rgba(126,156,210,0.30); border-radius: 16px; color: #eef2fa; }
+        .ah-surface { background-color: rgba(0,0,0,0); }
+        .ah-highlight { background-color: rgba(45,126,255,0.10); border-width: 3px; border-style: solid; border-color: #4d8dff; border-radius: 10px; }
+        .ah-title { color: #f7f9ff; font-weight: bold; font-size: 16px; }
+        .ah-subtitle { color: #aab4c8; font-size: 12px; }
+        .ah-heading { color: #f2f5fc; font-weight: bold; font-size: 14px; }
+        .ah-text { color: #c8d1e2; font-size: 13px; }
+        .ah-dim { color: #9aa6bc; font-size: 12px; }
+        .ah-key { color: #8794ac; font-size: 12px; }
+        .ah-value { color: #e7ecf7; font-size: 13px; font-weight: 600; }
+        .ah-warning { color: #f2c46d; font-size: 13px; }
+        .ah-danger { color: #ff9b9b; font-size: 13px; }
+        .ah-success { color: #7ddfa0; }
+        .ah-active { color: #7db4ff; }
+        .ah-pending { color: #7b8699; }
+        .ah-failed { color: #ff8f8f; }
+        .ah-check { font-size: 14px; font-weight: bold; }
+        .ah-badge { border-radius: 999px; padding-top: 2px; padding-bottom: 2px; padding-left: 10px; padding-right: 10px; font-size: 12px; font-weight: bold; }
+        .ah-badge-neutral { background-color: rgba(148,163,184,0.16); color: #cbd5e1; }
+        .ah-badge-info { background-color: rgba(59,130,246,0.20); color: #9cc2ff; }
+        .ah-badge-success { background-color: rgba(52,211,153,0.18); color: #8ef0c2; }
+        .ah-badge-warning { background-color: rgba(245,184,64,0.18); color: #ffd58a; }
+        .ah-badge-danger { background-color: rgba(248,113,113,0.18); color: #ffadad; }
+        .ah-divider { background-color: rgba(148,163,184,0.20); min-height: 1px; }
+        .ah-progress { min-height: 8px; }
+        .ah-progress trough { background-color: rgba(148,163,184,0.20); border-radius: 6px; min-height: 8px; }
+        .ah-progress progress { background-color: #5b9dff; border-radius: 6px; min-height: 8px; }
+        .ah-button { background-image: none; background-color: rgba(148,163,184,0.16); border-width: 1px; border-style: solid; border-color: rgba(148,163,184,0.22); border-radius: 9px; color: #e7ecf7; padding-top: 7px; padding-bottom: 7px; padding-left: 14px; padding-right: 14px; font-size: 13px; font-weight: bold; }
+        .ah-button:hover { background-color: rgba(148,163,184,0.26); }
+        .ah-primary { background-image: none; background-color: #2f6fdf; border-width: 1px; border-style: solid; border-color: #4f8bf0; color: #ffffff; }
+        .ah-primary:hover { background-color: #3b7cf0; }
+        .ah-stop { background-image: none; background-color: rgba(220,55,55,0.22); border-width: 1px; border-style: solid; border-color: rgba(255,120,120,0.45); color: #ffb3b3; }
+        .ah-stop:hover { background-color: rgba(235,70,70,0.30); }
+        .ah-close { background-image: none; background-color: transparent; border-style: none; color: #9aa6bc; font-size: 16px; padding-left: 4px; padding-right: 4px; }
+        .ah-close:hover { color: #f0f4ff; }
+        """, -1)
+        Gtk.StyleContext.add_provider_for_screen(screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.widget_css_ready = True
+
+    def label(self, text, style_class="ah-text", limit=500):
+        widget = Gtk.Label(label=safe_text(text, limit))
+        widget.set_xalign(0.0)
+        widget.set_line_wrap(True)
+        widget.set_max_width_chars(48)
+        widget.get_style_context().add_class(style_class)
+        return widget
+
+    def margin(self, widget, top=0, start=0, end=0, bottom=0):
+        widget.set_margin_top(top)
+        widget.set_margin_start(start)
+        widget.set_margin_end(end)
+        widget.set_margin_bottom(bottom)
+        return widget
+
+    def new_popup(self, focus_required, click_through=False):
         window = Gtk.Window(type=Gtk.WindowType.POPUP)
         window.set_decorated(False)
+        window.set_title("AgentHost Overlay")
         window.set_keep_above(True)
         window.set_skip_taskbar_hint(True)
-        interaction = (record.get("payload") or {}).get("interaction", {})
-        focus_required = isinstance(interaction, dict) and interaction.get("focus") == "when_required"
         window.set_accept_focus(focus_required)
         window.set_focus_on_map(focus_required)
-        if not CAIRO_FOREIGN_AVAILABLE:
-            event_box = Gtk.EventBox()
-            event_box.get_style_context().add_class("agenthost-overlay-card")
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-            payload = record.get("payload") or {}
-            box.pack_start(self.widget_label(payload.get("title") or payload.get("label") or payload.get("type", "overlay"), "agenthost-overlay-title"), False, False, 0)
-            for component in payload.get("components", []) if isinstance(payload, dict) else []:
-                if not isinstance(component, dict):
-                    continue
-                event = component.get("event")
-                label = component.get("label") or component.get("text")
-                if component.get("type") in {"button", "choice"} and isinstance(label, str) and isinstance(event, str):
-                    button = Gtk.Button(label=safe_text(label, 200))
-                    button.connect("clicked", self.widget_interactive_event, record, event)
-                    box.pack_start(button, False, False, 0)
-                elif isinstance(label, str):
-                    box.pack_start(self.widget_label(label), False, False, 0)
-            event_box.add(box)
-            event_box.connect("key-press-event", self.interactive_key, record)
-            window.add(event_box)
-            window.move(int(x), int(y))
-            window.set_default_size(int(width), int(height))
-            window.show_all()
-            self.interactive[record.get("overlayId")] = window
+        window.set_app_paintable(True)
+        screen = Gdk.Screen.get_default()
+        if screen is not None:
+            window.set_screen(screen)
+            self.ensure_widget_css(screen)
+        visual = screen.get_rgba_visual() if screen is not None else None
+        if visual is not None:
+            window.set_visual(visual)
+        gdk_window = window.get_window()
+        if click_through:
+            if gdk_window is not None:
+                self.make_click_through(gdk_window)
+            window.connect("map-event", self.on_click_through_map)
+        return window
+
+    def on_click_through_map(self, window, _event):
+        self.make_click_through(window.get_window())
+        return False
+
+    def make_click_through(self, gdk_window):
+        if gdk_window is None:
+            return False
+        if CAIRO_FOREIGN_AVAILABLE:
+            try:
+                gdk_window.input_shape_combine_region(cairo.Region(), 0, 0)
+                return True
+            except Exception:
+                pass
+        try:
+            gdk_window.set_pass_through(True)
+        except Exception:
+            pass
+        return clear_x11_input_shape(gdk_window)
+
+    def fade_in(self, window, record):
+        animation = (record.get("payload") or {}).get("animation") if isinstance(record.get("payload"), dict) else None
+        if isinstance(animation, dict) and animation.get("reducedMotion") in {"instant", "none"}:
+            window.set_opacity(1.0)
             return
-        area = Gtk.DrawingArea()
-        area.set_can_focus(focus_required)
-        area.add_events(Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.KEY_PRESS_MASK)
-        area.connect("draw", self.draw_interactive, record)
-        area.connect("button-release-event", self.interactive_click, record)
-        area.connect("key-press-event", self.interactive_key, record)
-        window.add(area)
-        window.move(int(x), int(y))
-        window.set_default_size(int(width), int(height))
-        window.show_all()
-        self.interactive[record.get("overlayId")] = window
+        window.set_opacity(0.0)
+        start = time.monotonic()
 
-    def widget_interactive_event(self, _button, record, event):
-        if event in EVENTS:
-            self.events.append({"eventId": "event_" + uuid.uuid4().hex, "overlayId": record.get("overlayId"), "event": event, "createdAt": now_iso(), "ownerSessionId": self.session_id})
-            self.events = self.events[-100:]
+        def step():
+            try:
+                if not window.get_visible():
+                    return False
+                progress = min(1.0, (time.monotonic() - start) / 0.12)
+                window.set_opacity(progress)
+                return progress < 1.0
+            except Exception:
+                return False
 
-    def draw_surface(self, _area, cr, geometry):
-        # Clear with SOURCE on the RGBA visual. Using OVER here leaves the
-        # window's default opaque background behind the overlay primitives.
-        cr.set_operator(cairo.OPERATOR_SOURCE)
-        cr.set_source_rgba(0, 0, 0, 0)
-        cr.paint()
-        cr.set_operator(cairo.OPERATOR_OVER)
-        monitor_index, ox, oy, monitor_width, monitor_height, _scale = geometry
-        for record in list(self.records.values()):
-            policy = (record.get("payload") or {}).get("displayPolicy", "primary")
-            if policy != "all" and monitor_index != 0:
+        GLib.timeout_add(16, step)
+
+    def fade_out(self, window):
+        start = time.monotonic()
+
+        def step():
+            try:
+                if not window.get_visible():
+                    return False
+                progress = 1.0 - min(1.0, (time.monotonic() - start) / 0.09)
+                window.set_opacity(max(0.0, progress))
+                if progress <= 0.0:
+                    window.destroy()
+                    return False
+                return True
+            except Exception:
+                return False
+
+        GLib.timeout_add(16, step)
+
+    def build_row(self, component):
+        kind = component.get("type")
+        if kind == "heading":
+            widget = self.label(component.get("text", ""), "ah-heading", 200)
+            return {"kind": kind, "data": component, "widget": widget, "update": lambda value, target=widget: target.set_text(safe_text(value.get("text", ""), 200))}
+        if kind in {"text", "warning"}:
+            style = "ah-warning" if kind == "warning" else "ah-text"
+            widget = self.label(("! " if kind == "warning" else "") + safe_text(component.get("text", ""), 500), style)
+            prefix = "! " if kind == "warning" else ""
+
+            def update(value, target=widget, lead=prefix):
+                target.set_text(lead + safe_text(value.get("text", ""), 500))
+
+            return {"kind": kind, "data": component, "widget": widget, "update": update}
+        if kind == "status_badge":
+            badge = self.label(component.get("text", ""), "ah-badge " + STATUS_CLASS.get(component.get("status"), "ah-badge-neutral"), 80)
+            self.margin(badge, 0, 0, 0, 0)
+            holder = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            holder.pack_start(badge, False, False, 0)
+
+            def update(value, target=badge):
+                status = value.get("status") if value.get("status") in STATUS_CLASS else "neutral"
+                target.set_text(safe_text(value.get("text", ""), 80))
+                context = target.get_style_context()
+                for name in STATUS_CLASS.values():
+                    context.remove_class(name)
+                context.add_class(STATUS_CLASS[status])
+
+            return {"kind": kind, "data": component, "widget": holder, "update": update}
+        if kind == "progress":
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            bar = Gtk.ProgressBar()
+            bar.get_style_context().add_class("ah-progress")
+            bar.set_show_text(False)
+            label = self.label(component.get("label", ""), "ah-dim", 120)
+            box.pack_start(bar, False, False, 0)
+            box.pack_start(label, False, False, 0)
+
+            def update(value, target=bar, caption=label):
+                try:
+                    fraction = max(0.0, min(1.0, float(value.get("value", 0.0))))
+                except Exception:
+                    fraction = 0.0
+                target.set_fraction(fraction)
+                caption.set_text(safe_text(value.get("label", ""), 120))
+                caption.set_visible(bool(caption.get_text()))
+
+            return {"kind": kind, "data": component, "widget": box, "update": update}
+        if kind == "spinner":
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=9)
+            spinner = Gtk.Spinner()
+            spinner.set_size_request(16, 16)
+            spinner.start()
+            label = self.label(component.get("label", ""), "ah-text", 200)
+            box.pack_start(spinner, False, False, 0)
+            box.pack_start(label, True, True, 0)
+
+            def update(value, target=label):
+                target.set_text(safe_text(value.get("label", ""), 200))
+                target.set_visible(bool(target.get_text()))
+
+            return {"kind": kind, "data": component, "widget": box, "update": update}
+        if kind == "checklist":
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+
+            def fill(items):
+                for child in box.get_children():
+                    box.remove(child)
+                    child.destroy()
+                for item in items[:8]:
+                    state = item.get("state") or ("done" if item.get("checked") else "pending")
+                    if state not in CHECK_GLYPHS:
+                        state = "pending"
+                    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                    marker = self.label(CHECK_GLYPHS[state], "ah-check ah-" + state, 4)
+                    marker.set_size_request(18, -1)
+                    row.pack_start(marker, False, False, 0)
+                    row.pack_start(self.label(item.get("label", ""), "ah-text" if state != "pending" else "ah-dim", 200), True, True, 0)
+                    box.pack_start(row, False, False, 0)
+                box.show_all()
+
+            fill(component.get("items") if isinstance(component.get("items"), list) else [])
+
+            def update(value, target=box):
+                fill(value.get("items") if isinstance(value.get("items"), list) else [])
+
+            return {"kind": kind, "data": component, "widget": box, "update": update}
+        if kind == "key_value":
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            key = self.label(component.get("key", ""), "ah-key", 60)
+            key.set_size_request(96, -1)
+            value = self.label(component.get("value", ""), "ah-value", 200)
+            row.pack_start(key, False, False, 0)
+            row.pack_start(value, True, True, 0)
+
+            def update(item, key_target=key, value_target=value):
+                key_target.set_text(safe_text(item.get("key", ""), 60))
+                value_target.set_text(safe_text(item.get("value", ""), 200))
+
+            return {"kind": kind, "data": component, "widget": row, "update": update}
+        if kind == "comparison":
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            before = self.label(component.get("before", ""), "ah-dim", 300)
+            after = self.label(component.get("after", ""), "ah-text", 300)
+            box.pack_start(before, False, False, 0)
+            box.pack_start(after, False, False, 0)
+
+            def update(value, old=before, new=after):
+                old.set_text(safe_text(value.get("before", ""), 300))
+                new.set_text(safe_text(value.get("after", ""), 300))
+
+            return {"kind": kind, "data": component, "widget": box, "update": update}
+        if kind == "divider":
+            divider = Gtk.Box()
+            divider.get_style_context().add_class("ah-divider")
+            divider.set_size_request(-1, 1)
+            return {"kind": kind, "data": component, "widget": divider, "update": lambda _value: None}
+        if kind == "icon":
+            token = component.get("token") if component.get("token") in {"info", "success", "warning", "danger", "check", "close", "pointer"} else "info"
+            widget = self.label(ICON_GLYPHS.get(token, "i"), "ah-check ah-active", 4)
+            widget.set_size_request(18, -1)
+            return {"kind": kind, "data": component, "widget": widget, "update": lambda _value: None}
+        if kind == "image_reference":
+            widget = self.label(component.get("alt", ""), "ah-dim", 300)
+            return {"kind": kind, "data": component, "widget": widget, "update": lambda value, target=widget: target.set_text(safe_text(value.get("alt", ""), 300))}
+        return None
+
+    def build_body(self, card, components):
+        body = card["body"]
+        for child in body.get_children():
+            body.remove(child)
+            child.destroy()
+        rows = []
+        for component in components:
+            row = self.build_row(component)
+            if row is not None:
+                rows.append(row)
+                body.pack_start(row["widget"], False, False, 0)
+        card["rows"] = rows
+        body.show_all()
+
+    def update_body(self, card, components):
+        current = card["rows"]
+        kinds = [component.get("type") for component in components]
+        rebuild = len(current) != len(components) or any(row["kind"] != kind for row, kind in zip(current, kinds))
+        if rebuild:
+            self.build_body(card, components)
+            return
+        for row, component in zip(current, components):
+            if row["data"] != component:
+                row["update"](component)
+                row["data"] = component
+
+    def build_footer(self, card, components, record):
+        footer = card["footer"]
+        for child in footer.get_children():
+            footer.remove(child)
+            child.destroy()
+        interactive = self.is_interactive(record)
+        allowed = self.allowed_events(record)
+        for component in components:
+            event = component.get("event")
+            if component.get("type") not in {"button", "choice"} or not isinstance(event, str):
                 continue
-            if not self.is_interactive(record):
-                self.draw_record(cr, record, ox, oy, monitor_width, monitor_height)
-        self.draw_ready.add(geometry[0])
+            button = Gtk.Button(label=safe_text(component.get("label", ""), 200))
+            button.set_relief(Gtk.ReliefStyle.NONE)
+            button.set_focus_on_click(False)
+            button.get_style_context().add_class("ah-button")
+            if event in {"resume", "continue", "accepted"}:
+                button.get_style_context().add_class("ah-primary")
+            elif event in {"emergency_stop_requested", "cancel", "cancelled"}:
+                button.get_style_context().add_class("ah-stop")
+            enabled = interactive and event in allowed
+            button.set_sensitive(enabled)
+            if enabled:
+                button.connect("clicked", lambda _button, current=record, name=event: self.emit(current, name))
+            footer.pack_start(button, False, False, 0)
+        card["footer_signature"] = [component for component in components if component.get("type") in {"button", "choice"}]
+        footer.set_visible(len(footer.get_children()) > 0)
+        card["separator"].set_visible(len(footer.get_children()) > 0)
+        footer.show_all()
+
+    def build_header(self, card, record):
+        header = card["header"]
+        for child in header.get_children():
+            header.remove(child)
+            child.destroy()
+        payload = record.get("payload") or {}
+        title = self.label(payload.get("title") or payload.get("label") or "AgentHost", "ah-title", 200)
+        title.set_ellipsize(3)
+        title.set_line_wrap(False)
+        title.set_max_width_chars(38)
+        drag = Gtk.EventBox()
+        drag.add(title)
+        drag.connect("button-press-event", self.start_drag, card["window"])
+        header.pack_start(drag, True, True, 0)
+        close_event = self.dismiss_event(record)
+        button = None
+        if close_event is not None:
+            button = Gtk.Button(label="✕")
+            button.set_relief(Gtk.ReliefStyle.NONE)
+            button.set_focus_on_click(False)
+            button.get_style_context().add_class("ah-close")
+            button.connect("clicked", lambda _button, current=record, name=close_event: self.emit(current, name))
+            header.pack_start(button, False, False, 0)
+        card["title"] = title
+        card["close_button"] = button
+        card["close_event"] = close_event
+        header.show_all()
+
+    def start_drag(self, _widget, event, window):
+        if event.button == 1:
+            window.begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
         return False
 
-    def draw_interactive(self, _area, cr, record):
-        allocation = _area.get_allocation()
-        cr.set_source_rgba(0.05, 0.07, 0.11, 0.96)
-        rounded_rect(cr, 0, 0, allocation.width, allocation.height, 12)
-        cr.fill()
-        self.draw_payload(cr, record.get("payload") or {}, 0, 0, allocation.width, allocation.height)
-        return False
+    def create_card(self, record):
+        window = self.new_popup((record.get("payload") or {}).get("interaction", {}).get("focus") == "when_required" if isinstance(record.get("payload"), dict) else False)
+        frame = Gtk.EventBox()
+        frame.get_style_context().add_class("ah-card")
+        frame.set_size_request(CARD_WIDTH, -1)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.margin(outer, 14, 16, 16, 14)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.margin(header, 0, 0, 0, 6)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        separator = Gtk.Box()
+        separator.get_style_context().add_class("ah-divider")
+        separator.set_size_request(-1, 1)
+        self.margin(separator, 10, 0, 0, 10)
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        footer.set_halign(Gtk.Align.END)
+        outer.pack_start(header, False, False, 0)
+        outer.pack_start(body, False, False, 0)
+        outer.pack_start(separator, False, False, 0)
+        outer.pack_start(footer, False, False, 0)
+        frame.add(outer)
+        window.add(frame)
+        window.connect("key-press-event", self.card_key, record)
+        card = {"overlayId": record.get("overlayId"), "window": window, "frame": frame, "outer": outer, "header": header, "body": body, "separator": separator, "footer": footer, "rows": [], "footer_signature": [], "title": None, "close_button": None, "close_event": None, "last_position": None}
+        self.cards[record.get("overlayId")] = card
+        return card
 
-    def draw_record(self, cr, record, ox, oy, monitor_width=1920, monitor_height=1080):
+    def render_card(self, record):
+        overlay_id = record.get("overlayId")
+        card = self.cards.get(overlay_id)
+        first = card is None
+        if card is None:
+            card = self.create_card(record)
+        payload = record.get("payload") or {}
+        components = component_rows(payload)
+        if not components and payload.get("type") == "progress":
+            try:
+                components = [{"type": "progress", "value": max(0.0, min(1.0, float(payload.get("progress", payload.get("value", 0.0)))))}]
+            except Exception:
+                components = [{"type": "progress", "value": 0.0}]
+        body_components = [component for component in components if component.get("type") not in {"button", "choice"}]
+        footer_components = [component for component in components if component.get("type") in {"button", "choice"}]
+        self.build_header(card, record)
+        if first:
+            self.build_body(card, body_components)
+        else:
+            self.update_body(card, body_components)
+        if card.get("footer_signature") != footer_components:
+            self.build_footer(card, footer_components, record)
+        if first:
+            card["window"].show_all()
+            self.fade_in(card["window"], record)
+        self.position_card(card, record)
+        self.draw_ready.add(overlay_id)
+
+    def position_card(self, card, record):
+        window = card["window"]
+        if not window.get_visible():
+            window.show_all()
+        self.pump(3)
+        try:
+            _minimum, natural = card["frame"].get_preferred_size()
+            height = int(natural.height)
+        except Exception:
+            height = card_content_height(record.get("payload") or {})
+        width = CARD_WIDTH
+        area = self.workarea()
+        if area is None:
+            return
+        height = max(64, min(height, area.height - 2 * CARD_MARGIN, MAX_CARD_HEIGHT))
         payload = record.get("payload") or {}
         target = payload.get("target") if isinstance(payload, dict) else {}
         bounds = target.get("bounds") if isinstance(target, dict) else None
         point = target.get("point") if isinstance(target, dict) else None
         if isinstance(bounds, dict):
             try:
-                x, y, width, height = float(bounds.get("x", 0)) - ox, float(bounds.get("y", 0)) - oy, float(bounds.get("width", 1)), float(bounds.get("height", 1))
+                x = float(bounds.get("x", 0)) + float(bounds.get("width", 1)) + 12
+                y = float(bounds.get("y", 0))
             except Exception:
-                x, y, width, height = 20, 20, 40, 40
+                x, y = area.x + CARD_MARGIN, area.y + CARD_MARGIN
         elif isinstance(point, dict):
-            x, y, width, height = float(point.get("x", 0)) - ox, float(point.get("y", 0)) - oy, 48, 48
+            try:
+                x = float(point.get("x", 0)) + 20
+                y = float(point.get("y", 0)) + 20
+            except Exception:
+                x, y = area.x + CARD_MARGIN, area.y + CARD_MARGIN
         else:
-            placement = payload.get("placement", "top_left")
-            width, height = 360, card_content_height(payload)
-            margin = 24
+            placement = payload.get("placement", "top_right")
             if placement in {"top_center", "bottom_center"}:
-                x = (monitor_width - width) / 2
-            elif placement in {"top_right", "bottom_right"}:
-                x = monitor_width - width - margin
+                x = area.x + (area.width - width) / 2
+            elif placement in {"top_left", "bottom_left"}:
+                x = area.x + CARD_MARGIN
             else:
-                x = margin
-            y = monitor_height - height - margin if placement in {"bottom_left", "bottom_center", "bottom_right"} else margin
-        self.draw_payload(cr, payload, x, y, width, height)
+                x = area.x + area.width - width - CARD_MARGIN
+            y = area.y + area.height - height - CARD_MARGIN if placement in {"bottom_left", "bottom_center", "bottom_right"} else area.y + CARD_MARGIN
+        x = min(max(x, area.x + CARD_MARGIN), area.x + area.width - width - CARD_MARGIN)
+        y = min(max(y, area.y + CARD_MARGIN), area.y + area.height - height - CARD_MARGIN)
+        card["last_position"] = (int(x), int(y), width, height)
+        window.resize(width, height)
+        window.move(int(x), int(y))
 
-    def draw_payload(self, cr, payload, x, y, width, height):
+    def card_key(self, _widget, event, record):
+        if event.keyval == Gdk.KEY_Escape:
+            event_name = self.dismiss_event(record)
+            if event_name is not None:
+                self.emit(record, event_name)
+                return True
+        return False
+
+    def needs_surfaces(self):
+        return any(self.is_surface_record(record) for record in self.records.values())
+
+    def is_surface_record(self, record):
+        payload = record.get("payload") if isinstance(record, dict) else {}
+        kind = payload.get("type", record.get("type", "widget")) if isinstance(payload, dict) else record.get("type", "widget")
+        return kind in SURFACE_TYPES
+
+    def ensure_surfaces(self):
+        if not self.needs_surfaces():
+            self.destroy_surfaces()
+            return True
+        geometries = self.monitor_geometries()
+        signature = tuple(geometries)
+        if signature == self.monitor_signature and self.surface_windows:
+            self.redraw_surfaces()
+            return True
+        self.destroy_surfaces()
+        self.monitor_signature = signature
+        for monitor_index, geometry in enumerate(geometries):
+            window = self.new_popup(False, click_through=True)
+            if CAIRO_FOREIGN_AVAILABLE:
+                area = Gtk.DrawingArea()
+                area.set_app_paintable(True)
+                area.connect("draw", self.draw_surface, (monitor_index,) + geometry)
+                window.add(area)
+            else:
+                root = Gtk.Fixed()
+                root.get_style_context().add_class("ah-surface")
+                window.add(root)
+                self.surface_fixed.append(root)
+            window.move(geometry[0], geometry[1])
+            window.set_default_size(geometry[2], geometry[3])
+            window.show_all()
+            gdk_window = window.get_window()
+            if gdk_window is not None:
+                self.make_click_through(gdk_window)
+            self.surface_windows.append(window)
+            self.draw_ready.add("surface:%d" % monitor_index)
+        if not CAIRO_FOREIGN_AVAILABLE:
+            self.redraw_surfaces()
+        return True
+
+    def redraw_surfaces(self):
+        if CAIRO_FOREIGN_AVAILABLE:
+            for window in self.surface_windows:
+                child = window.get_child()
+                if child is not None:
+                    child.queue_draw()
+            return
+        for index, root in enumerate(self.surface_fixed):
+            for child in root.get_children():
+                root.remove(child)
+                child.destroy()
+            geometry = self.monitor_geometries()[index] if index < len(self.monitor_geometries()) else (0, 0, 1920, 1080, 1)
+            ox, oy = geometry[0], geometry[1]
+            for record in self.records.values():
+                if not self.is_surface_record(record):
+                    continue
+                bounds = self.target_bounds(record)
+                widget = self.surface_widget(record)
+                root.put(widget, int(bounds[0] - ox), int(bounds[1] - oy))
+                widget.show_all()
+            root.show_all()
+
+    def surface_widget(self, record):
+        payload = record.get("payload") or {}
+        kind = payload.get("type", "pointer")
+        if kind in {"pointer", "arrow"}:
+            return self.label("➤", "ah-active", 4)
+        frame = Gtk.EventBox()
+        frame.get_style_context().add_class("ah-highlight")
+        return frame
+
+    def draw_surface(self, _area, cr, geometry):
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        monitor_index, ox, oy, monitor_width, monitor_height, _scale = geometry
+        for record in list(self.records.values()):
+            if not self.is_surface_record(record):
+                continue
+            policy = (record.get("payload") or {}).get("displayPolicy", "primary")
+            if policy != "all" and monitor_index != 0:
+                continue
+            self.draw_record(cr, record, ox, oy, monitor_width, monitor_height)
+        self.draw_ready.add("surface:%d" % monitor_index)
+        return False
+
+    def draw_record(self, cr, record, ox, oy, monitor_width=1920, monitor_height=1080):
+        payload = record.get("payload") or {}
+        bounds = self.target_bounds(record)
+        x, y, width, height = bounds[0] - ox, bounds[1] - oy, bounds[2], bounds[3]
+        self.draw_primitive(cr, payload, x, y, width, height)
+
+    def draw_primitive(self, cr, payload, x, y, width, height):
         if not isinstance(payload, dict):
             return
         kind = payload.get("type", "widget")
@@ -629,162 +921,51 @@ class Renderer:
             cr.line_to(cx + 14, cy + 24)
             cr.close_path()
             cr.fill()
+
+    def emit(self, record, event):
+        if not isinstance(event, str) or event not in EVENTS:
             return
-        if kind == "progress":
-            value = payload.get("progress", payload.get("value", 0.0))
-            try:
-                value = max(0.0, min(1.0, float(value)))
-            except Exception:
-                value = 0.0
-            cr.set_source_rgba(0.08, 0.09, 0.12, 0.85)
-            rounded_rect(cr, x, y, max(width, 180), 18, 8)
-            cr.fill()
-            cr.set_source_rgba(*color_for(style, 0.95))
-            rounded_rect(cr, x, y, max(width, 180) * value, 18, 8)
-            cr.fill()
+        if event not in self.allowed_events(record):
             return
-        self.draw_card(cr, payload, x, y, width, height, color)
+        self.events.append({"eventId": "event_" + uuid.uuid4().hex, "overlayId": record.get("overlayId"), "event": event, "createdAt": now_iso(), "ownerSessionId": self.session_id})
+        self.events = self.events[-100:]
 
-    def draw_card(self, cr, payload, x, y, width, height, color):
-        width = max(width, 280)
-        height = max(height, card_content_height(payload))
-        cr.set_source_rgba(0.04, 0.05, 0.08, 0.94)
-        rounded_rect(cr, x, y, width, height, 12)
-        cr.fill()
-        cr.set_source_rgba(*color)
-        cr.set_line_width(2)
-        rounded_rect(cr, x, y, width, height, 12)
-        cr.stroke()
-        title = payload.get("label") or payload.get("title") or payload.get("text") or payload.get("type", "overlay")
-        draw_text(cr, title, x + 16, y + 28, 16, (0.96, 0.97, 1, 1), width - 32, cairo.FONT_WEIGHT_BOLD)
-        line_y = y + 54
-        for component in component_rows(payload):
-            if line_y > y + height - 14:
-                break
-            kind = component.get("type")
-            if kind == "heading":
-                line_y = draw_text(cr, component.get("text", ""), x + 16, line_y, 15,
-                                   (0.96, 0.97, 1, 1), width - 32, cairo.FONT_WEIGHT_BOLD)
-            elif kind == "status_badge":
-                line_y = self.draw_badge(cr, component, x + 16, line_y, width - 32)
-            elif kind == "key_value":
-                line_y = self.draw_key_value(cr, component, x + 16, line_y, width - 32)
-            elif kind == "progress":
-                line_y = self.draw_mini_progress(cr, component, x + 16, line_y, width - 32)
-            elif kind == "warning":
-                line_y = draw_text(cr, "! " + str(component.get("text", "")), x + 16, line_y, 13,
-                                   WARN_CAIRO, width - 32)
-            elif kind == "divider":
-                cr.set_source_rgba(0.3, 0.33, 0.4, 0.8)
-                cr.set_line_width(1)
-                cr.move_to(x + 16, line_y - 6)
-                cr.line_to(x + width - 16, line_y - 6)
-                cr.stroke()
-                line_y += 14
-            elif kind == "icon":
-                line_y = self.draw_icon(cr, component, x + 16, line_y)
-            else:
-                text = component.get("text") or component.get("label") or ""
-                if isinstance(text, str) and text:
-                    line_y = draw_text(cr, text, x + 16, line_y, 13, (0.82, 0.85, 0.9, 1), width - 32)
+    def drain_events(self):
+        events = list(self.events)
+        self.events = []
+        return events
 
-    def draw_badge(self, cr, component, x, y, max_width):
-        status = component.get("status") if component.get("status") in STATUS_CAIRO else "neutral"
-        text = safe_text(component.get("text", ""), 80)
-        cr.set_font_size(13)
-        tw = min(cr.text_extents(text).width + 24, max_width)
-        cr.set_source_rgba(*STATUS_CAIRO[status])
-        rounded_rect(cr, x, y - 17, tw, 22, 11)
-        cr.fill()
-        cr.set_source_rgba(1, 1, 1, 1)
-        cr.move_to(x + 12, y - 1)
-        cr.show_text(text[:max(0, int(max_width / 7))])
-        return y + 30
+    def visibility_counts(self):
+        self.pump(8)
+        visible = 0
+        for card in self.cards.values():
+            window = card.get("window")
+            gdk_window = window.get_window() if window is not None else None
+            if gdk_window is not None and (not hasattr(gdk_window, "get_mapped") or gdk_window.get_mapped()):
+                visible += 1
+        for window in self.surface_windows:
+            gdk_window = window.get_window()
+            if gdk_window is not None and (not hasattr(gdk_window, "get_mapped") or gdk_window.get_mapped()):
+                visible += 1
+        interactive = sum(1 for card in self.cards.values() if self.is_interactive(self.records.get(card.get("overlayId"), {})))
+        transparent = visible
+        return visible, interactive, transparent
 
-    def draw_key_value(self, cr, component, x, y, max_width):
-        key = safe_text(component.get("key", ""), 60)
-        value = safe_text(component.get("value", ""), 200)
-        cr.set_font_size(13)
-        cr.set_source_rgba(*DIM_CAIRO)
-        cr.move_to(x, y)
-        cr.show_text(key + ": " if key else "")
-        kw = cr.text_extents(key + ": " if key else "").width
-        cr.set_source_rgba(0.93, 0.94, 0.97, 1)
-        rest = max(20.0, max_width - kw)
-        shown = value
-        while shown and cr.text_extents(shown).width > rest:
-            shown = shown[:-1]
-        cr.move_to(x + kw, y)
-        cr.show_text(shown)
-        return y + 24
-
-    def draw_mini_progress(self, cr, component, x, y, max_width):
-        try:
-            value = max(0.0, min(1.0, float(component.get("value", 0.0))))
-        except Exception:
-            value = 0.0
-        bar_w = max(120.0, max_width)
-        cr.set_source_rgba(0.08, 0.09, 0.12, 0.9)
-        rounded_rect(cr, x, y - 13, bar_w, 14, 7)
-        cr.fill()
-        cr.set_source_rgba(0.30, 0.55, 1.0, 0.95)
-        if value > 0:
-            rounded_rect(cr, x, y - 13, max(14.0, bar_w * value), 14, 7)
-            cr.fill()
-        label = component.get("label")
-        if isinstance(label, str) and label:
-            return draw_text(cr, label, x, y + 18, 12, DIM_CAIRO, max_width)
-        return y + 30
-
-    def draw_icon(self, cr, component, x, y):
-        token = component.get("token") if component.get("token") in STATUS_CAIRO else "neutral"
-        glyph = ICON_GLYPHS.get(component.get("token"), "i")
-        cr.set_source_rgba(*STATUS_CAIRO.get(token, STATUS_CAIRO["neutral"]))
-        cr.arc(x + 11, y - 6, 11, 0, 2 * math.pi)
-        cr.fill()
-        cr.set_source_rgba(1, 1, 1, 1)
-        cr.set_font_size(13)
-        ext = cr.text_extents(glyph)
-        cr.move_to(x + 11 - ext.width / 2, y - 6 + ext.height / 2)
-        cr.show_text(glyph)
-        return y + 24
-
-    def interactive_click(self, _widget, _event, record):
-        event = self.first_event(record)
-        if event is not None:
-            self.events.append({"eventId": "event_" + uuid.uuid4().hex, "overlayId": record.get("overlayId"), "event": event, "createdAt": now_iso(), "ownerSessionId": self.session_id})
-            self.events = self.events[-100:]
-        return False
-
-    def interactive_key(self, _widget, event, record):
-        if event.keyval == Gdk.KEY_Escape:
-            self.events.append({"eventId": "event_" + uuid.uuid4().hex, "overlayId": record.get("overlayId"), "event": "dismissed", "createdAt": now_iso(), "ownerSessionId": self.session_id})
-            self.events = self.events[-100:]
-            return True
-        return False
-
-    def first_event(self, record):
-        payload = record.get("payload") or {}
-        for component in payload.get("components", []) if isinstance(payload, dict) else []:
-            if isinstance(component, dict) and component.get("event") in EVENTS:
-                return component.get("event")
-        return "accepted"
-
-    def tick(self):
-        if Gtk.main_level() <= 0:
-            return False
-        signature = tuple(self.monitor_geometries())
-        if signature != self.monitor_signature:
-            self.rebuild()
-        for window in self.windows:
-            child = window.get_child()
-            if child is not None:
-                child.queue_draw()
-        for window in self.interactive.values():
-            child = window.get_child()
-            if child is not None:
-                child.queue_draw()
-        return True
+    def operation_ack(self, command, acknowledgement, overlay_id=None, reason=None):
+        visible, interactive, transparent = self.visibility_counts()
+        return {
+            "command": command,
+            "acknowledgement": acknowledgement,
+            "rendererEpoch": self.renderer_epoch,
+            "visibleWindowCount": visible,
+            "interactiveWindowCount": interactive,
+            "transparentWindowCount": transparent,
+            "drawReadyCount": len(self.draw_ready),
+            "visible": bool(visible > 0 and len(self.draw_ready) > 0),
+            "liveSurfaceRegistered": bool(overlay_id is not None and overlay_id in self.records),
+            **({"overlayId": overlay_id} if overlay_id is not None else {}),
+            **({"reason": reason} if reason is not None else {}),
+        }
 
     def show(self, record):
         if not isinstance(record, dict) or not isinstance(record.get("overlayId"), str) or not isinstance(record.get("payload"), dict):
@@ -794,53 +975,109 @@ class Renderer:
             return {"ok": False, "reason": "render_record_oversized"}
         if not self.capability().get("supported"):
             return {"ok": False, "reason": self.last_render_reason or "overlay_transparency_unavailable"}
+        previous = self.records.get(record["overlayId"])
         self.records[record["overlayId"]] = record
         self.emergency_hidden = False
-        if not self.rebuild():
-            self.records.pop(record["overlayId"], None)
-            return {"ok": False, "reason": self.last_render_reason or "overlay_transparency_unavailable"}
-        visible, _interactive = self.visibility_counts()
+        try:
+            self.render_record(record)
+        except Exception:
+            if previous is not None:
+                self.records[record["overlayId"]] = previous
+            else:
+                self.records.pop(record["overlayId"], None)
+            return {"ok": False, "reason": "overlay_render_failed"}
+        visible, _interactive, _transparent = self.visibility_counts()
         if visible <= 0:
-            self.records.pop(record["overlayId"], None)
-            self.rebuild()
+            if previous is not None:
+                self.records[record["overlayId"]] = previous
+            else:
+                self.records.pop(record["overlayId"], None)
+                self.dismiss_card(record["overlayId"], animate=False)
             return {"ok": False, "reason": "overlay_live_registration_missing"}
         return {"ok": True, **self.operation_ack("show", "visible", record["overlayId"], "gtk3_overlay_shown")}
+
+    def render_record(self, record):
+        payload = record.get("payload") or {}
+        kind = payload.get("type", record.get("type", "widget")) if isinstance(payload, dict) else record.get("type", "widget")
+        if kind in SURFACE_TYPES:
+            self.dismiss_card(record.get("overlayId"), animate=False)
+            self.ensure_surfaces()
+            self.redraw_surfaces()
+            self.draw_ready.add(record.get("overlayId"))
+            return
+        self.render_card(record)
 
     def update(self, record):
         if not isinstance(record, dict) or record.get("overlayId") not in self.records:
             return {"ok": False, "reason": "overlay_not_found"}
+        previous = self.records[record["overlayId"]]
         result = self.show(record)
         if result.get("ok"):
             result["command"] = "update"
             result["acknowledgement"] = "updated"
+            result["reason"] = "gtk3_overlay_updated"
+        elif previous is not None:
+            self.records[record["overlayId"]] = previous
         return result
+
+    def dismiss_card(self, overlay_id, animate=True):
+        card = self.cards.pop(overlay_id, None)
+        if card is None:
+            return
+        window = card.get("window")
+        if window is None:
+            return
+        if animate:
+            self.fade_out(window)
+        else:
+            window.destroy()
+        self.draw_ready.discard(overlay_id)
 
     def dismiss(self, overlay_id):
         self.records.pop(overlay_id, None)
-        window = self.interactive.pop(overlay_id, None)
-        if window is not None:
-            window.destroy()
-        self.rebuild()
+        self.dismiss_card(overlay_id)
+        if not self.needs_surfaces():
+            self.destroy_surfaces()
+        else:
+            self.redraw_surfaces()
         return {"ok": True, **self.operation_ack("dismiss", "dismissed", overlay_id, "gtk3_overlay_dismissed")}
 
     def clear(self):
         self.records.clear()
-        self.rebuild()
+        self.destroy_cards()
+        self.destroy_surfaces()
+        self.draw_ready = set()
         return {"ok": True, **self.operation_ack("clear", "cleared", reason="gtk3_overlays_cleared")}
 
     def emergency_hide(self):
         self.records.clear()
+        self.destroy_cards()
+        self.destroy_surfaces()
+        self.draw_ready = set()
         self.emergency_hidden = True
-        self.rebuild()
         return {"ok": True, **self.operation_ack("emergency_hide", "emergency_hidden", reason="gtk3_emergency_hide_complete")}
 
     def state(self):
-        return {"renderer": self.capability(), "overlays": [{"overlayId": key, "ownerSessionId": self.session_id, "type": value.get("type", "widget"), "sensitivity": (value.get("payload") or {}).get("sensitivity", "public"), "interactive": self.is_interactive(value), "visible": True, "createdAt": now_iso(), "updatedAt": now_iso(), "expiresAt": now_iso()} for key, value in self.records.items()], "pendingEvents": list(self.events), "emergencyHidden": self.emergency_hidden}
+        return {
+            "renderer": self.capability(),
+            "overlays": [{"overlayId": key, "ownerSessionId": self.session_id, "type": value.get("type", "widget"), "sensitivity": (value.get("payload") or {}).get("sensitivity", "public"), "interactive": self.is_interactive(value), "visible": True, "createdAt": now_iso(), "updatedAt": now_iso(), "expiresAt": now_iso()} for key, value in self.records.items()],
+            "pendingEvents": list(self.events),
+            "emergencyHidden": self.emergency_hidden,
+        }
+
+    def monitor_tick(self):
+        if Gtk.main_level() <= 0:
+            return False
+        signature = tuple(self.monitor_geometries())
+        if signature != self.monitor_signature and self.needs_surfaces():
+            self.ensure_surfaces()
+        return True
 
     def close(self):
         self.destroy_windows()
-        if self.tick_source:
-            GLib.source_remove(self.tick_source)
+        if self.monitor_source:
+            GLib.source_remove(self.monitor_source)
+            self.monitor_source = None
         Gtk.main_quit()
 
 
@@ -895,26 +1132,33 @@ def handle(line):
             reply(request["id"], True, renderer.capability())
         elif command == "show":
             result = renderer.show(payload)
-            if result.get("ok"): result["requestId"] = request["id"]
+            if result.get("ok"):
+                result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "update":
             result = renderer.update(payload)
-            if result.get("ok"): result["requestId"] = request["id"]
+            if result.get("ok"):
+                result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "dismiss":
             result = renderer.dismiss((payload or {}).get("overlayId"))
-            if result.get("ok"): result["requestId"] = request["id"]
+            if result.get("ok"):
+                result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "clear":
             result = renderer.clear()
-            if result.get("ok"): result["requestId"] = request["id"]
+            if result.get("ok"):
+                result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "emergency_hide":
             result = renderer.emergency_hide()
-            if result.get("ok"): result["requestId"] = request["id"]
+            if result.get("ok"):
+                result["requestId"] = request["id"]
             reply(request["id"], bool(result.get("ok")), result if result.get("ok") else None, None if result.get("ok") else result.get("reason"))
         elif command == "state":
             reply(request["id"], True, renderer.state())
+        elif command == "events":
+            reply(request["id"], True, {"events": renderer.drain_events()})
         elif command == "close":
             reply(request["id"], True, {"reason": "renderer_closing"})
             renderer.close()
@@ -940,9 +1184,6 @@ if __name__ == "__main__":
         raise SystemExit(78)
     renderer = Renderer()
     GLib.io_add_watch(sys.stdin, GLib.IO_IN | GLib.IO_HUP, stdin_watch)
-    # Orphan guard: Node parents can die without the stdin HUP ever firing
-    # (inherited fds, SIGKILL). A reparented renderer would otherwise keep its
-    # always-on-top windows mapped forever, blocking the user's screen.
     _starter_ppid = os.getppid()
 
     def _parent_watch():

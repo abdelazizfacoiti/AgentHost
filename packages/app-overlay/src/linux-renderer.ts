@@ -13,6 +13,11 @@ export interface LinuxOverlayRendererOptions { environment?: OverlayEnvironment;
 
 const fallbackReport = (report: OverlayCapabilityReport, reason: string): OverlayCapabilityReport => ({ ...report, supported: false, available: true, visible: false, rendererStatus: "degraded", fallbackRenderer: "headless", reason, limitations: [...new Set([...report.limitations, "Headless renderer fallback is active."])] });
 const failure = (reason: string): OverlayOperationResult => ({ ok: false, reason, acknowledged: false });
+function isOverlayWidgetEvent(value: unknown): value is OverlayWidgetEvent {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.eventId === "string" && record.eventId.length > 0 && record.eventId.length <= 100 && typeof record.overlayId === "string" && record.overlayId.length > 0 && record.overlayId.length <= 200 && typeof record.event === "string" && record.event.length > 0 && record.event.length <= 100 && typeof record.createdAt === "string" && typeof record.ownerSessionId === "string" && record.ownerSessionId.length > 0;
+}
 
 export class LinuxOverlayRenderer implements OverlayRenderer {
   readonly #fallback = new HeadlessOverlayRenderer();
@@ -93,6 +98,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   async emergencyHide(): Promise<OverlayOperationResult> { const result = await this.#operation("emergency_hide", {}, () => this.#fallback.emergencyHide()); await this.#fallback.emergencyHide(); return result; }
   async state(): Promise<OverlayStateSnapshot> { if (await this.#ensureStarted()) { const reply = await this.#request("state", {}).catch(() => undefined); if (reply?.ok && reply.data !== undefined) return reply.data as OverlayStateSnapshot; } const fallback = await this.#fallback.state(); return { ...fallback, renderer: this.#report }; }
   async events(): Promise<OverlayWidgetEvent[]> { if (await this.#ensureStarted()) { const reply = await this.#request("state", {}).catch(() => undefined); const data = reply?.ok === true && reply.data !== undefined ? reply.data as Partial<OverlayStateSnapshot> : undefined; if (Array.isArray(data?.pendingEvents)) return data.pendingEvents; } return await this.#fallback.events(); }
+  async drainEvents(): Promise<OverlayWidgetEvent[]> { if (await this.#ensureStarted()) { const reply = await this.#request("events", {}).catch(() => undefined); const data = reply?.ok === true && reply.data !== null && typeof reply.data === "object" ? (reply.data as { events?: unknown }).events : undefined; if (Array.isArray(data)) return data.filter(isOverlayWidgetEvent); } return await this.#fallback.drainEvents(); }
 
   async close(): Promise<void> {
     this.#closed = true;
@@ -115,7 +121,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     return this.#report;
   }
 
-  async #operation(command: Exclude<OverlayRendererCommand, "hello" | "capabilities" | "state" | "close">, payload: unknown, fallback: () => Promise<OverlayOperationResult> | OverlayOperationResult): Promise<OverlayOperationResult> {
+  async #operation(command: Exclude<OverlayRendererCommand, "hello" | "capabilities" | "state" | "events" | "close">, payload: unknown, fallback: () => Promise<OverlayOperationResult> | OverlayOperationResult): Promise<OverlayOperationResult> {
     if (!(await this.#ensureStarted())) return this.#mode === "auto" ? await fallback() : failure(this.#lastFailure ?? "renderer_start_timeout");
     this.#runtimeState = "rendering";
     const reply = await this.#request(command, payload, this.#renderAckTimeoutMs).catch((error: unknown) => { this.#fail(error instanceof Error ? error.message : "renderer_protocol_error"); return undefined; });

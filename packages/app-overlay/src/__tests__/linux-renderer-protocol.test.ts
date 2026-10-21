@@ -7,6 +7,7 @@ describe("overlay renderer IPC protocol", () => {
     const request = { version: OVERLAY_IPC_VERSION, id: "request-1", token: "t".repeat(32), command: "show" };
     expect(validateRendererRequest(request)).toBe(true);
     expect(validateRendererRequest({ ...request, command: "eval" })).toBe(false);
+    expect(validateRendererRequest({ ...request, command: "events" })).toBe(true);
     expect(validateRendererRequest({ ...request, payload: { text: "x".repeat(OVERLAY_IPC_MAX_BYTES) } })).toBe(false);
   });
 

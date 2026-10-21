@@ -152,15 +152,15 @@ Receipts are attached by the normal runner rather than exposed as a standalone a
 
 `scheduler.job_*` (including pause, resume, cancel, archive, and remove), activation tools, readiness/activation previews, manual-run contract tools, preflight tools, acknowledgement/request tools, request review/revocation tools, and approval validity/explanation tools are metadata-only. They may create local review records for bounded once/delayed/recurring/cron/calendar descriptions, but never create timers, workers, run sessions, replay sessions, notifications, files, or execution permission. Scheduler approval remains non-executable.
 
-### Overlay renderer and visual-assistance sessions
+### Overlay renderer and task progress card
 
-`overlay.get_capabilities`, renderer diagnostics/restart, primitives (`show_pointer`, `highlight_target`, `show_tooltip`, `show_widget`, `update`, `dismiss`, `clear`, `emergency_hide`), assistance-session tools, visual guides (`overlay.guide_present/advance/dismiss`), and `overlay.control_surface_show/get/update/hide/apply_event` are `visual_only` with no target-app external effect. `overlay.guide_present` renders a checklist with progress plus a highlight and tooltip on the current step's screen target in one call; `advance` moves everything to the next step (finishing dismisses all); `dismiss` clears immediately. Guides are ephemeral, owner-scoped, TTL-bound, and auto-expire. Control surfaces bind one generic operator view to one trusted assistance session and expose only `continue`, `pause`, `resume`, `cancel`, `retry_visual_render`, `inspect_diagnostics`, `emergency_hide`, and `close_control_surface`. No `back` action exists. Events never invoke another tool. Renderer IDs are short-lived and invalid after restart; duplicate event IDs are rejected by a separate TTL replay ledger. GTK3/X11 is optional; headless fallback is safe; Wayland limitations are explicit.
+Overlay is not exposed as MCP tools in the minimal-v2 tree. The MCP server owns a `VisualSurfaceCoordinator` for lifecycle shutdown; local scripts and future tools use `createOverlayRenderer`, `OverlayManager`, and `TaskProgressOverlay` from `packages/app-overlay`.
 
-R4 runtime activity is not a new execution tool. The normal tool runner emits bounded activity records and the overlay controller renders only allowlisted labels, lifecycle state, elapsed time, authoritative progress, blocker/warning codes, and renderer/suppression status. Direct tool rows are projected through this authoritative source once. Activity state never creates permissions, confirmations, target-app actions, or background work.
+`TaskProgressOverlay` renders status, checklist, `Step n/m`, elapsed time, approval command, and Pause/Resume/Stop controls. Pause is cooperative at a step boundary; Stop is a request and never kills an in-flight tool call. Use `manager.updateWidget()` for in-place updates; do not dismiss and re-show on every tick. Construct the renderer and manager with the same `sessionId` so button events are accepted.
 
-`npm run demo:visual-copilot` is explicit local demonstration command, not MCP capability. It uses same stores and renderer boundary, prompts for every operator decision, prints redacted diagnostics, and exits safely when GUI dependencies are unavailable.
+`npm run demo:overlay` is a visual-only pointer/highlight/tooltip/card tour. `npm run demo:task-progress` runs the live progress card. Neither performs target-app actions. GTK3/X11 is optional; headless fallback is safe; Wayland limitations are explicit. Fullscreen pointer/highlight surfaces are click-through on X11 via XShape when Cairo foreign bindings are unavailable.
 
-V2 surface projection uses a versioned envelope and fixed trusted component registry. Dynamic markup/scripts, URLs, expressions, imports, arbitrary MCP calls, shell commands, raw arguments, secrets, and private page/OCR/filesystem content are rejected. Visible native rendering requires handshake, transparency, mapping, draw-ready, epoch, request correlation, live registration, and post-acknowledgement projection; headless state never claims visible success. Screenshot suppression hides every coordinator surface, not only runtime activity.
+V2 surface projection uses a versioned envelope and fixed trusted component registry. Dynamic markup/scripts, URLs, expressions, imports, arbitrary MCP calls, shell commands, raw arguments, secrets, and private page/OCR/filesystem content are rejected. Visible native rendering requires handshake, transparency, mapping, draw-ready, epoch, request correlation, live registration, and post-acknowledgement projection; headless state never claims visible success. Screenshot suppression hides every coordinator surface.
 
 ## Optional adapters
 
@@ -200,9 +200,9 @@ ever sticks anyway, `agenthost overlay hide` terminates orphaned renderers
 (live ones are left alone) and `overlay.emergency_hide` clears owned
 overlays at once.
 
-## Control Room
+## Removed product surfaces
 
-Control Room is HTTP reporting surface, not MCP capability. It is disabled by default and starts only when explicitly enabled. It displays bounded dashboard, task, timeline, screenshot-metadata, and health projections from real local records. It never invokes MCP tools, creates confirmations, grants access, starts replay, starts jobs, or controls browser/desktop targets.
+Control Room, Browser Bridge, and the runtime-activity service are not part of the current minimal-v2 tree. Older sections and docs that mention them are historical.
 
 ## Speech tools
 

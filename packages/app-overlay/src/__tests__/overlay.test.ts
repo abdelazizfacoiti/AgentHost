@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { redactOverlayText, validateOverlayAnimation, validateOverlayWidget, type OverlayTargetBinding, type OverlayWidget } from "@agenthost/core";
 import { HeadlessOverlayRenderer } from "../headless-renderer.js";
 import { OverlayManager } from "../manager.js";
+import type { OverlayRenderRecord } from "../renderer.js";
 import { probeLinuxOverlay } from "../linux-probe.js";
 
 const target: OverlayTargetBinding = { kind: "screen_point", point: { x: 20, y: 30 }, trusted: true, expiresAt: new Date(Date.now() + 20_000).toISOString() };
@@ -68,6 +69,35 @@ describe("overlay foundation", () => {
     const result = await manager.showPrimitive({ type: "pointer", target, sensitivity: "public" });
     expect(result.ok).toBe(false);
     expect((await manager.state()).overlays).toHaveLength(0);
+  });
+
+  it("validates spinner labels and checklist states", () => {
+    const base = { title: "Progress", sensitivity: "public" as const };
+    expect(validateOverlayWidget({ ...base, components: [{ type: "spinner", label: "Indexing" }] })).toEqual([]);
+    expect(validateOverlayWidget({ ...base, components: [{ type: "spinner", label: "x".repeat(201) }] })).toContain("overlay_spinner_label_too_large");
+    expect(validateOverlayWidget({ ...base, components: [{ type: "checklist", items: [{ label: "one", checked: true, state: "done" }] }] })).toEqual([]);
+    expect(validateOverlayWidget({ ...base, components: [{ type: "checklist", items: [{ label: "one", checked: false, state: "bogus" as never }] }] })).toContain("overlay_checklist_state_invalid");
+  });
+
+  it("preserves checklist state and redacts spinner labels in renderer payloads", async () => {
+    class CapturingRenderer extends HeadlessOverlayRenderer {
+      shown: OverlayRenderRecord[] = [];
+      override show(record: OverlayRenderRecord) { this.shown.push(record); return super.show(record); }
+    }
+    const renderer = new CapturingRenderer();
+    const manager = new OverlayManager(renderer, { sessionId: "overlay-redaction-test" });
+    const result = await manager.showWidget({
+      title: "Progress",
+      sensitivity: "public",
+      components: [
+        { type: "spinner", label: "password=hunter2" },
+        { type: "checklist", items: [{ label: "one", checked: true, state: "done" }] }
+      ]
+    });
+    expect(result.ok).toBe(true);
+    const payload = (renderer.shown[0]?.payload ?? {}) as { components?: Array<{ label?: string; items?: Array<{ state?: string }> }> };
+    expect(payload.components?.[0]?.label).not.toContain("hunter2");
+    expect(payload.components?.[1]?.items?.[0]?.state).toBe("done");
   });
 
   it("probes X11, Wayland, and headless without opening windows", () => {

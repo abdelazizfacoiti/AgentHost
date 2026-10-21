@@ -38,9 +38,7 @@ packages/
   core/              @agenthost/core — risk tiers, capability permissions, policies, types
   mcp-server/        @agenthost/mcp-server — MCP server, tools, server, resources
   agenthost-cli/     CLI tool (bin: agenthost-mcp)
-  app-browser/       browser extension + background.js
-  app-overlay/       GTK3 renderer + overlay manager
-  app-control-room/  Control Room web UI
+  app-overlay/       GTK3 renderer + overlay manager + task progress card
   os-linux/          OS adapters (filesystem, desktop, dependencies, window mgmt)
   app-blender/       optional Blender adapter
 ```
@@ -54,8 +52,8 @@ packages/
 | `npm run test` | `vitest run` — all packages |
 | `npm start:mcp` | Run MCP server |
 | `npm run smoke:mcp` | Smoke test |
-| `npm run browser:pair` | Pair browser bridge |
-| `npm run control-room` | Start Control Room |
+| `npm run demo:overlay` | Static pointer/highlight/tooltip/card overlay tour |
+| `npm run demo:task-progress` | Live progress card with Pause/Resume/Stop |
 | `agenthost task watch <id> [--follow] [--notify]` | Tail redacted task progress; notify on done |
 | `agenthost task export <id> [--format md\|html]` | Shareable redacted run report |
 | `task.execute_plan` | Bounded tool sequence per task; dry-run each step for tokens first; fail-fast with replan hint |
@@ -84,44 +82,36 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 
 ## Key files & paths
 
-- `~/.agenthost/` — config (`config.json`), logs, screenshots, runtime data, control-room stores
-- `~/.bridge/config.json` — browser bridge config (port `43117`)
+- `~/.agenthost/` — config (`config.json`), logs, screenshots, runtime data
 - `~/.agenthost/logs/` — JSONL audit logs
 - `~/.agenthost/screenshots/` — captured screenshots
-- `~/.agenthost/control-room/` — activity.jsonl + screenshots.jsonl
+- `~/.agenthost/outputs/` — task reports and generated artifacts
 
 ## Environment gotchas
 
 - **AZERTY keyboard**: `desktop.type_text` auto-routes ASCII letters/digits/space through `xdotool type` and everything else through clipboard paste. Install `xclip` or `xsel` or non-ASCII typing reports `clipboard backend missing` instead of mistyping.
-- **Background browser worker**: `browser.background_launch` (dry-run + confirmation) spawns detached headless Chromium in `~/.agenthost/browser/profiles/background/`; `browser.background_status` reports worker aliveness. Pair once headful in that profile, then headless launches reconnect. Firefox can't be the worker (`--auto` fails closed, unsigned XPI needs `about:debugging` per session).
-- **Draw.io**: Requires account/signup prompt that blocks automation. Use **Excalidraw** for quick drawing tasks.
-- **Firefox bridge**: Paired but connection can be unstable. `--auto` works for Chromium, fails closed for Firefox.
 - **Second Firefox window**: `xdotool windowactivate` may fail with `BadWindow`. Use `xdotool search --name <pattern>` to find correct window ID.
 - **Focus-safe desktop**: `window.focus` returns `previousWindow` (best effort) so agents can restore user focus; focus changes are reported, never silent.
 - **Learning loop**: `strategy.record_episode` / `strategy.recall_episodes` feed redacted episodes (30-day TTL) that `strategy.select` scores; never store raw task content or secrets in lessons.
 - **SSH device adapter**: second adapter, first remote device (`packages/app-ssh`, `ssh.run_command`, dry-run + token like Blender). Enable via `optionalAdapters.ssh.enabled`. Key auth only; blocked remote patterns stay blocked.
-- **Control Room screenshot limit**: Default pagination limit is **50** (`limit()` in `control-room-store.ts` caps at `Math.min(100, Math.max(1, Math.floor(value)))`). Do not exceed 50 screenshots in a single query to avoid truncation errors.
-- **Live progress without watching apps**: `GET /api/v1/activity?limit=20` (same pagination bounds) feeds the Control Room “Live background work” panel; `browser.background_status` reports placement + isolated headless profile args without launching anything.
-
-## Browser extension
-
-Extension auto-enrolls on Chromium startup with `--load-extension`. Firefox `--auto` fails closed. Prepare with `npm run browser:extension:prepare` or `npm run browser:setup`.
+- **Task progress card**: `TaskProgressOverlay` (in `packages/app-overlay/src/task-progress.ts`) renders status, checklist, `Step n/m`, elapsed time, approval command, and Pause/Resume/Stop. Pause is cooperative at a step boundary; Stop never kills an in-flight tool call. Call `pollEvents()` to drain button events. Construct the renderer and manager with the **same sessionId**.
+- **Overlay click-through**: small card windows are interactive; fullscreen surfaces are created only for pointer/arrow/highlight/spotlight primitives and must stay click-through. Do not reintroduce a fullscreen surface for ordinary cards.
+- **Overlay updates**: use `manager.updateWidget()` for in-place changes. Do not `dismiss` + `show` on every tick; that causes flicker and resets controls.
 
 ## Testing quirks
 
-- ~94 files, ~540 tests across `__tests__/` dirs
+- Tests live in `__tests__/` dirs inside each package's `src/`
 - Tests use Vitest (no separate config file; defaults from `vitest`)
-- `packages/mcp-server/src/__tests__/general-purpose-agent.test.ts` — 10-test suite for general-purpose agent flow
-- `packages/core/src/__tests__/capability-manifest.test.ts` — new manifest tests
-- `packages/mcp-server/src/__tests__/resources.test.ts` — resource discovery tests
-- `packages/mcp-server/src/__tests__/guide-overlay-tools.test.ts` — guide overlay tests
-- Integration tests may require browser bridge connection and X11 display (`:0`)
+- `packages/app-overlay/src/__tests__/task-progress.test.ts` — progress card states, controls, auto-hide
+- `packages/app-overlay/src/__tests__/linux-renderer.test.ts` — GTK IPC, fallback, restart, event drain
+- `packages/core/src/__tests__/capability-manifest.test.ts` — capability manifest tests
+- Integration tests may require an X11 display (`:0`).
 
 ## Development workflow
 
 Before major changes:
 1. inspect repo
-2. read docs (`docs/README.md`, `docs/01-04`, `06`, `08`)
+2. read `README.md`, `DEMO.md`, and `docs/INDEX.md`; treat older milestone docs as historical
 3. summarize current state
 4. propose exact files to create/edit
 5. implement only approved milestone
@@ -152,12 +142,10 @@ After implementation:
 - Release scans reject credential-like material, token values, current-user absolute paths, screenshots/audio/logs, caches, runtime state, dangling dev symlinks, Python caches
 - Uninstall preserves runtime data by default
 - `agenthost overlay hide` kills orphaned GTK renderer processes
+- Overlay renderer PID files and temporary demo scripts belong outside the repo; remove them after use
 
-## Bridge / runtime
+## Runtime
 
-- Bridge port: `43117` (from `~/.bridge/config.json`)
-- Connection can be unstable; retry may be needed
-- `agenthost browser setup` to re-pair
 - MCP server entry: `packages/mcp-server/src/index.ts`
 - Server entry: `packages/mcp-server/src/server.ts`
 - Tool definitions in `packages/mcp-server/src/tools/`

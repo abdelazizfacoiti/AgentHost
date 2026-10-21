@@ -11,9 +11,10 @@ and composes computer, browser, filesystem, shell, application, vision/OCR,
 speech, and skill capabilities to accomplish it — observing each result,
 verifying outcomes, and recovering from failures. Every action passes through
 schema validation → risk classification → policy check → approval handling →
-execution → audit logging. And unlike other computer-use tools, **you can see
-every step as it happens**: an on-screen widget narrates each action and every
-click flashes a highlight ring at its target.
+execution → audit logging. Unlike other computer-use tools, **you can see
+what is happening**: an on-screen progress card shows the current step, elapsed
+time, and pause/resume/stop controls, and pointer primitives can highlight a
+target without intercepting clicks.
 
 ## It really works — Hespress run, unedited screenshots
 
@@ -24,18 +25,8 @@ searched, clicked the first result, and verified the homepage:
 
 ![Hespress homepage](.github/assets/demo-hespress-home.png)
 
-While it worked, the operator saw this — no extra calls, no delay:
-
-```text
-Focusing window Firefox          ✓ completed
-Sending hotkey ctrl+t            ✓ completed
-Typing text 8 chars              ✓ completed
-Sending hotkey Enter             ✓ completed
-Clicking target (970, 130)       ✓ completed
-Clicking target (530, 365)       ✓ completed
-```
-
 Full sequence with exact tool calls: [`examples/web-research/`](examples/web-research/).
+For the live progress card, run `npm run demo:task-progress` after `npm run build`.
 
 ## 60-second start (release archive)
 
@@ -61,7 +52,7 @@ own user directories. Then point any MCP client at it:
 ```
 
 Works with Codex, Claude Code, Copilot, OpenCode, and any MCP client. Agent
-clients: don't ingest all 250+ tool schemas up front — pull
+clients: don't ingest every tool schema up front — pull
 `agenthost://capabilities.md` first, or paste `agenthost capabilities --markdown`
 into static configs. Contributors: [`git clone` path below](#source-checkout).
 
@@ -70,16 +61,16 @@ into static configs. Contributors: [`git clone` path below](#source-checkout).
 | | AgentHost |
 |---|---|
 | **Safety model** | Risk tiers (LOW→auto, MEDIUM→logged, HIGH→approval, CRITICAL→explicit) + capability grants + exact-target confirmations + audit receipts on *every* tool |
-| **Visibility** | Working widget narrates each action (`Clicking target (520, 340)`); clicks flash a highlight ring; `task watch --follow` + Control Room live feed |
+| **Visibility** | On-screen progress card with step checklist, elapsed time, and pause/resume/stop controls; pointer and highlight primitives pass clicks through |
 | **Speed** | WindowId focus skips re-listing; 2s window-list cache; cached PATH lookups (see numbers below) |
 | **Provider-agnostic** | Any model via MCP stdio; lazy capability/skill resources keep system prompts small |
-| **Private by construction** | Loopback-only listeners, redacted logs/traces/overlays, emergency stop independent of the model |
-| **Verified** | 580+ tests, `build → lint → test`, CI on every push, smoke-tested MCP handshake |
+| **Private by construction** | Local stdio transport, redacted logs/traces/overlays, emergency stop independent of the model |
+| **Verified** | Extensive Vitest suite, `build → lint → test` on every change, smoke-tested MCP handshake |
 
-Browser control without the Browser Bridge? Structured DOM/tab access over a
-loopback bridge with explicit pairing — no cookies, passwords, storage, or
-arbitrary JS. When the bridge is unavailable, AgentHost degrades honestly to
-accessibility, OCR/vision, pointer fallback, or guide mode — never silently.
+Browser work uses ordinary desktop automation — focus, hotkeys, typing,
+screenshots, accessibility, and OCR/vision — with no cookies, passwords,
+storage, or arbitrary JavaScript. Sensitive pages remain policy-gated, and
+failures surface honestly instead of pretending an action succeeded.
 
 ## Honest performance numbers
 
@@ -101,14 +92,14 @@ No external benchmark claims — run it yourself and compare.
 
 - **vs browser-only agents** (e.g. BrowserUse): AgentHost drives the whole
   desktop — any app, terminal, files, hotkeys — not just web pages. Browser
-  work uses a paired extension bridge; everything else uses OS adapters.
+  work uses ordinary desktop automation instead of a bundled extension.
 - **vs terminal coding agents** (e.g. OpenInterpreter, Cline): same local-first
   spirit, but AgentHost adds GUI grounding (click/type/focus with active-window
   verification), visual narration, and a uniform confirmation/audit pipeline
   across *all* tools instead of shell-only approvals.
 - **vs cloud computer-use** (e.g. Claude/OpenAI operator-style products):
   AgentHost runs on your machine, under your policy, with your data never
-  leaving the loopback interface. No account, no per-action API meter.
+  leaving the machine. No account, no per-action API meter.
 
 ## CLI
 
@@ -116,8 +107,6 @@ No external benchmark claims — run it yourself and compare.
 agenthost doctor [--json]
 agenthost setup [--resume]
 agenthost start [--background] / stop / status
-agenthost control-room
-agenthost browser setup|status|reset
 agenthost task watch <id> [--follow] [--notify]
 agenthost task export <id> [--format md|html] [--out <path>]
 agenthost task approve <id> [--max-risk low|medium]
@@ -146,34 +135,21 @@ export AGENTHOST_CONFIG="$PWD/.agenthost/config.json"
 npm run start:mcp
 ```
 
-## Browser Bridge pairing
-
-```bash
-agenthost browser setup --browser chromium --auto --apply --approve
-# ..or Firefox (manual one-time load, then pair):
-agenthost browser setup --browser firefox --apply
-```
-
-Load the printed unpacked extension directory, choose **Pair with AgentHost**,
-approve the exact identity in the terminal, and wait for reconnect
-verification. Full steps and recovery:
-[Browser Setup Validation](docs/06_BROWSER_SETUP_VALIDATION.md).
-
 ## Safety boundary
 
 - No public listeners, hidden persistence, or autonomous background work.
 - No credential extraction, CAPTCHA/MFA/login/payment bypass, or sudo.
 - No silent send/submit/upload/delete/pay/buy; no arbitrary generated code.
-- No browser cookies/storage/debugger access; no scheduler execution.
-- No raw private content, tokens, or secrets in logs, receipts, overlays, or
-  Control Room. Visual surfaces never control target applications.
+- No browser cookies, storage, or debugger access.
+- No raw private content, tokens, or secrets in logs, receipts, or overlays.
+  Visual surfaces never control target applications.
 
 Details: [Security, permissions, and logging](docs/04_SECURITY_PERMISSIONS_AND_LOGGING.md).
 
 ## Roadmap
 
-- **P1 — less friction:** one-command pairing everywhere, `doctor --fix` for
-  missing system deps, Control Room first-run tour, hosted docs site.
+- **P1 — less friction:** `doctor --fix` for missing system deps, clearer
+  one-command setup, and a hosted docs site.
 - **P2 — more humans:** macOS/Windows adapters (the `LinuxAutomation`
   interface is already the portability contract), `npx`/brew/Docker
   distribution, OSWorld-style eval harness, skill marketplace.

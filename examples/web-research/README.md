@@ -33,12 +33,12 @@ Hespress homepage after the click:
 
 ![Hespress homepage](../../.github/assets/demo-hespress-home.png)
 
-## What the operator sees live
+## Visual feedback
 
-While the agent works, the on-screen working widget narrates each step —
-`Sending hotkey ctrl+t`, `Typing text 8 chars`, `Clicking target (970, 130)`
-— and every click flashes a highlight ring at its target. See
-`../overlay-narration/` for details.
+The desktop tools remain visual-only at the surface layer: pointer and
+highlight primitives can mark a target and pass clicks through. For a live
+progress card with Pause/Resume/Stop controls, see `../overlay-narration/`
+and run `npm run demo:task-progress`.
 
 ## Notes from this run
 

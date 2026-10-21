@@ -48,7 +48,9 @@ function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWith
         ? behavior.invalidHandshake === true ? { invalid: true } : { protocolVersion: 1, rendererEpoch: behavior.wrongEpoch === true ? epoch + 1 : epoch, capabilities: behavior.unsupportedRenderer === true ? { supported: false, reason: "overlay_compositor_unavailable" } : { supported: true } }
         : ["show", "update", "dismiss", "clear", "emergency_hide"].includes(request.command)
           ? { command: request.command, acknowledgement: request.command === "show" ? "visible" : request.command === "update" ? "updated" : request.command === "dismiss" ? "dismissed" : request.command === "clear" ? "cleared" : "emergency_hidden", rendererEpoch: epoch, visibleWindowCount: 1, interactiveWindowCount: 0, requestId: request.id, ...(request.command === "show" || request.command === "update" ? { transparentWindowCount: 1, drawReadyCount: 1, visible: true, liveSurfaceRegistered: behavior.missingLiveRegistration !== true } : {}) }
-          : { reason: "fake_renderer" };
+          : request.command === "events"
+            ? { events: [{ eventId: "event-1", overlayId: "overlay-1", event: "pause", createdAt: new Date().toISOString(), ownerSessionId: "overlay-session" }] }
+            : { reason: "fake_renderer" };
       child.stdout.write(JSON.stringify({ version: 1, id: request.id, ok: true, data }) + "\n");
       newline = buffer.indexOf("\n");
     }
@@ -88,6 +90,9 @@ describe("GTK renderer controller", () => {
       expect((await renderer.dismiss("overlay-1")).ok).toBe(true);
       expect((await renderer.clear()).ok).toBe(true);
       expect((await renderer.emergencyHide()).ok).toBe(true);
+      const drained = await renderer.drainEvents();
+      expect(drained).toHaveLength(1);
+      expect(drained[0]).toMatchObject({ overlayId: "overlay-1", event: "pause" });
     } finally {
       await renderer.close();
     }

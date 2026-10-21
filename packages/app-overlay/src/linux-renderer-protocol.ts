@@ -4,7 +4,7 @@ export const OVERLAY_IPC_VERSION = 1 as const;
 export const OVERLAY_IPC_MAX_BYTES = 256 * 1024;
 export const OVERLAY_IPC_MAX_IN_FLIGHT = 32;
 
-export type OverlayRendererCommand = "hello" | "capabilities" | "show" | "update" | "dismiss" | "clear" | "emergency_hide" | "state" | "close";
+export type OverlayRendererCommand = "hello" | "capabilities" | "show" | "update" | "dismiss" | "clear" | "emergency_hide" | "state" | "events" | "close";
 
 export interface OverlayRendererRequest {
   version: typeof OVERLAY_IPC_VERSION;
@@ -30,7 +30,7 @@ export interface OverlayRendererHandshakeData {
 
 export type OverlayRendererAcknowledgement = "visible" | "updated" | "dismissed" | "cleared" | "emergency_hidden";
 export interface OverlayRendererOperationData {
-  command: Exclude<OverlayRendererCommand, "hello" | "capabilities" | "state" | "close">;
+  command: Exclude<OverlayRendererCommand, "hello" | "capabilities" | "state" | "events" | "close">;
   acknowledgement: OverlayRendererAcknowledgement;
   rendererEpoch: number;
   requestId?: string;
@@ -44,7 +44,7 @@ export interface OverlayRendererOperationData {
   reason?: string;
 }
 
-const commands = new Set<OverlayRendererCommand>(["hello", "capabilities", "show", "update", "dismiss", "clear", "emergency_hide", "state", "close"]);
+const commands = new Set<OverlayRendererCommand>(["hello", "capabilities", "show", "update", "dismiss", "clear", "emergency_hide", "state", "events", "close"]);
 
 export function serializeRendererMessage(value: unknown): string | undefined {
   try {

@@ -28,6 +28,7 @@ export interface OverlayRenderer {
   emergencyHide(): Promise<OverlayOperationResult> | OverlayOperationResult;
   state(): Promise<OverlayStateSnapshot> | OverlayStateSnapshot;
   events(): Promise<OverlayWidgetEvent[]> | OverlayWidgetEvent[];
+  drainEvents?(): Promise<OverlayWidgetEvent[]> | OverlayWidgetEvent[];
   diagnostics?(): Promise<OverlayRendererDiagnostics> | OverlayRendererDiagnostics;
   restart?(): Promise<OverlayRendererRestartResult> | OverlayRendererRestartResult;
   close?(): Promise<void> | void;

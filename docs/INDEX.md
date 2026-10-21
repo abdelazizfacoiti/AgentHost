@@ -1,6 +1,6 @@
 # AgentHost canonical documentation
 
-AgentHost is a Linux-first, provider-agnostic local capability runtime and visual copilot. These documents describe the current implementation and its explicit limits.
+AgentHost is a Linux-first, provider-agnostic local capability runtime and visual copilot. These documents describe the product and its explicit limits. The current minimal-v2 tree does not include Control Room, Browser Bridge, or the runtime-activity service; sections that mention them are historical. See `README.md` and `DEMO.md` for current behavior and overlay demos.
 
 | Document | Use it for |
 | --- | --- |

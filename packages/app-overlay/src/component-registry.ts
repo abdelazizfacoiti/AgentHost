@@ -2,7 +2,7 @@ import type { OverlayWidgetComponent } from "@agenthost/core";
 
 /** Fixed renderer vocabulary. No HTML, CSS, script, URL, or dynamic component loading. */
 export const TRUSTED_VISUAL_COMPONENTS = [
-  "heading", "text", "divider", "icon", "status_badge", "progress", "checklist", "key_value",
+  "heading", "text", "divider", "icon", "status_badge", "progress", "spinner", "checklist", "key_value",
   "button", "choice", "comparison", "warning", "image_reference"
 ] as const;
 

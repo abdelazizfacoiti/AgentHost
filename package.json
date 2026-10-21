@@ -27,7 +27,8 @@
     "benchmark:desktop": "node scripts/benchmark-desktop.mjs",
     "release:install": "node scripts/install-release.mjs",
     "agenthost": "node packages/agenthost-cli/dist/index.js",
-    "demo:overlay": "node scripts/demo-overlay.mjs"
+    "demo:overlay": "node scripts/demo-overlay.mjs",
+    "demo:task-progress": "node scripts/task-progress-demo.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.0",

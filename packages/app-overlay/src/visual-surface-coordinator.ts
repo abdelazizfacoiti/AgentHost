@@ -115,6 +115,24 @@ export class VisualSurfaceCoordinator extends BaseOverlayManager {
     return result;
   }
 
+  override async updateWidget(input: OverlayWidget, reducedMotion = false): Promise<OverlayOperationResult> {
+    const result = await super.updateWidget(input, reducedMotion);
+    if (result.ok && input.widgetId !== undefined) {
+      const current = this.#surfaces.get(input.widgetId);
+      if (current !== undefined) {
+        const now = new Date().toISOString();
+        this.#surfaces.set(input.widgetId, {
+          ...current,
+          content: { title: input.title, components: normalizeTrustedVisualComponents(input.components) },
+          state: "visible",
+          updatedAt: now,
+          expiresAt: new Date(Date.now() + Math.min(300_000, Math.max(1_000, input.ttlMs ?? 30_000))).toISOString()
+        });
+      }
+    }
+    return result;
+  }
+
   override async update(overlayId: string, patch: Record<string, unknown>): Promise<OverlayOperationResult> {
     const result = await super.update(overlayId, patch);
     if (result.ok) {

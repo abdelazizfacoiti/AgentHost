@@ -280,7 +280,7 @@ Historical phases remain a record of shipped work, not the future architecture.
 
 ## V2 verification and manual boundary
 
-Automated verification covers headless protocol, strict surface validation, suppression ordering, mode selection, route scoring, metrics redaction, and advisory-only behavior. A normal X11 desktop is still required for visible pixel verification; use `npm run demo:visual-copilot -- --diagnose` first, then `npm run demo:visual-copilot -- --require-gui`. No CI run claims visible success from a headless renderer.
+Automated verification covers headless protocol, strict surface validation, suppression ordering, mode selection, route scoring, metrics redaction, and advisory-only behavior. A normal X11 desktop is still required for visible pixel verification; use `npm run demo:overlay` and `npm run demo:task-progress`. No CI run claims visible success from a headless renderer.
 
 ## Verification contract
 

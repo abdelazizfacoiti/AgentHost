@@ -11,6 +11,7 @@ export class DisabledOverlayRenderer implements OverlayRenderer {
   emergencyHide(): OverlayOperationResult { return { ok: true, reason: "overlay_disabled", acknowledged: true, rendererEpoch: 0 }; }
   state(): OverlayStateSnapshot { return { renderer: this.#report, overlays: [], pendingEvents: [], emergencyHidden: false }; }
   events(): OverlayWidgetEvent[] { return []; }
+  drainEvents(): OverlayWidgetEvent[] { return []; }
   diagnostics(): OverlayRendererDiagnostics { return { requestedMode: "disabled", effectiveBackend: "disabled", rendererStatus: "unavailable", sessionType: "unknown", displayPresent: false, waylandDisplayPresent: false, pythonExecutable: "not_used", rendererScriptPresent: false, childState: "stopped", handshake: "not_attempted", runtimeState: "stopped", rendererEpoch: 0, capabilities: this.#report, activeOverlayCount: 0, restartCount: 0, restartAllowed: false, recommendedAction: "Enable overlay rendering or use headless mode." }; }
   restart(): OverlayRendererRestartResult { return { ok: false, reason: "overlay_disabled", diagnostics: this.diagnostics() }; }
 }

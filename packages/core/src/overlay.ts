@@ -45,7 +45,8 @@ export type OverlayWidgetComponent =
   | { type: "icon"; token: "info" | "success" | "warning" | "danger" | "pointer" | "check" | "close" }
   | { type: "status_badge"; status: "neutral" | "info" | "success" | "warning" | "danger"; text: string }
   | { type: "progress"; value: number; label?: string }
-  | { type: "checklist"; items: Array<{ label: string; checked: boolean }> }
+  | { type: "spinner"; label?: string }
+  | { type: "checklist"; items: Array<{ label: string; checked: boolean; state?: "pending" | "active" | "done" | "failed" }> }
   | { type: "key_value"; key: string; value: string }
   | { type: "button"; label: string; event: OverlayEventName }
   | { type: "choice"; label: string; event: "accepted" | "rejected" | "cancelled" }
@@ -134,7 +135,7 @@ export function validateOverlayWidget(widget: OverlayWidget, reducedMotion = fal
   if (!Array.isArray(widget.components) || widget.components.length > 30) errors.push("overlay_widget_components_invalid");
   if (widget.placement !== undefined && !["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"].includes(widget.placement)) errors.push("overlay_widget_placement_invalid");
   if (widget.displayPolicy !== undefined && !["primary", "all"].includes(widget.displayPolicy)) errors.push("overlay_widget_display_policy_invalid");
-  const allowedComponents = new Set(["heading", "text", "divider", "icon", "status_badge", "progress", "checklist", "key_value", "button", "choice", "comparison", "warning", "image_reference"]);
+  const allowedComponents = new Set(["heading", "text", "divider", "icon", "status_badge", "progress", "spinner", "checklist", "key_value", "button", "choice", "comparison", "warning", "image_reference"]);
   for (const component of widget.components ?? []) {
     if (component === null || typeof component !== "object") { errors.push("overlay_component_unsupported"); continue; }
     if (!allowedComponents.has(component.type)) {
@@ -146,6 +147,13 @@ export function validateOverlayWidget(widget: OverlayWidget, reducedMotion = fal
     }
     if (component.type === "status_badge" || component.type === "button" || component.type === "choice") {
       const label = "label" in component ? component.label : component.text; const result = redactOverlayText(label, widget.sensitivity); errors.push(...result.errors);
+    }
+    if (component.type === "spinner" && component.label !== undefined) errors.push(...redactOverlayText(component.label, widget.sensitivity).errors);
+    if (component.type === "spinner" && component.label !== undefined && component.label.length > 200) errors.push("overlay_spinner_label_too_large");
+    if (component.type === "checklist") {
+      for (const item of component.items) {
+        if (item.state !== undefined && !["pending", "active", "done", "failed"].includes(item.state)) errors.push("overlay_checklist_state_invalid");
+      }
     }
     if (component.type === "icon" && !["info", "success", "warning", "danger", "pointer", "check", "close"].includes(component.token)) errors.push("overlay_icon_token_invalid");
     if (component.type === "status_badge" && !["neutral", "info", "success", "warning", "danger"].includes(component.status)) errors.push("overlay_status_invalid");

@@ -1,37 +1,46 @@
-# Overlay narration: see what the agent is doing
+# Overlay progress: see what the agent is doing
 
-AgentHost narrates desktop work automatically — no extra tool calls, no
-added latency:
+AgentHost can show a compact native GTK3 card while long work runs. The card is
+driven by a plain library API, not by MCP tool calls:
 
-- **Working widget** (top corner): `Clicking target (520, 340)`,
-  `Focusing window Firefox`, `Typing text 12 chars`, `Sending hotkey ctrl+l`.
-  Typed text, titles, and tokens are never shown — only coordinates, app
-  names, and character counts.
-- **Click highlight**: every `desktop.click` / coordinate pointer action
-  flashes a 1.2s highlight ring at its target, concurrently with the action.
-  It is visual-only and best-effort: headless sessions silently skip it.
-- **Task progress**: `agenthost task watch <id> --follow` tails the redacted
-  event log; the Control Room `GET /api/v1/activity?limit=20` feed shows the
-  same specific labels for dashboards.
+```ts
+import { createOverlayRenderer, OverlayManager, TaskProgressOverlay } from "@agenthost/app-overlay";
+
+const sessionId = "my-session";
+const manager = new OverlayManager(createOverlayRenderer("auto", { sessionId }), { sessionId });
+const progress = new TaskProgressOverlay({
+  manager,
+  taskId: "task_123",
+  title: "Researching salaries",
+  steps: [
+    { id: "collect", label: "Collect review pages" },
+    { id: "extract", label: "Extract salary bands" }
+  ],
+  onAction: (action) => console.log(`operator asked to ${action}`)
+});
+await progress.start();
+await progress.setStep("extract");
+await progress.waitingForApproval("task_123");
+await progress.complete("Report ready");
+```
+
+The card shows status, a checklist, `Step n / m`, elapsed time, the exact
+approval command, and Pause/Resume/Stop controls. Pause is cooperative at a
+step boundary; Stop is a request and never kills the current tool call. The
+card hides itself 15 seconds after a terminal state.
 
 ## Try it
 
 ```bash
-# Static widget/highlight tour (no target-app action):
+npm run build
 npm run demo:overlay
-
-# Watch live background work without looking at the apps:
-# Control Room loopback UI -> "Live background work" panel
-agenthost control-room
+npm run demo:task-progress
 ```
 
-## Configuration
+`demo:overlay` is a static pointer/highlight/tooltip/card tour.
+`demo:task-progress` simulates a multi-step run so the controls can be tried
+without touching a target application.
 
-- `AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED=false` — disable the widget.
-- `AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_REDUCED_MOTION=true` — instant transitions.
-- Screenshots automatically suppress the widget during capture so evidence
-  stays clean, then restore it.
-
-Implementation: `packages/mcp-server/src/action-announce.ts`,
-`runtime-activity-service.ts` (`describeToolDetail`),
-`runtime-activity-overlay.ts`.
+Implementation: `packages/app-overlay/src/task-progress.ts`,
+`packages/app-overlay/src/manager.ts`, and
+`packages/app-overlay/runtime/gtk3-renderer.py`.

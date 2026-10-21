@@ -8,3 +8,4 @@ export * from "./linux-renderer-protocol.js";
 export * from "./linux-renderer.js";
 export * from "./renderer-factory.js";
 export * from "./manager.js";
+export * from "./task-progress.js";
