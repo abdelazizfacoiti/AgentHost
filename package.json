@@ -17,15 +17,7 @@
     "lint": "tsc -b --pretty false",
     "test": "vitest run",
     "start:mcp": "node packages/mcp-server/dist/index.js",
-    "control-room": "node scripts/start-control-room.mjs",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
-    "browser:extension:prepare": "node scripts/prepare-browser-extension.mjs",
-    "browser:extension:firefox": "node scripts/prepare-browser-extension.mjs --browser firefox",
-    "browser:extension:chromium": "node scripts/prepare-browser-extension.mjs --browser chromium",
-    "browser:extension:build": "node scripts/build-browser-extension.mjs",
-    "browser:extension:verify": "node scripts/build-browser-extension.mjs",
-    "browser:setup": "node scripts/prepare-browser-extension.mjs --setup",
-    "browser:pair": "node packages/agenthost-cli/dist/index.js browser setup",
     "release:build": "node scripts/build-release.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:notices": "node scripts/generate-third-party-notices.mjs",
@@ -35,8 +27,7 @@
     "benchmark:desktop": "node scripts/benchmark-desktop.mjs",
     "release:install": "node scripts/install-release.mjs",
     "agenthost": "node packages/agenthost-cli/dist/index.js",
-    "demo:overlay": "node scripts/demo-overlay.mjs",
-    "demo:visual-copilot": "node scripts/demo-visual-copilot.mjs"
+    "demo:overlay": "node scripts/demo-overlay.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.0",

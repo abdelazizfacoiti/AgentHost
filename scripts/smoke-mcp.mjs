@@ -2,18 +2,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createAdapterRegistry,
-  createBaseCapabilityRegistry,
-  createSessionId,
-  JsonlAuditLogger,
-  loadAgentHostConfig
-} from "../packages/core/dist/index.js";
-import { getLinuxSystemInfo } from "../packages/os-linux/dist/index.js";
-import { ConfirmationManager } from "../packages/mcp-server/dist/confirmation.js";
-import { GrantStore } from "../packages/mcp-server/dist/grants.js";
-import { runTool } from "../packages/mcp-server/dist/tool-runner.js";
-import { createSystemTools } from "../packages/mcp-server/dist/tools/system.js";
+import { createAgentHostMcpServer } from "../packages/mcp-server/dist/server.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const serverPath = path.join(rootDir, "packages", "mcp-server", "dist", "index.js");
@@ -24,67 +13,26 @@ if (!existsSync(serverPath)) {
   process.exit(1);
 }
 
-const config = await loadAgentHostConfig({
-  env: {
-    ...process.env,
-    AGENTHOST_HOME: smokeDir,
-    AGENTHOST_PROFILE: "dev"
-  }
-});
-const registry = createBaseCapabilityRegistry();
-const adapters = createAdapterRegistry();
-const logger = new JsonlAuditLogger(config.logFile);
-const context = {
-  sessionId: createSessionId(),
-  config,
-  policy: config.policy,
-  registry,
-  adapters,
-  logger,
-  confirmations: new ConfirmationManager(),
-  grants: new GrantStore({ persistentGrants: config.policy.grants }),
-  linux: {
-    getSystemInfo: () => getLinuxSystemInfo(config, registry)
-  }
-};
-const tools = createSystemTools();
+process.env.AGENTHOST_HOME = smokeDir;
+process.env.AGENTHOST_PROFILE = "dev";
 
-async function callTool(name) {
-  const tool = tools.find((candidate) => candidate.name === name);
+const { context, closeResources } = await createAgentHostMcpServer();
 
-  if (tool === undefined) {
-    throw new Error(`Missing tool definition: ${name}`);
+try {
+  const toolNames = [...(context.tools?.keys() ?? [])].sort();
+  for (const expected of ["system.get_info", "system.list_capabilities", "desktop.screenshot", "vision.analyze_image", "desktop.click"]) {
+    if (!toolNames.includes(expected)) {
+      throw new Error(`Missing registered tool: ${expected}`);
+    }
   }
 
-  const result = await runTool(tool, {}, context);
+  const info = context.tools?.get("system.get_info");
+  if (info === undefined) throw new Error("Missing system.get_info definition.");
+  const result = await info.handler({}, context);
+  if (!result.ok) throw new Error("system.get_info did not return an ok ToolResult.");
 
-  if (!result.ok || result.tool !== name) {
-    throw new Error(`${name} did not return an ok ToolResult.`);
-  }
-
-  return result;
+  console.log("AgentHost smoke test passed.");
+  console.log(JSON.stringify({ toolCount: toolNames.length, capabilityTools: toolNames }, null, 2));
+} finally {
+  await closeResources();
 }
-
-const info = await callTool("system.get_info");
-const capabilities = await callTool("system.list_capabilities");
-
-const toolNames = capabilities.data.tools.map((tool) => tool.name).sort();
-
-for (const expected of ["system.get_info", "system.list_capabilities"]) {
-  if (!toolNames.includes(expected)) {
-    throw new Error(`Missing capability: ${expected}`);
-  }
-}
-
-console.log("AgentHost smoke test passed.");
-console.log(
-  JSON.stringify(
-    {
-      systemInfoTool: info.tool,
-      capabilityTools: toolNames,
-      logFile: config.logFile
-    },
-    null,
-    2
-  )
-);

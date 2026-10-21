@@ -37,34 +37,10 @@ import type {
   SandboxSupportProbeResult
   ,VisionGroundingResult, VisionMode
 } from "@agenthost/core";
-import type { BrowserBridgeAdapter, BrowserBridgeServer } from "@agenthost/app-browser";
 import type { OverlayManager } from "@agenthost/app-overlay";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
-import type { ConfirmationManager } from "./confirmation.js";
-import type { ForgeStore } from "./forge-store.js";
 import type { GrantStore } from "./grants.js";
-import type { WorkflowStore } from "./workflow-store.js";
-import type { WorkflowReplayStore } from "./workflow-replay-store.js";
-import type { ToolReceiptManager } from "./tool-receipts.js";
-import type { VisionEvidenceStore } from "./vision-evidence.js";
-import type { SchedulerStore } from "./scheduler-store.js";
-import type { OverlayAssistanceStore } from "./overlay-assistance-store.js";
-import type { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
-import type { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
-import type { ControlRoomStore } from "./control-room-store.js";
-import type { GoalPlanningService } from "./goal-planning-service.js";
-import type { CapabilityStrategyStore } from "./capability-strategy-store.js";
-import type { CapabilityStrategyService } from "./capability-strategy-service.js";
-import type { AdaptiveActionRouter } from "./adaptive-action-router.js";
-import type { SpeechService } from "./speech-service.js";
-import type { RuntimeActivityService } from "./runtime-activity-service.js";
-import type { RuntimeActivityOverlayController } from "./runtime-activity-overlay.js";
 import type { AnyAgentHostToolDefinition } from "./tool-runner.js";
-import type { BrowserSetupService } from "./browser-setup-service.js";
-import type { CapabilityGraphService } from "./capability-graph-service.js";
-import type { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
-import type { EpisodicMemoryStore } from "./episodic-memory-store.js";
-import type { BridgeProbeCache } from "./decision-cache.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -166,34 +142,8 @@ export interface AgentHostMcpContext {
   registry: CapabilityRegistrySnapshot;
   adapters: AdapterRegistrySnapshot;
   logger: AuditLogger;
-  confirmations: ConfirmationManager;
   grants: GrantStore;
-  forge: ForgeStore;
-  workflowTrace?: WorkflowStore;
-  workflowReplay?: WorkflowReplayStore;
-  receipts?: ToolReceiptManager;
-  visionEvidence?: VisionEvidenceStore;
-  scheduler?: SchedulerStore;
-  browser?: BrowserBridgeAdapter;
-  browserBridge?: BrowserBridgeServer;
-  browserSetup?: BrowserSetupService;
-  capabilityGraph?: CapabilityGraphService;
-  failureMemory?: SafeFailureMemoryStore;
-  episodicMemory?: EpisodicMemoryStore;
   overlay?: OverlayManager;
-  overlayAssistance?: OverlayAssistanceStore;
-  overlayAssistanceTemplates?: OverlayAssistanceTemplateStore;
-  overlayControlSurface?: OverlayControlSurfaceStore;
-  controlRoom?: ControlRoomStore;
-  goalPlanning?: GoalPlanningService;
-  strategyStore?: CapabilityStrategyStore;
-  strategyService?: CapabilityStrategyService;
-  routeRouter?: AdaptiveActionRouter;
-  speech?: SpeechService;
-  runtimeActivity?: RuntimeActivityService;
-  runtimeActivityOverlay?: RuntimeActivityOverlayController;
-  /** Shared bridge probe cache — deduplicates browser.detect() across concurrent callers. */
-  bridgeProbeCache?: BridgeProbeCache;
   /** Live tool definitions for governed nested execution (plan executor). */
   tools?: Map<string, AnyAgentHostToolDefinition<any>>;
   linux: LinuxAutomation;

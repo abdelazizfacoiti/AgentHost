@@ -32,20 +32,16 @@ if (await readFile(path.join(root, "THIRD_PARTY_NOTICES"), "utf8") !== expectedN
 }
 const releaseRoot = path.join(root, "release");
 const stage = path.join(releaseRoot, `agenthost-v${version}-linux-x64`);
-const browserBuild = spawnSync(process.execPath, [path.join(root, "scripts", "build-browser-extension.mjs")], { cwd: root, stdio: "pipe" });
-if (browserBuild.status !== 0) throw new Error("browser_release_artifact_build_failed");
 // Release staging can contain large dependency trees; tolerate transient
 // directory-entry races while pruning a prior stage, but never reuse it.
 await rm(stage, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 await mkdir(stage, { recursive: true, mode: 0o755 });
 async function copy(source, destination, options = {}) { await mkdir(path.dirname(destination), { recursive: true }); await cp(source, destination, { recursive: true, force: true, ...options }); }
-for (const packageName of ["core", "mcp-server", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "app-ssh", "agenthost-cli"]) {
+for (const packageName of ["core", "mcp-server", "os-linux", "app-overlay", "app-blender", "app-ssh", "agenthost-cli"]) {
   await copy(path.join(root, "packages", packageName, "dist"), path.join(stage, "packages", packageName, "dist"));
   await copy(path.join(root, "packages", packageName, "package.json"), path.join(stage, "packages", packageName, "package.json"));
 }
 await copy(path.join(root, "packages", "app-overlay", "runtime"), path.join(stage, "packages", "app-overlay", "runtime"));
-await copy(path.join(root, "packages", "app-browser", "extension"), path.join(stage, "browser-extension", "source"));
-await copy(path.join(releaseRoot, "browser"), path.join(stage, "browser-extension", "artifacts"));
 await copy(path.join(root, "README.md"), path.join(stage, "README.md"));
 await copy(path.join(root, "CHANGELOG.md"), path.join(stage, "CHANGELOG.md"));
 await copy(path.join(root, "CONTRIBUTING.md"), path.join(stage, "CONTRIBUTING.md"));
@@ -58,7 +54,7 @@ for (const legalFile of LEGAL_FILES) {
 }
 if (await stat(path.join(root, "node_modules")).then(() => true).catch(() => false)) await copy(path.join(root, "node_modules"), path.join(stage, "node_modules"));
 await mkdir(path.join(stage, "node_modules", "@agenthost"), { recursive: true });
-for (const packageName of ["core", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "app-ssh", "mcp-server"]) {
+for (const packageName of ["core", "os-linux", "app-overlay", "app-blender", "app-ssh", "mcp-server"]) {
   const link = path.join(stage, "node_modules", "@agenthost", packageName);
   await rm(link, { recursive: true, force: true }).catch(() => undefined);
   await symlink(path.join("..", "..", "packages", packageName), link, "junction");
@@ -83,7 +79,7 @@ await removeDanglingSymlinks(stage);
 const wrapper = `#!/usr/bin/env node\nimport { fileURLToPath } from "node:url";\nprocess.env.AGENTHOST_RELEASE_ROOT = fileURLToPath(new URL("..", import.meta.url));\nawait import(new URL("../packages/agenthost-cli/dist/index.js", import.meta.url));\n`;
 await mkdir(path.join(stage, "bin"), { recursive: true });
 await writeFile(path.join(stage, "bin", "agenthost.mjs"), wrapper, { mode: 0o755 }); await chmod(path.join(stage, "bin", "agenthost.mjs"), 0o755);
-for (const packageName of ["core", "mcp-server", "os-linux", "app-browser", "app-overlay", "app-control-room", "app-blender", "app-ssh", "agenthost-cli"]) {
+for (const packageName of ["core", "mcp-server", "os-linux", "app-overlay", "app-blender", "app-ssh", "agenthost-cli"]) {
   const packageManifest = JSON.parse(await readFile(path.join(stage, "packages", packageName, "package.json"), "utf8"));
   if (packageManifest.license !== PROJECT_LICENSE) {
     throw new Error(`release_package_license_invalid:${packageName}`);
@@ -102,8 +98,7 @@ const manifest = {
   createdAt: "1970-01-01T00:00:00.000Z",
   requires: { node: ">=20", python: "3" },
   limitations: [
-    "X11 visible overlay is verified; Wayland reports limited support.",
-    "Browser extensions are unsigned/manual unless externally published."
+    "X11 visible overlay is verified; Wayland reports limited support."
   ],
   legal: {
     projectLicense: PROJECT_LICENSE,

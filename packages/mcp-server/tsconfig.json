@@ -14,13 +14,7 @@
       "path": "../os-linux"
     },
     {
-      "path": "../app-browser"
-    },
-    {
       "path": "../app-overlay"
-    },
-    {
-      "path": "../app-control-room"
     }
   ]
 }

@@ -190,9 +190,11 @@ paste `agenthost capabilities --markdown`.
 ## Overlay lifecycle: no stuck widgets
 
 Every overlay carries a TTL (default 30s, max 5min) enforced by a 5-second
-sweeper even when nothing polls state. The working widget auto-hides after
-terminal work (completed, failed, cancelled; default 5s) and hides
-immediately on `task.complete` and `agent.stop`. Renderer children exit when
+sweeper even when nothing polls state. The status widget stays on screen at
+all times: terminal work (completed, failed, cancelled; default 5s) yields to
+a persistent idle widget, as do `task.complete` and `agent.stop` (set
+`runtimeActivityOverlay.persistWhenIdle: false` for the legacy auto-hide).
+Renderer children exit when
 their MCP parent dies (stdin HUP plus a 5-second parent-watch). If a widget
 ever sticks anyway, `agenthost overlay hide` terminates orphaned renderers
 (live ones are left alone) and `overlay.emergency_hide` clears owned

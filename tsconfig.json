@@ -5,13 +5,7 @@
       "path": "./packages/app-blender"
     },
     {
-      "path": "./packages/app-browser"
-    },
-    {
       "path": "./packages/app-overlay"
-    },
-    {
-      "path": "./packages/app-control-room"
     },
     {
       "path": "./packages/app-ssh"

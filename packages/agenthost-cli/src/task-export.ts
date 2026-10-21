@@ -44,6 +44,7 @@ function eventsOf(record: TaskExportRecord): TaskExportEvent[] {
 
 export function renderTaskMarkdown(record: TaskExportRecord): string {
   const events = eventsOf(record);
+  const counts = countByKind(events);
   const lines = [
     `# AgentHost run: ${text(record.taskId, "task")}`,
     "",
@@ -52,6 +53,7 @@ export function renderTaskMarkdown(record: TaskExportRecord): string {
     `- Current action: ${text(record.currentAction)}`,
     `- Created: ${text(record.createdAt)}`,
     `- Updated: ${text(record.updatedAt)}`,
+    ...(counts.length > 0 ? [`- Events by kind: ${counts.map(({ kind, count }) => `${kind}: ${count}`).join(", ")}`] : []),
     "",
     `> Goal: ${text(record.goal)}`,
     "",
@@ -67,26 +69,53 @@ export function renderTaskMarkdown(record: TaskExportRecord): string {
   return `${lines.join("\n")}\n`;
 }
 
+function statusClass(status: string): string {
+  if (status === "completed") return "ok";
+  if (status === "failed" || status === "blocked") return "bad";
+  if (status === "paused" || status === "cancelled") return "warn";
+  return "info";
+}
+
+function kindClass(kind: string): string {
+  if (kind === "error") return "error";
+  if (kind === "verification") return "verification";
+  if (kind === "recovery") return "recovery";
+  return "";
+}
+
+function countByKind(events: TaskExportEvent[]): Array<{ kind: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const event of events) counts.set(text(event.kind), (counts.get(text(event.kind)) ?? 0) + 1);
+  return [...counts.entries()]
+    .map(([kind, count]) => ({ kind, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
 export function renderTaskHtml(record: TaskExportRecord): string {
   const events = eventsOf(record);
+  const counts = countByKind(events);
   const rows = events
     .map(
       (event) =>
-        `      <tr><td>${escHtml(text(event.at))}</td><td>${escHtml(text(event.kind))}</td><td>${escHtml(text(event.summary, ""))}</td></tr>`
+        `      <tr><td>${escHtml(text(event.at))}</td><td><span class="kind ${kindClass(text(event.kind))}">${escHtml(text(event.kind))}</span></td><td>${escHtml(text(event.summary, ""))}</td></tr>`
     )
     .join("\n");
+  const summary = counts.length > 0
+    ? counts.map(({ kind, count }) => `<span class="kind ${kindClass(kind)}">${escHtml(kind)}: ${count}</span>`).join(" ")
+    : "no events yet";
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentHost run: ${escHtml(text(record.taskId, "task"))}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f4f4}.badge{display:inline-block;padding:.1rem .5rem;border-radius:999px;background:#eef;border:1px solid #ccd}blockquote{border-left:3px solid #888;margin:1rem 0;padding:.2rem 1rem;color:#333}footer{margin-top:2rem;color:#666;font-size:.85rem}</style>
+<style>body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#111}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f4f4}.badge{display:inline-block;padding:.15rem .6rem;border-radius:999px;font-weight:600;background:#eef;border:1px solid #ccd}.badge.ok{background:#e6f4ea;border-color:#34a853}.badge.bad{background:#fce8e6;border-color:#d93025}.badge.warn{background:#fef7e0;border-color:#f9ab00}.badge.info{background:#e8f0fe;border-color:#1a73e8}.kind{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.85em;background:#f4f4f4;border:1px solid #ccc;white-space:nowrap}.kind.error{background:#fce8e6;border-color:#d93025}.kind.verification{background:#e6f4ea;border-color:#34a853}.kind.recovery{background:#fef7e0;border-color:#f9ab00}.summary{margin:.5rem 0 1rem;line-height:2}blockquote{border-left:3px solid #888;margin:1rem 0;padding:.2rem 1rem;color:#333}footer{margin-top:2rem;color:#666;font-size:.85rem}</style>
 </head>
 <body>
 <h1>AgentHost run: ${escHtml(text(record.taskId, "task"))}</h1>
-<p><span class="badge">${escHtml(text(record.status))}</span> phase ${escHtml(text(record.phase))} &middot; action ${escHtml(text(record.currentAction))}</p>
+<p><span class="badge ${statusClass(text(record.status))}">${escHtml(text(record.status))}</span> phase ${escHtml(text(record.phase))} &middot; action ${escHtml(text(record.currentAction))}</p>
 <blockquote>Goal: ${escHtml(text(record.goal))}</blockquote>
+<p class="summary">${summary} &middot; ${events.length} events total</p>
 <h2>Timeline</h2>
 <table>
 <thead><tr><th>Time</th><th>Kind</th><th>Summary</th></tr></thead>

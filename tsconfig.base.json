@@ -14,14 +14,8 @@
       "@agenthost/os-linux": [
         "packages/os-linux/src/index.ts"
       ],
-      "@agenthost/app-browser": [
-        "packages/app-browser/src/index.ts"
-      ],
       "@agenthost/app-overlay": [
         "packages/app-overlay/src/index.ts"
-      ],
-      "@agenthost/app-control-room": [
-        "packages/app-control-room/src/index.ts"
       ]
     },
     "strict": true,

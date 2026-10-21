@@ -1,622 +1,270 @@
-import type {
-  ActionPreviewResult,
-  FileEnsureDirResult,
-  FileExistsResult,
-  FileListResult,
-  FileReadResult,
-  FileWriteResult,
-  ToolResult
-} from "@agenthost/core";
-import { createGovernedActionEffect, evaluateSafety, fingerprintActionBinding, normalizePathForPolicy, toolFailure, toolSuccess } from "@agenthost/core";
+import path from "node:path";
+import { readFile, writeFile, mkdir, rm, readdir, stat, copyFile, rename } from "node:fs/promises";
+import { toolFailure, toolSuccess, normalizePathForPolicy, evaluateSafety, type ToolResult, type FileExistsResult } from "@agenthost/core";
 import { z } from "zod";
-import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
+import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import { createSafetyEvaluationContext } from "../grants.js";
-import {
-  acceptedConfirmation,
-  buildPreviewResult,
-  confirmationRequired,
-  missingConfirmationReason,
-  rejectedConfirmation,
-  toFilePreviewTarget
-} from "./preview.js";
 
-const pathSchema = z.string().trim().min(1).max(1000);
-const encodingSchema = z.enum(["utf8", "base64"]);
+const baseSchema = z.object({
+  path: z.string().trim().min(1).max(1000)
+}).strict();
 
-const writeInputSchema = z
-  .object({
-    path: pathSchema,
-    content: z.string(),
-    encoding: encodingSchema.optional(),
-    createParents: z.boolean().optional(),
-    dryRun: z.boolean().optional(),
-    confirmationToken: z.string().trim().min(1).max(500).optional()
-  })
-  .strict();
-const readInputSchema = z
-  .object({
-    path: pathSchema,
-    encoding: encodingSchema.optional(),
-    maxBytes: z.number().int().min(1).max(1024 * 1024).optional()
-  })
-  .strict();
-const pathOnlyInputSchema = z.object({ path: pathSchema }).strict();
-const ensureDirInputSchema = z
-  .object({
-    path: pathSchema,
-    dryRun: z.boolean().optional(),
-    confirmationToken: z.string().trim().min(1).max(500).optional()
-  })
-  .strict();
-const listInputSchema = z
-  .object({
-    path: pathSchema,
-    limit: z.number().int().min(1).max(500).optional()
-  })
-  .strict();
+const readInput = baseSchema.extend({
+  encoding: z.enum(["utf8", "base64"]).optional(),
+  maxBytes: z.number().int().min(1).max(100 * 1024 * 1024).optional()
+}).strict();
 
-const sourceDestSchema = z
-  .object({
-    source: pathSchema,
-    destination: pathSchema,
-    dryRun: z.boolean().optional(),
-    confirmationToken: z.string().trim().min(1).max(500).optional()
-  })
-  .strict();
-const deleteInputSchema = z
-  .object({
-    path: pathSchema,
-    recursive: z.boolean().optional(),
-    dryRun: z.boolean().optional(),
-    confirmationToken: z.string().trim().min(1).max(500).optional()
-  })
-  .strict();
-type SourceDestInput = z.infer<typeof sourceDestSchema>;
-type DeleteInput = z.infer<typeof deleteInputSchema>;
-type WriteInput = z.infer<typeof writeInputSchema>;
-type ReadInput = z.infer<typeof readInputSchema>;
-type PathOnlyInput = z.infer<typeof pathOnlyInputSchema>;
-type EnsureDirInput = z.infer<typeof ensureDirInputSchema>;
-type ListInput = z.infer<typeof listInputSchema>;
+const writeInput = baseSchema.extend({
+  content: z.string().min(0).max(100 * 1024 * 1024),
+  encoding: z.enum(["utf8", "base64"]).optional(),
+  createParents: z.boolean().optional()
+}).strict();
 
-const pathOnlyMcpInputSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "string",
-      minLength: 1,
-      maxLength: 1000
-    }
-  },
-  required: ["path"],
-  additionalProperties: false
-};
+const listInput = baseSchema.extend({
+  limit: z.number().int().min(1).max(10000).optional()
+}).strict();
 
-const ensureDirMcpInputSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "string",
-      minLength: 1,
-      maxLength: 1000
-    },
-    dryRun: {
-      type: "boolean"
-    },
-    confirmationToken: {
-      type: "string",
-      minLength: 1,
-      maxLength: 500
-    }
-  },
-  required: ["path"],
-  additionalProperties: false
-};
+const existsInput = baseSchema.strict();
 
-function previewReasons(primaryReason: string, safetyReasons: string[]): string[] {
-  return safetyReasons.includes(primaryReason) ? safetyReasons : [primaryReason, ...safetyReasons];
-}
+const ensureDirInput = baseSchema.strict();
 
-function normalizePreviewPath(inputPath: string, context: AgentHostMcpContext): string {
+const copyInput = z.object({
+  source: z.string().trim().min(1).max(1000),
+  destination: z.string().trim().min(1).max(1000)
+}).strict();
+
+const moveInput = z.object({
+  source: z.string().trim().min(1).max(1000),
+  destination: z.string().trim().min(1).max(1000)
+}).strict();
+
+const deleteInput = baseSchema.extend({
+  recursive: z.boolean().optional()
+}).strict();
+
+function resolvedPath(inputPath: string, context: AgentHostMcpContext): string {
   return normalizePathForPolicy(inputPath, { agentHostDir: context.config.agentHostDir });
 }
 
+function safetyCheck(tool: string, actionType: "file_read" | "file_write" | "file_delete", filePath: string, context: AgentHostMcpContext) {
+  return evaluateSafety(
+    { tool, actionType, filePath, strategy: "cli_or_script" },
+    context.policy,
+    createSafetyEvaluationContext(context)
+  );
+}
+
+function failure(tool: string, safety: ReturnType<typeof evaluateSafety>): ToolResult<never> {
+  return toolFailure({
+    tool,
+    riskLevel: safety.riskLevel,
+    approval: safety.approval,
+    error: {
+      code: safety.blocked ? "safety_blocked" : "approval_required",
+      message: safety.blocked ? "Blocked by safety engine." : "Requires approval.",
+      details: safety
+    },
+    observations: safety.reasons
+  });
+}
+
 export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
-  const write: AgentHostToolDefinition<WriteInput, FileWriteResult | ActionPreviewResult, AgentHostMcpContext> = {
-    name: "file.write",
-    description: "Writes a new file inside approved roots only.",
-    riskLevel: "medium",
-    inputSchema: writeInputSchema,
-    mcpInputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          minLength: 1,
-          maxLength: 1000
-        },
-        content: {
-          type: "string"
-        },
-        encoding: {
-          type: "string",
-          enum: ["utf8", "base64"]
-        },
-        createParents: {
-          type: "boolean"
-        },
-        dryRun: {
-          type: "boolean"
-        },
-        confirmationToken: {
-          type: "string",
-          minLength: 1,
-          maxLength: 500
-        }
-      },
-      required: ["path", "content"],
-      additionalProperties: false
-    },
-    inputSummary: "Write file",
-    safety: {
-      actionType: "file_write",
-      getInput: (input) => ({ filePath: input.path })
-    },
-    preview: {
-      isDryRun: (input) => input.dryRun === true
-    },
-    async handler(input, context, runtime): Promise<ToolResult<FileWriteResult | ActionPreviewResult>> {
-      if (runtime?.isDryRun) {
-        const normalizedPath = normalizePreviewPath(input.path, context);
-        const safetyDecision =
-          runtime.safetyDecision ??
-          evaluateSafety(
-            {
-              tool: "file.write",
-              actionType: "file_write",
-              filePath: input.path
-            },
-            context.policy,
-            createSafetyEvaluationContext(context)
-          );
-
-        return buildPreviewResult({
-          tool: "file.write",
-          riskLevel: "medium",
-          safety: safetyDecision,
-          targetSummary: `Write ${input.content.length} bytes to ${normalizedPath}`,
-          target: toFilePreviewTarget(normalizedPath, normalizedPath),
-          confirmation: {
-            manager: context.confirmations,
-            sessionId: context.sessionId,
-            input,
-            target: { path: normalizedPath },
-            explanation: "Use this token to write the exact previewed file before it expires.",
-            riskLevel: safetyDecision.riskLevel,
-            appSensitivity: safetyDecision.appSensitivity
-          },
-          reasons: previewReasons("Classified the file path without writing any content.", safetyDecision.reasons),
-          observations: ["Previewed file creation without writing the file."]
-        });
-      }
-
-      const normalizedPath = normalizePreviewPath(input.path, context);
-      if (input.confirmationToken === undefined) {
-        const { code, reason } = missingConfirmationReason(
-          runtime?.safetyDecision ??
-            evaluateSafety(
-              {
-                tool: "file.write",
-                actionType: "file_write",
-                filePath: input.path
-              },
-              context.policy,
-              createSafetyEvaluationContext(context)
-            )
-        );
-        return toolFailure({
-          tool: "file.write",
-          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-          confirmation: confirmationRequired(reason),
-          error: {
-            code,
-            message: reason
-          },
-          observations: [reason]
-        });
-      }
-
-      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
-        sessionId: context.sessionId,
-        tool: "file.write",
-        input,
-        target: { path: normalizedPath },
-        riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium"
-      });
-
-      if (!verification.ok) {
-        return toolFailure({
-          tool: "file.write",
-          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
-          error: {
-            code: "confirmation_rejected",
-            message: verification.reason
-          },
-          observations: [verification.reason]
-        });
-      }
-
-      const writeInput: {
-        path: string;
-        content: string;
-        encoding?: "utf8" | "base64";
-        createParents?: boolean;
-      } = {
-        path: input.path,
-        content: input.content
-      };
-
-      if (input.encoding !== undefined) {
-        writeInput.encoding = input.encoding;
-      }
-
-      if (input.createParents !== undefined) {
-        writeInput.createParents = input.createParents;
-      }
-
-      return toolSuccess({
-        tool: "file.write",
-        riskLevel: "medium",
-        confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and file write executed."),
-        data: await context.linux.writeFile(writeInput),
-        observations: ["Wrote a new file inside approved roots."]
-      });
-    }
-  };
-
-  const read: AgentHostToolDefinition<ReadInput, FileReadResult, AgentHostMcpContext> = {
+  const read: AgentHostToolDefinition<z.infer<typeof readInput>, unknown, AgentHostMcpContext> = {
     name: "file.read",
-    description: "Reads a file when path safety policy allows it.",
+    description: "Reads a file from an approved path.",
     riskLevel: "low",
-    inputSchema: readInputSchema,
+    inputSchema: readInput,
     mcpInputSchema: {
       type: "object",
-      properties: {
-        path: {
-          type: "string",
-          minLength: 1,
-          maxLength: 1000
-        },
-        encoding: {
-          type: "string",
-          enum: ["utf8", "base64"]
-        },
-        maxBytes: {
-          type: "integer",
-          minimum: 1,
-          maximum: 1048576
-        }
-      },
+      properties: { path: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, maxBytes: { type: "integer" } },
       required: ["path"],
       additionalProperties: false
     },
     inputSummary: "Read file",
-    safety: {
-      actionType: "file_read",
-      getInput: (input) => ({ filePath: input.path })
-    },
-    async handler(input, context): Promise<ToolResult<FileReadResult>> {
-      const readInput: { path: string; encoding?: "utf8" | "base64"; maxBytes?: number } = {
-        path: input.path
-      };
-
-      if (input.encoding !== undefined) {
-        readInput.encoding = input.encoding;
+    safety: { actionType: "file_read", getInput: (i) => ({ filePath: i.path }) },
+    async handler(input, context) {
+      const fp = resolvedPath(input.path, context);
+      const safety = safetyCheck("file.read", "file_read", fp, context);
+      if (!safety.allowed) return failure("file.read", safety);
+      try {
+        const content = input.encoding === "base64"
+          ? (await readFile(fp)).toString("base64")
+          : await readFile(fp, "utf8");
+        return toolSuccess({ tool: "file.read", riskLevel: "low", data: { path: fp, content, truncated: false }, observations: ["Read file."] });
+      } catch (e) {
+        return toolFailure({ tool: "file.read", riskLevel: "low", error: { code: "read_failed", message: e instanceof Error ? e.message : "Read failed" } });
       }
-
-      if (input.maxBytes !== undefined) {
-        readInput.maxBytes = input.maxBytes;
-      }
-
-      return toolSuccess({
-        tool: "file.read",
-        riskLevel: "low",
-        data: await context.linux.readFile(readInput),
-        observations: ["Read file after path safety classification."]
-      });
     }
   };
 
-  const exists: AgentHostToolDefinition<PathOnlyInput, FileExistsResult, AgentHostMcpContext> = {
-    name: "file.exists",
-    description: "Checks whether a path exists when path safety policy allows it.",
-    riskLevel: "low",
-    inputSchema: pathOnlyInputSchema,
-    mcpInputSchema: pathOnlyMcpInputSchema,
-    inputSummary: "Check file exists",
-    safety: {
-      actionType: "file_read",
-      getInput: (input) => ({ filePath: input.path })
-    },
-    async handler(input, context): Promise<ToolResult<FileExistsResult>> {
-      return toolSuccess({
-        tool: "file.exists",
-        riskLevel: "low",
-        data: await context.linux.fileExists({ path: input.path }),
-        observations: ["Checked path existence after path safety classification."]
-      });
-    }
-  };
-
-  const list: AgentHostToolDefinition<ListInput, FileListResult, AgentHostMcpContext> = {
-    name: "file.list",
-    description: "Lists a directory non-recursively when path safety policy allows it.",
-    riskLevel: "low",
-    inputSchema: listInputSchema,
+  const write: AgentHostToolDefinition<z.infer<typeof writeInput>, unknown, AgentHostMcpContext> = {
+    name: "file.write",
+    description: "Writes a file to an approved path.",
+    riskLevel: "medium",
+    inputSchema: writeInput,
     mcpInputSchema: {
       type: "object",
-      properties: {
-        path: {
-          type: "string",
-          minLength: 1,
-          maxLength: 1000
-        },
-        limit: {
-          type: "integer",
-          minimum: 1,
-          maximum: 500
+      properties: { path: { type: "string" }, content: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, createParents: { type: "boolean" } },
+      required: ["path", "content"],
+      additionalProperties: false
+    },
+    inputSummary: "Write file",
+    safety: { actionType: "file_write", getInput: (i) => ({ filePath: i.path }) },
+    async handler(input, context) {
+      const fp = resolvedPath(input.path, context);
+      const safety = safetyCheck("file.write", "file_write", fp, context);
+      if (!safety.allowed) return failure("file.write", safety);
+      try {
+        if (input.createParents) {
+          await mkdir(path.dirname(fp), { recursive: true });
         }
-      },
+        const content = input.encoding === "base64" ? Buffer.from(input.content, "base64") : input.content;
+        await writeFile(fp, content);
+        return toolSuccess({ tool: "file.write", riskLevel: "medium", data: { path: fp, written: true }, observations: ["Wrote file."] });
+      } catch (e) {
+        return toolFailure({ tool: "file.write", riskLevel: "medium", error: { code: "write_failed", message: e instanceof Error ? e.message : "Write failed" } });
+      }
+    }
+  };
+
+  const list: AgentHostToolDefinition<z.infer<typeof listInput>, unknown, AgentHostMcpContext> = {
+    name: "file.list",
+    description: "Lists files in a directory.",
+    riskLevel: "low",
+    inputSchema: listInput,
+    mcpInputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, limit: { type: "integer" } },
       required: ["path"],
       additionalProperties: false
     },
     inputSummary: "List directory",
-    safety: {
-      actionType: "file_read",
-      getInput: (input) => ({ filePath: input.path })
-    },
-    async handler(input, context): Promise<ToolResult<FileListResult>> {
-      const listInput: { path: string; limit?: number } = {
-        path: input.path
-      };
-
-      if (input.limit !== undefined) {
-        listInput.limit = input.limit;
+    safety: { actionType: "file_read", getInput: (i) => ({ filePath: i.path }) },
+    async handler(input, context) {
+      const fp = resolvedPath(input.path, context);
+      const safety = safetyCheck("file.list", "file_read", fp, context);
+      if (!safety.allowed) return failure("file.list", safety);
+      try {
+        const entries = await readdir(fp, { withFileTypes: true });
+        const files = entries.slice(0, input.limit ?? 1000).map(e => ({
+          name: e.name,
+          isDirectory: e.isDirectory(),
+          isFile: e.isFile()
+        }));
+        return toolSuccess({ tool: "file.list", riskLevel: "low", data: { path: fp, files, truncated: entries.length > (input.limit ?? 1000) }, observations: ["Listed directory."] });
+      } catch (e) {
+        return toolFailure({ tool: "file.list", riskLevel: "low", error: { code: "list_failed", message: e instanceof Error ? e.message : "List failed" } });
       }
-
-      return toolSuccess({
-        tool: "file.list",
-        riskLevel: "low",
-        data: await context.linux.listDirectory(listInput),
-        observations: ["Listed directory after path safety classification."]
-      });
     }
   };
 
-  const ensureDir: AgentHostToolDefinition<EnsureDirInput, FileEnsureDirResult | ActionPreviewResult, AgentHostMcpContext> = {
+  const exists: AgentHostToolDefinition<z.infer<typeof existsInput>, FileExistsResult, AgentHostMcpContext> = {
+    name: "file.exists",
+    description: "Checks if a path exists.",
+    riskLevel: "observe",
+    inputSchema: existsInput,
+    mcpInputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false },
+    inputSummary: "Check file exists",
+    safety: { actionType: "file_read", getInput: (i) => ({ filePath: i.path }) },
+    async handler(input, context) {
+      const fp = resolvedPath(input.path, context);
+      const safety = safetyCheck("file.exists", "file_read", fp, context);
+      if (!safety.allowed) return failure("file.exists", safety);
+      try {
+        await stat(fp);
+        return toolSuccess({ tool: "file.exists", riskLevel: "observe", data: { path: fp, exists: true }, observations: ["Path exists."] });
+      } catch {
+        return toolSuccess({ tool: "file.exists", riskLevel: "observe", data: { path: fp, exists: false }, observations: ["Path does not exist."] });
+      }
+    }
+  };
+
+  const ensureDir: AgentHostToolDefinition<z.infer<typeof ensureDirInput>, unknown, AgentHostMcpContext> = {
     name: "file.ensure_dir",
-    description: "Creates an approved directory if needed.",
+    description: "Ensures a directory exists.",
     riskLevel: "medium",
-    inputSchema: ensureDirInputSchema,
-    mcpInputSchema: ensureDirMcpInputSchema,
+    inputSchema: ensureDirInput,
+    mcpInputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false },
     inputSummary: "Ensure directory",
-    safety: {
-      actionType: "file_write",
-      getInput: (input) => ({ filePath: input.path })
-    },
-    preview: {
-      isDryRun: (input) => input.dryRun === true
-    },
-    async handler(input, context, runtime): Promise<ToolResult<FileEnsureDirResult | ActionPreviewResult>> {
-      if (runtime?.isDryRun) {
-        const normalizedPath = normalizePreviewPath(input.path, context);
-        const safetyDecision =
-          runtime.safetyDecision ??
-          evaluateSafety(
-            {
-              tool: "file.ensure_dir",
-              actionType: "file_write",
-              filePath: input.path
-            },
-            context.policy,
-            createSafetyEvaluationContext(context)
-          );
-
-        return buildPreviewResult({
-          tool: "file.ensure_dir",
-          riskLevel: "medium",
-          safety: safetyDecision,
-          targetSummary: `Ensure directory ${normalizedPath}`,
-          target: toFilePreviewTarget(normalizedPath, normalizedPath),
-          confirmation: {
-            manager: context.confirmations,
-            sessionId: context.sessionId,
-            input,
-            target: { path: normalizedPath },
-            explanation: "Use this token to create the exact previewed directory before it expires.",
-            riskLevel: safetyDecision.riskLevel,
-            appSensitivity: safetyDecision.appSensitivity
-          },
-          reasons: previewReasons("Classified the directory path without creating it.", safetyDecision.reasons),
-          observations: ["Previewed directory creation without creating the directory."]
-        });
+    safety: { actionType: "file_write", getInput: (i) => ({ filePath: i.path }) },
+    async handler(input, context) {
+      const fp = resolvedPath(input.path, context);
+      const safety = safetyCheck("file.ensure_dir", "file_write", fp, context);
+      if (!safety.allowed) return failure("file.ensure_dir", safety);
+      try {
+        await mkdir(fp, { recursive: true });
+        return toolSuccess({ tool: "file.ensure_dir", riskLevel: "medium", data: { path: fp, created: true }, observations: ["Directory ensured."] });
+      } catch (e) {
+        return toolFailure({ tool: "file.ensure_dir", riskLevel: "medium", error: { code: "mkdir_failed", message: e instanceof Error ? e.message : "Mkdir failed" } });
       }
-
-      const normalizedPath = normalizePreviewPath(input.path, context);
-      if (input.confirmationToken === undefined) {
-        const { code, reason } = missingConfirmationReason(
-          runtime?.safetyDecision ??
-            evaluateSafety(
-              {
-                tool: "file.ensure_dir",
-                actionType: "file_write",
-                filePath: input.path
-              },
-              context.policy,
-              createSafetyEvaluationContext(context)
-            )
-        );
-        return toolFailure({
-          tool: "file.ensure_dir",
-          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-          confirmation: confirmationRequired(reason),
-          error: {
-            code,
-            message: reason
-          },
-          observations: [reason]
-        });
-      }
-
-      const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
-        sessionId: context.sessionId,
-        tool: "file.ensure_dir",
-        input,
-        target: { path: normalizedPath },
-        riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium"
-      });
-
-      if (!verification.ok) {
-        return toolFailure({
-          tool: "file.ensure_dir",
-          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-          confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
-          error: {
-            code: "confirmation_rejected",
-            message: verification.reason
-          },
-          observations: [verification.reason]
-        });
-      }
-
-      return toolSuccess({
-        tool: "file.ensure_dir",
-        riskLevel: "medium",
-        confirmation: acceptedConfirmation(
-          verification.tokenId,
-          true,
-          "Confirmation token accepted and directory ensure executed."
-        ),
-        data: await context.linux.ensureDir({ path: input.path }),
-        observations: ["Ensured directory inside approved roots."]
-      });
     }
   };
 
-  return [write, read, exists, list, ensureDir, copy, move, remove];
+  const copy: AgentHostToolDefinition<z.infer<typeof copyInput>, unknown, AgentHostMcpContext> = {
+    name: "file.copy",
+    description: "Copies a file.",
+    riskLevel: "medium",
+    inputSchema: copyInput,
+    mcpInputSchema: { type: "object", properties: { source: { type: "string" }, destination: { type: "string" } }, required: ["source", "destination"], additionalProperties: false },
+    inputSummary: "Copy file",
+    safety: { actionType: "file_write", getInput: (i) => ({ filePath: i.destination }) },
+    async handler(input, context) {
+      const src = resolvedPath(input.source, context);
+      const dst = resolvedPath(input.destination, context);
+      const safety = safetyCheck("file.copy", "file_write", dst, context);
+      if (!safety.allowed) return failure("file.copy", safety);
+      try {
+        await copyFile(src, dst);
+        return toolSuccess({ tool: "file.copy", riskLevel: "medium", data: { source: src, destination: dst, copied: true }, observations: ["Copied file."] });
+      } catch (e) {
+        return toolFailure({ tool: "file.copy", riskLevel: "medium", error: { code: "copy_failed", message: e instanceof Error ? e.message : "Copy failed" } });
+      }
+    }
+  };
+
+  const move: AgentHostToolDefinition<z.infer<typeof moveInput>, unknown, AgentHostMcpContext> = {
+    name: "file.move",
+    description: "Moves a file.",
+    riskLevel: "medium",
+    inputSchema: moveInput,
+    mcpInputSchema: { type: "object", properties: { source: { type: "string" }, destination: { type: "string" } }, required: ["source", "destination"], additionalProperties: false },
+    inputSummary: "Move file",
+    safety: { actionType: "file_write", getInput: (i) => ({ filePath: i.destination }) },
+    async handler(input, context) {
+      const src = resolvedPath(input.source, context);
+      const dst = resolvedPath(input.destination, context);
+      const safety = safetyCheck("file.move", "file_write", dst, context);
+      if (!safety.allowed) return failure("file.move", safety);
+      try {
+        await rename(src, dst);
+        return toolSuccess({ tool: "file.move", riskLevel: "medium", data: { source: src, destination: dst, moved: true }, observations: ["Moved file."] });
+      } catch (e) {
+        return toolFailure({ tool: "file.move", riskLevel: "medium", error: { code: "move_failed", message: e instanceof Error ? e.message : "Move failed" } });
+      }
+    }
+  };
+
+  const delete_: AgentHostToolDefinition<z.infer<typeof deleteInput>, unknown, AgentHostMcpContext> = {
+    name: "file.delete",
+    description: "Deletes a file or directory.",
+    riskLevel: "high",
+    inputSchema: deleteInput,
+    mcpInputSchema: { type: "object", properties: { path: { type: "string" }, recursive: { type: "boolean" } }, required: ["path"], additionalProperties: false },
+    inputSummary: "Delete file",
+    safety: { actionType: "file_write", getInput: (i) => ({ filePath: i.path }) },
+    async handler(input, context) {
+      const fp = resolvedPath(input.path, context);
+      const safety = safetyCheck("file.delete", "file_write", fp, context);
+      if (!safety.allowed) return failure("file.delete", safety);
+      try {
+        await rm(fp, { recursive: input.recursive ?? false, force: true });
+        return toolSuccess({ tool: "file.delete", riskLevel: "high", data: { path: fp, deleted: true }, observations: ["Deleted path."] });
+      } catch (e) {
+        return toolFailure({ tool: "file.delete", riskLevel: "high", error: { code: "delete_failed", message: e instanceof Error ? e.message : "Delete failed" } });
+      }
+    }
+  };
+
+  return [read, write, list, exists, ensureDir, copy, move, delete_];
 }
-
-
-
-const copy: AgentHostToolDefinition<SourceDestInput, unknown, AgentHostMcpContext> = {
-  name: "file.copy",
-  description: "Copies a file subject to path policy, dry-run, and confirmation.",
-  riskLevel: "medium",
-  inputSchema: sourceDestSchema,
-  mcpInputSchema: {
-    type: "object",
-    properties: {
-      source: { type: "string", minLength: 1, maxLength: 1000 },
-      destination: { type: "string", minLength: 1, maxLength: 1000 },
-      dryRun: { type: "boolean" },
-      confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
-    },
-    required: ["source", "destination"],
-    additionalProperties: false
-  },
-  inputSummary: "Copy file",
-  safety: { actionType: "file_write", getInput: (input) => ({ filePath: input.destination }) },
-  resolveEffect: (input, context) => createGovernedActionEffect({ ownerSessionId: context.sessionId, operationFamily: "file", operation: "copy", executionClass: "state_changing", bindings: { target: fingerprintActionBinding(`${input.source}|${input.destination}`) }, reversibility: "reversible", confirmationLevel: "standard", verificationKind: "tool_result" }),
-  preview: { isDryRun: (input) => input.dryRun === true },
-  async handler(input, context, runtime): Promise<ToolResult<unknown>> {
-    if (runtime?.isDryRun) {
-      const safetyDecision = runtime.safetyDecision ?? evaluateSafety({ tool: "file.copy", actionType: "file_write", filePath: input.destination }, context.policy, createSafetyEvaluationContext(context));
-      return buildPreviewResult({ tool: "file.copy", riskLevel: "medium", safety: safetyDecision, targetSummary: `Copy ${input.source} to ${input.destination}`, target: toFilePreviewTarget(input.destination, `Copy ${input.source} to ${input.destination}`), confirmation: { manager: context.confirmations, sessionId: context.sessionId, input, target: { source: input.source, destination: input.destination }, explanation: "Use this token to copy the exact previewed file.", riskLevel: safetyDecision.riskLevel, appSensitivity: safetyDecision.appSensitivity }, reasons: previewReasons("Classified the copy without executing it.", safetyDecision.reasons), observations: ["Previewed file copy without copying."] });
-    }
-    if (input.confirmationToken === undefined) {
-      const { code, reason } = missingConfirmationReason(runtime?.safetyDecision ?? evaluateSafety({ tool: "file.copy", actionType: "file_write", filePath: input.destination }, context.policy, createSafetyEvaluationContext(context)));
-      return toolFailure({ tool: "file.copy", riskLevel: "medium", confirmation: confirmationRequired(reason), error: { code, message: reason }, observations: [reason] });
-    }
-    const verification = context.confirmations.verifyAndConsume(input.confirmationToken, { sessionId: context.sessionId, tool: "file.copy", input, target: { source: input.source, destination: input.destination }, riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium" });
-    if (!verification.ok) return toolFailure({ tool: "file.copy", riskLevel: "medium", confirmation: rejectedConfirmation(verification.tokenId, verification.reason), error: { code: "confirmation_rejected", message: verification.reason }, observations: [verification.reason] });
-    return toolSuccess({ tool: "file.copy", riskLevel: "medium", confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and file copy executed."), data: await context.linux.copyFile!({ source: input.source, destination: input.destination }), observations: ["Copied file after policy and confirmation."] });
-  }
-};
-
-const move: AgentHostToolDefinition<SourceDestInput, unknown, AgentHostMcpContext> = {
-  name: "file.move",
-  description: "Moves/renames a file subject to path policy, dry-run, and confirmation.",
-  riskLevel: "medium",
-  inputSchema: sourceDestSchema,
-  mcpInputSchema: {
-    type: "object",
-    properties: {
-      source: { type: "string", minLength: 1, maxLength: 1000 },
-      destination: { type: "string", minLength: 1, maxLength: 1000 },
-      dryRun: { type: "boolean" },
-      confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
-    },
-    required: ["source", "destination"],
-    additionalProperties: false
-  },
-  inputSummary: "Move file",
-  safety: { actionType: "file_write", getInput: (input) => ({ filePath: input.destination }) },
-  resolveEffect: (input, context) => createGovernedActionEffect({ ownerSessionId: context.sessionId, operationFamily: "file", operation: "move", executionClass: "state_changing", bindings: { target: fingerprintActionBinding(`${input.source}|${input.destination}`) }, reversibility: "reversible", confirmationLevel: "standard", verificationKind: "tool_result" }),
-  preview: { isDryRun: (input) => input.dryRun === true },
-  async handler(input, context, runtime): Promise<ToolResult<unknown>> {
-    if (runtime?.isDryRun) {
-      const safetyDecision = runtime.safetyDecision ?? evaluateSafety({ tool: "file.move", actionType: "file_write", filePath: input.destination }, context.policy, createSafetyEvaluationContext(context));
-      return buildPreviewResult({ tool: "file.move", riskLevel: "medium", safety: safetyDecision, targetSummary: `Move ${input.source} to ${input.destination}`, target: toFilePreviewTarget(input.destination, `Copy ${input.source} to ${input.destination}`), confirmation: { manager: context.confirmations, sessionId: context.sessionId, input, target: { source: input.source, destination: input.destination }, explanation: "Use this token to move the exact previewed file.", riskLevel: safetyDecision.riskLevel, appSensitivity: safetyDecision.appSensitivity }, reasons: previewReasons("Classified the move without executing it.", safetyDecision.reasons), observations: ["Previewed file move without moving."] });
-    }
-    if (input.confirmationToken === undefined) {
-      const { code, reason } = missingConfirmationReason(runtime?.safetyDecision ?? evaluateSafety({ tool: "file.move", actionType: "file_write", filePath: input.destination }, context.policy, createSafetyEvaluationContext(context)));
-      return toolFailure({ tool: "file.move", riskLevel: "medium", confirmation: confirmationRequired(reason), error: { code, message: reason }, observations: [reason] });
-    }
-    const verification = context.confirmations.verifyAndConsume(input.confirmationToken, { sessionId: context.sessionId, tool: "file.move", input, target: { source: input.source, destination: input.destination }, riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium" });
-    if (!verification.ok) return toolFailure({ tool: "file.move", riskLevel: "medium", confirmation: rejectedConfirmation(verification.tokenId, verification.reason), error: { code: "confirmation_rejected", message: verification.reason }, observations: [verification.reason] });
-    return toolSuccess({ tool: "file.move", riskLevel: "medium", confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and file move executed."), data: await context.linux.moveFile!({ source: input.source, destination: input.destination }), observations: ["Moved file after policy and confirmation."] });
-  }
-};
-
-const remove: AgentHostToolDefinition<DeleteInput, unknown, AgentHostMcpContext> = {
-  name: "file.delete",
-  description: "Deletes a file or empty directory subject to path policy. High-consequence: requires approval and exact target.",
-  riskLevel: "high",
-  inputSchema: deleteInputSchema,
-  mcpInputSchema: {
-    type: "object",
-    properties: {
-      path: { type: "string", minLength: 1, maxLength: 1000 },
-      recursive: { type: "boolean" },
-      dryRun: { type: "boolean" },
-      confirmationToken: { type: "string", minLength: 1, maxLength: 500 }
-    },
-    required: ["path"],
-    additionalProperties: false
-  },
-  inputSummary: "Delete file",
-  safety: { actionType: "file_delete", getInput: (input) => ({ filePath: input.path, destructive: true }) },
-  resolveEffect: (input, context) => {
-    if (input.recursive === true) throw new Error("action_unsupported:Recursive delete is not supported; delete explicit paths instead.");
-    return createGovernedActionEffect({ ownerSessionId: context.sessionId, operationFamily: "file", operation: "delete", executionClass: "state_changing", destructive: true, bindings: { target: fingerprintActionBinding(input.path) }, reversibility: "destructive", confirmationLevel: "strong", verificationKind: "tool_result" });
-  },
-  preview: { isDryRun: (input) => input.dryRun === true },
-  async handler(input, context, runtime): Promise<ToolResult<unknown>> {
-    if (input.recursive === true) {
-      return toolFailure({ tool: "file.delete", riskLevel: "blocked", error: { code: "recursive_delete_unsupported", message: "Recursive delete is not supported; delete explicit paths instead." }, observations: ["Recursive delete refused."] });
-    }
-    if (runtime?.isDryRun) {
-      const safetyDecision = runtime.safetyDecision ?? evaluateSafety({ tool: "file.delete", actionType: "file_delete", filePath: input.path, destructive: true }, context.policy, createSafetyEvaluationContext(context));
-      return buildPreviewResult({ tool: "file.delete", riskLevel: "high", safety: safetyDecision, targetSummary: `Delete ${input.path}`, target: toFilePreviewTarget(input.path, `Delete ${input.path}`), confirmation: { manager: context.confirmations, sessionId: context.sessionId, input, target: { path: input.path }, explanation: "Use this token to delete the exact previewed path.", riskLevel: safetyDecision.riskLevel, appSensitivity: safetyDecision.appSensitivity }, reasons: previewReasons("Classified the delete without executing it.", safetyDecision.reasons), observations: ["Previewed file delete without deleting."] });
-    }
-    if (input.confirmationToken === undefined) {
-      const { code, reason } = missingConfirmationReason(runtime?.safetyDecision ?? evaluateSafety({ tool: "file.delete", actionType: "file_delete", filePath: input.path, destructive: true }, context.policy, createSafetyEvaluationContext(context)));
-      return toolFailure({ tool: "file.delete", riskLevel: "high", confirmation: confirmationRequired(reason), error: { code, message: reason }, observations: [reason] });
-    }
-    const verification = context.confirmations.verifyAndConsume(input.confirmationToken, { sessionId: context.sessionId, tool: "file.delete", input, target: { path: input.path }, riskLevel: runtime?.safetyDecision?.riskLevel ?? "high" });
-    if (!verification.ok) return toolFailure({ tool: "file.delete", riskLevel: "high", confirmation: rejectedConfirmation(verification.tokenId, verification.reason), error: { code: "confirmation_rejected", message: verification.reason }, observations: [verification.reason] });
-    return toolSuccess({ tool: "file.delete", riskLevel: "high", confirmation: acceptedConfirmation(verification.tokenId, true, "Confirmation token accepted and delete executed."), data: await context.linux.deletePath!({ path: input.path }), observations: ["Deleted path after policy and confirmation."] });
-  }
-};

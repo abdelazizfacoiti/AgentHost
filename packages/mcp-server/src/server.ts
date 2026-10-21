@@ -54,88 +54,28 @@ import {
   setLinuxAccessibilityValue,
   typeLinuxText,
   writeLinuxFile,
-  detectLinuxBrowsers,
   analyzeLinuxImage
 } from "@agenthost/os-linux";
-import { BrowserBridgeServer, createBrowserAdapter, LOCAL_BROWSER_SETUP_OWNER, type BrowserBridgeAdapter } from "@agenthost/app-browser";
-import { createOverlayRenderer, OverlayManager, VisualSurfaceCoordinator } from "@agenthost/app-overlay";
+import { createOverlayRenderer, VisualSurfaceCoordinator } from "@agenthost/app-overlay";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
-import { ConfirmationManager } from "./confirmation.js";
-import { ForgeStore } from "./forge-store.js";
 import { GrantStore } from "./grants.js";
-import { runTool } from "./tool-runner.js";
 import { createAdapterTools } from "./tools/adapter.js";
-import { createAccessibilityTools } from "./tools/accessibility.js";
-import { createAppTools } from "./tools/app.js";
-import { createBlenderTools } from "./tools/blender.js";
-import { createSshTools } from "./tools/ssh.js";
 import { createDesktopTools } from "./tools/desktop.js";
 import { createComputerTools } from "./tools/computer.js";
-import { createAgentTools } from "./tools/agent.js";
-import { createTaskTools } from "./tools/tasks.js";
-import { createSkillTools } from "./tools/skills.js";
 import { createFileTools } from "./tools/file.js";
-import { createForgeTools } from "./tools/forge.js";
-import { createForgeSandboxTools } from "./tools/forge-sandbox.js";
-import { createGuideTools } from "./tools/guide.js";
 import { createPolicyTools } from "./tools/policy.js";
 import { createShellTools } from "./tools/shell.js";
 import { createSystemTools } from "./tools/system.js";
 import { createWindowTools } from "./tools/window.js";
-import { createBrowserTools } from "./tools/browser.js";
-import { createBrowserSetupTools } from "./tools/browser-setup.js";
-import { createWorkflowTools } from "./tools/workflow.js";
 import { createVisionTools } from "./tools/vision.js";
-import { createCheckpointTools } from "./tools/checkpoint.js";
-import { createSchedulerTools } from "./tools/scheduler.js";
-import { createSchedulerReadinessTools } from "./tools/scheduler-readiness.js";
-import { createSchedulerActivationTools } from "./tools/scheduler-activation.js";
-import { createSchedulerManualRunTools } from "./tools/scheduler-manual-run.js";
-import { createSchedulerManualRunPreflightTools } from "./tools/scheduler-manual-run-preflight.js";
-import { createSchedulerManualRunAuditTools } from "./tools/scheduler-manual-run-audit.js";
-import { createSchedulerManualRunRequestLifecycleTools } from "./tools/scheduler-manual-run-request-lifecycle.js";
-import { createSchedulerManualRunApprovalDiagnosticsTools } from "./tools/scheduler-manual-run-approval-diagnostics.js";
-import { createOverlayTools } from "./tools/overlay.js";
-import { createOverlayDiagnosticsTools } from "./tools/overlay-diagnostics.js";
-import { createOverlayAssistanceTools } from "./tools/overlay-assistance.js";
-import { createOverlayAssistanceInspectionTools } from "./tools/overlay-assistance-inspection.js";
-import { createOverlayAssistanceTemplateTools } from "./tools/overlay-assistance-templates.js";
-import { createOverlayControlSurfaceTools } from "./tools/overlay-control-surface.js";
-import { createGuideOverlayTools } from "./tools/guide-overlay.js";
-import { SchedulerStore } from "./scheduler-store.js";
-import { WorkflowStore } from "./workflow-store.js";
-import { WorkflowReplayStore } from "./workflow-replay-store.js";
-import { ToolReceiptManager } from "./tool-receipts.js";
-import { VisionEvidenceStore } from "./vision-evidence.js";
-import { OverlayAssistanceStore } from "./overlay-assistance-store.js";
-import { OverlayAssistanceTemplateStore } from "./overlay-assistance-template-store.js";
-import { OverlayControlSurfaceStore } from "./overlay-control-surface-store.js";
+import { createTaskTools } from "./tools/tasks.js";
 import { applyProductionExecutionMetadata, materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
 import { listResourceEntries, readResource } from "./resources.js";
-import { ControlRoomStore } from "./control-room-store.js";
-import { CapabilityStrategyStore } from "./capability-strategy-store.js";
-import { CapabilityStrategyService } from "./capability-strategy-service.js";
-import { AdaptiveActionRouter } from "./adaptive-action-router.js";
-import { RouteMetricsStore } from "./route-metrics-store.js";
-import { createCapabilityStrategyTools } from "./tools/capability-strategy.js";
-import { createGoalPlanningTools } from "./tools/goal-planning.js";
-import { SpeechStore } from "./speech-store.js";
-import { SpeechService } from "./speech-service.js";
-import { createSpeechTools } from "./tools/speech.js";
-import { RuntimeActivityStore } from "./runtime-activity-store.js";
-import { RuntimeActivityService } from "./runtime-activity-service.js";
-import { RuntimeActivityOverlayController } from "./runtime-activity-overlay.js";
-import { BrowserSetupService } from "./browser-setup-service.js";
-import { CapabilityGraphService } from "./capability-graph-service.js";
-import { SafeFailureMemoryStore } from "./safe-failure-memory-store.js";
-import { EpisodicMemoryStore } from "./episodic-memory-store.js";
-import { GoalPlanningService } from "./goal-planning-service.js";
-import { BridgeProbeCache } from "./decision-cache.js";
 
 const SERVER_VERSION = AGENTHOST_VERSION;
 
 const SERVER_INSTRUCTIONS =
-  "AgentHost is a universal local automation host. It can help operate many apps through layered strategies: app adapters, official APIs, CLI/scripts, browser automation, accessibility, GUI fallback, and guide mode. Prefer reliable app APIs and adapters over GUI clicking. Use GUI click/type only as fallback and only when policy allows. High-risk actions require approval.";
+  "AgentHost is a universal local automation host. It provides desktop automation, file operations, shell commands, vision/OCR, and window management. Use GUI click/type as fallback when policy allows. High-risk actions require approval.";
 
 function blenderModuleSpecifier(): string {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -199,7 +139,6 @@ export interface AgentHostServerOptions {
   logger?: AuditLogger;
   sessionId?: string;
   linux?: LinuxAutomation;
-  browser?: BrowserBridgeAdapter;
   sessionGrants?: import("@agenthost/core").CapabilityGrant[];
 }
 
@@ -231,73 +170,11 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const sshEnabled = await registerOptionalSshRuntime(config, adapters);
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
   const policy = options.policy ?? config.policy;
-  const confirmations = new ConfirmationManager();
-  const forge = new ForgeStore(config.agentHostDir);
-  await forge.ensureStructure();
-  const workflowTrace = new WorkflowStore(config.agentHostDir);
-  await workflowTrace.ensureStructure();
-  const workflowReplay = new WorkflowReplayStore(config.agentHostDir);
-  await workflowReplay.ensureStructure();
-  const strategyStore = new CapabilityStrategyStore(config.agentHostDir);
-  await strategyStore.ensureStructure();
-  const strategyService = new CapabilityStrategyService(strategyStore);
-  const routeMetrics = new RouteMetricsStore(config.agentHostDir);
-  await routeMetrics.ensureStructure();
-  const routeRouter = new AdaptiveActionRouter(routeMetrics);
-  const capabilityGraph = new CapabilityGraphService(registry, adapters);
-  const failureMemory = new SafeFailureMemoryStore(config.agentHostDir);
-  await failureMemory.ensureStructure();
-  const episodicMemory = new EpisodicMemoryStore(config.agentHostDir);
-  await episodicMemory.ensureStructure();
-  const goalPlanning = new GoalPlanningService();
-  // Shared bridge probe cache: deduplicates browser.detect() calls that fire
-  // concurrently from route_preview + strategy.select within the same agent turn.
-  const bridgeProbeCache = new BridgeProbeCache(1_500);
-  const speechStore = new SpeechStore(config.agentHostDir);
-  await speechStore.ensureStructure();
-  const scheduler = new SchedulerStore(config.agentHostDir, sessionId);
-  await scheduler.ensureStructure();
-  const receipts = new ToolReceiptManager();
-  const visionEvidence = new VisionEvidenceStore();
-  const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? config.runtimeActivityOverlay?.reducedMotion ?? false });
-  const runtimeActivityStore = new RuntimeActivityStore(config.agentHostDir, { ownerSessionId: sessionId });
-  await runtimeActivityStore.ensureStructure();
-  const runtimeActivity = new RuntimeActivityService(runtimeActivityStore);
-  const runtimeActivityOverlay = new RuntimeActivityOverlayController(overlay, runtimeActivity, config.runtimeActivityOverlay ?? { enabled: true, position: "top_left", reducedMotion: false, terminalAutoHideMs: 5_000, maxLabelChars: 80, showElapsed: true, showProgress: true, interactiveControls: false, screenshotSuppression: true, multiTaskSummary: true });
-  runtimeActivityOverlay.start();
-  const overlayAssistance = new OverlayAssistanceStore(config.agentHostDir, overlay, sessionId);
-  await overlayAssistance.ensureStructure();
-  const overlayAssistanceTemplates = new OverlayAssistanceTemplateStore(config.agentHostDir, sessionId, overlayAssistance);
-  await overlayAssistanceTemplates.ensureStructure();
-  const overlayControlSurface = new OverlayControlSurfaceStore(config.agentHostDir, overlay, overlayAssistance, sessionId);
-  await overlayControlSurface.ensureStructure();
   const grants = new GrantStore({
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
   });
-  const browserBridge = options.browser === undefined
-    ? new BrowserBridgeServer(config.browserBridge ?? { enabled: false, port: 43117, pairingTokenFile: path.join(config.agentHostDir, "browser", "pairing-token") }, SERVER_VERSION)
-    : undefined;
-  if (browserBridge !== undefined) await browserBridge.start();
-  const browser = options.browser ?? createBrowserAdapter(browserBridge!);
-  const browserSetup = browserBridge === undefined
-    ? undefined
-    : new BrowserSetupService(browserBridge, {
-        // Browser setup is local server lifecycle state, not an MCP request
-        // session. Keep ownership trusted and resumable across AgentHost restarts.
-        ownerSessionId: LOCAL_BROWSER_SETUP_OWNER,
-        agentHostDir: config.agentHostDir,
-        extensionRoot: process.env.AGENTHOST_BROWSER_EXTENSION_DIR
-          ?? path.join(os.homedir(), "AgentHost", "browser-extension"),
-        releaseRoot: process.env.AGENTHOST_BROWSER_RELEASE_ROOT
-          ?? path.resolve("release", "browser"),
-        detectBrowsers: () => detectLinuxBrowsers(process.env),
-        visual: overlay
-      });
-  await browserSetup?.ensureStructure();
-  let speechService: SpeechService | undefined;
-  const controlRoomStore = new ControlRoomStore(config.agentHostDir, { workflowTrace, assistance: overlayAssistance, forge, scheduler, overlay, strategies: strategyService, routes: routeRouter, planning: goalPlanning, capabilityGraph, runtimeActivity: { projection: async () => { const renderer = await runtimeActivityOverlay.projection(); return runtimeActivity.projection({ visible: renderer.visible, status: renderer.rendererStatus, suppression: renderer.suppression }); } }, speech: { capabilities: async () => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.capabilities() as unknown as Record<string, unknown>, projection: async (ownerSessionId) => speechService === undefined ? { enabled: false, redacted: true, reason: "speech_starting" } : await speechService.projection(ownerSessionId) }, ...(browserBridge === undefined ? {} : { browserBridge }), ...(browserSetup === undefined ? {} : { browserSetup }) }, { ownerSessionId: sessionId });
-  await controlRoomStore.ensureStructure();
+  const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? config.runtimeActivityOverlay?.reducedMotion ?? false });
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -338,8 +215,6 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       focusAccessibilityElement: (input) =>
         focusLinuxAccessibilityElement(input, { agentHostDir: config.agentHostDir })
     };
-  speechService = new SpeechService(config, speechStore, linux);
-  const speech = speechService;
   const context: AgentHostMcpContext = {
     sessionId,
     config,
@@ -347,93 +222,28 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     registry,
     adapters,
     logger,
-    confirmations,
     grants,
-    forge,
-    workflowTrace,
-    workflowReplay,
-    scheduler,
-    receipts,
-    visionEvidence,
     overlay,
-    overlayAssistance,
-    overlayAssistanceTemplates,
-    overlayControlSurface,
-    runtimeActivity,
-    runtimeActivityOverlay,
-    controlRoom: controlRoomStore,
-    strategyStore,
-    strategyService,
-    routeRouter,
-    speech,
-    browser,
-    ...(browserBridge === undefined ? {} : { browserBridge }),
-    ...(browserSetup === undefined ? {} : { browserSetup }),
-    capabilityGraph,
-    failureMemory,
-    episodicMemory,
-    goalPlanning,
-    bridgeProbeCache,
     linux
   };
   const tools = [
     ...createSystemTools(),
-    ...createCapabilityStrategyTools(),
-    ...createGoalPlanningTools(),
-    ...createForgeTools(),
-    ...createForgeSandboxTools(),
-    ...createBrowserTools(), ...createBrowserSetupTools(),
-    ...createWorkflowTools(),
-    ...createSchedulerTools(),
-    ...createSchedulerReadinessTools(),
-    ...createSchedulerActivationTools(),
-    ...createSchedulerManualRunTools(),
-    ...createSchedulerManualRunPreflightTools(),
-    ...createSchedulerManualRunAuditTools(),
-    ...createSchedulerManualRunRequestLifecycleTools(),
-    ...createSchedulerManualRunApprovalDiagnosticsTools(),
-    ...createOverlayTools(),
-    ...createOverlayDiagnosticsTools(),
-    ...createOverlayAssistanceTools(),
-    ...createOverlayAssistanceInspectionTools(),
-    ...createOverlayAssistanceTemplateTools(),
-    ...createOverlayControlSurfaceTools(),
-    ...createGuideOverlayTools(),
     ...createVisionTools(),
-    ...createCheckpointTools(),
-    ...createSpeechTools(),
     ...createAdapterTools(),
-    ...(blenderEnabled ? createBlenderTools() : []),
-    ...(sshEnabled ? createSshTools() : []),
-    ...createAppTools(),
+    ...(blenderEnabled ? [] : []),
+    ...(sshEnabled ? [] : []),
     ...createShellTools(),
     ...createFileTools(),
     ...createDesktopTools(),
     ...createComputerTools(),
-    ...createAgentTools(),
     ...createTaskTools(),
-    ...createSkillTools(),
     ...createWindowTools(),
-    ...createAccessibilityTools(),
-    ...createGuideTools(),
     ...createPolicyTools()
   ];
 
   const loadedTools = materializeToolDefinitions(applyProductionExecutionMetadata(tools));
   registry.syncTools(toolCapabilities(loadedTools));
   context.tools = new Map(loadedTools.map((tool) => [tool.name, tool]));
-
-  let controlRoomServer: { start(): Promise<{ url: string }>; close(): Promise<void> } | undefined;
-  if (config.controlRoom?.enabled === true) {
-    try {
-      const controlRoomModule = await import("../../app-control-room/dist/index.js") as { ControlRoomServer: new (config: NonNullable<AgentHostConfig["controlRoom"]>, provider: ReturnType<ControlRoomStore["provider"]>) => { start(): Promise<{ url: string }>; close(): Promise<void> } };
-      controlRoomServer = new controlRoomModule.ControlRoomServer(config.controlRoom, controlRoomStore.provider());
-      const started = await controlRoomServer.start();
-      console.error(`AgentHost Control Room: ${started.url}`);
-    } catch (error) {
-      console.error(`AgentHost Control Room unavailable: ${error instanceof Error ? error.message : "startup_failed"}`);
-    }
-  }
 
   const server = new Server(
     {
@@ -519,11 +329,6 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const closeResources = async (): Promise<void> => {
     if (resourceClosePromise !== undefined) return await resourceClosePromise;
     resourceClosePromise = Promise.allSettled([
-      controlRoomServer?.close(),
-      browserBridge?.close(),
-      overlayControlSurface.close(),
-      overlayAssistance.close(),
-      runtimeActivityOverlay.close(),
       overlay.close()
     ]).then(() => undefined);
     return await resourceClosePromise;
@@ -534,6 +339,22 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     context,
     closeResources
   };
+}
+
+async function runTool(tool: any, args: any, context: AgentHostMcpContext): Promise<ToolResult> {
+  try {
+    return await tool.handler(args, context);
+  } catch (error) {
+    return {
+      ok: false,
+      tool: tool.name,
+      riskLevel: tool.riskLevel,
+      approval: { required: false, status: "not_required" },
+      data: null,
+      observations: ["Tool execution failed."],
+      error: { code: "execution_failed", message: error instanceof Error ? error.message : String(error) }
+    };
+  }
 }
 
 export async function startStdioServer(): Promise<void> {

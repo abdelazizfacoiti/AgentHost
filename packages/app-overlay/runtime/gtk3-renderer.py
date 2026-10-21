@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import uuid
+from xml.sax.saxutils import escape as xml_escape
 
 try:
     import gi
@@ -61,6 +62,65 @@ def color_for(style, alpha=1.0):
     return r, g, b, alpha
 
 
+# Pretty live-widget palette. Hex twins feed Pango markup on the
+# GTK-widget fallback path; cairo tuples feed the Cairo path.
+STATUS_CAIRO = {
+    "neutral": (0.30, 0.36, 0.48, 0.95),
+    "info": (0.11, 0.37, 0.75, 0.95),
+    "success": (0.13, 0.48, 0.26, 0.95),
+    "warning": (0.69, 0.38, 0.02, 0.95),
+    "danger": (0.71, 0.18, 0.18, 0.95),
+}
+STATUS_HEX = {
+    "neutral": "#4d5a75",
+    "info": "#1d5fc2",
+    "success": "#1f7a42",
+    "warning": "#b06205",
+    "danger": "#c22f2f",
+}
+ICON_GLYPHS = {
+    "info": "i",
+    "success": "✓",
+    "warning": "!",
+    "danger": "×",
+    "check": "✓",
+    "close": "×",
+    "pointer": "➤",
+}
+DIM_CAIRO = (0.60, 0.64, 0.70, 1)
+DIM_HEX = "#9aa3b2"
+WARN_CAIRO = (0.95, 0.70, 0.20, 1)
+WARN_HEX = "#f0b233"
+
+
+def component_rows(payload):
+    """Bounded trusted-component rows for widget payloads."""
+    if not isinstance(payload, dict):
+        return []
+    components = payload.get("components")
+    if isinstance(components, list):
+        return [c for c in components if isinstance(c, dict)][:12]
+    if isinstance(payload.get("text"), str):
+        return [{"type": "text", "text": payload.get("text")}]
+    return []
+
+
+def card_content_height(payload):
+    """Pretty cards grow with their rows instead of clipping at 160px."""
+    height = 60  # title + padding
+    for component in component_rows(payload):
+        kind = component.get("type")
+        if kind == "progress":
+            height += 46
+        elif kind in {"status_badge", "heading"}:
+            height += 32
+        elif kind == "divider":
+            height += 14
+        else:
+            height += 24
+    return max(120, min(560, height))
+
+
 def rounded_rect(cr, x, y, width, height, radius):
     radius = max(0.0, min(radius, min(width, height) / 2.0))
     cr.new_sub_path()
@@ -71,9 +131,9 @@ def rounded_rect(cr, x, y, width, height, radius):
     cr.close_path()
 
 
-def draw_text(cr, text, x, y, size=16, color=(1, 1, 1, 1), max_width=520):
+def draw_text(cr, text, x, y, size=16, color=(1, 1, 1, 1), max_width=520, weight=cairo.FONT_WEIGHT_NORMAL):
     cr.set_source_rgba(*color)
-    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, weight)
     cr.set_font_size(size)
     words = safe_text(text).split(" ")
     line = ""
@@ -275,6 +335,61 @@ class Renderer:
         label.get_style_context().add_class(style_class)
         return label
 
+    def widget_markup(self, markup, style_class="agenthost-overlay-text"):
+        label = Gtk.Label()
+        label.set_markup(markup)
+        label.set_xalign(0.0)
+        label.set_line_wrap(True)
+        label.set_max_width_chars(80)
+        label.get_style_context().add_class(style_class)
+        return label
+
+    def widget_row(self, component):
+        """Pretty per-component widget for the no-Cairo fallback path."""
+        if not isinstance(component, dict):
+            return None
+        kind = component.get("type")
+        if kind == "heading":
+            return self.widget_markup("<b><span size='larger'>%s</span></b>" % xml_escape(safe_text(component.get("text", ""), 200)))
+        if kind == "status_badge":
+            status = component.get("status") if component.get("status") in STATUS_HEX else "neutral"
+            return self.widget_markup("<span background='%s' foreground='white'><b> %s </b></span>" % (
+                STATUS_HEX[status], xml_escape(safe_text(component.get("text", ""), 80))))
+        if kind == "key_value":
+            key = xml_escape(safe_text(component.get("key", ""), 60))
+            value = xml_escape(safe_text(component.get("value", ""), 200))
+            return self.widget_markup("<span foreground='%s'>%s:</span> %s" % (DIM_HEX, key, value) if key else value)
+        if kind == "progress":
+            try:
+                value = max(0.0, min(1.0, float(component.get("value", 0.0))))
+            except Exception:
+                value = 0.0
+            bar = Gtk.ProgressBar()
+            bar.get_style_context().add_class("agenthost-overlay-progress")
+            bar.set_fraction(value)
+            bar.set_show_text(False)
+            label = component.get("label")
+            if isinstance(label, str) and label:
+                row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                row.pack_start(bar, False, False, 0)
+                row.pack_start(self.widget_markup("<small>%s</small>" % xml_escape(safe_text(label, 120))), False, False, 0)
+                return row
+            return bar
+        if kind == "warning":
+            return self.widget_markup("<span foreground='%s'><b>! %s</b></span>" % (
+                WARN_HEX, xml_escape(safe_text(component.get("text", ""), 300))))
+        if kind == "divider":
+            return Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        if kind == "icon":
+            token = component.get("token") if component.get("token") in STATUS_HEX else "neutral"
+            glyph = ICON_GLYPHS.get(component.get("token"), "i")
+            return self.widget_markup("<span background='%s' foreground='white' size='large'><b> %s </b></span>" % (
+                STATUS_HEX[token], xml_escape(glyph)))
+        text = component.get("text") or component.get("label") or ""
+        if isinstance(text, str) and text:
+            return self.widget_label(text)
+        return None
+
     def render_widget_surface(self, root, geometry):
         monitor_index, ox, oy, monitor_width, monitor_height, _scale = geometry
         for record in list(self.records.values()):
@@ -320,16 +435,12 @@ class Renderer:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             title = payload.get("label") or payload.get("title") or payload.get("text") or kind
             box.pack_start(self.widget_label(title, "agenthost-overlay-title"), False, False, 0)
-            components = payload.get("components")
-            if isinstance(components, list):
-                for component in components[:12]:
-                    if isinstance(component, dict):
-                        text = component.get("text") or component.get("label") or component.get("key")
-                        if isinstance(text, str): box.pack_start(self.widget_label(text), False, False, 0)
-            elif isinstance(payload.get("text"), str):
-                box.pack_start(self.widget_label(payload["text"]), False, False, 0)
+            for component in component_rows(payload):
+                row = self.widget_row(component)
+                if row is not None:
+                    box.pack_start(row, False, False, 0)
             frame.add(box); widget = frame
-            width, height = max(width, 260), max(height, 84)
+            width, height = max(width, 280), max(height, card_content_height(payload))
         root.put(widget, x, y)
         widget.set_size_request(width, height)
         widget.show_all()
@@ -486,7 +597,7 @@ class Renderer:
             x, y, width, height = float(point.get("x", 0)) - ox, float(point.get("y", 0)) - oy, 48, 48
         else:
             placement = payload.get("placement", "top_left")
-            width, height = 360, 160
+            width, height = 360, card_content_height(payload)
             margin = 24
             if placement in {"top_center", "bottom_center"}:
                 x = (monitor_width - width) / 2
@@ -535,8 +646,8 @@ class Renderer:
         self.draw_card(cr, payload, x, y, width, height, color)
 
     def draw_card(self, cr, payload, x, y, width, height, color):
-        width = max(width, 260)
-        height = max(height, 84)
+        width = max(width, 280)
+        height = max(height, card_content_height(payload))
         cr.set_source_rgba(0.04, 0.05, 0.08, 0.94)
         rounded_rect(cr, x, y, width, height, 12)
         cr.fill()
@@ -545,20 +656,98 @@ class Renderer:
         rounded_rect(cr, x, y, width, height, 12)
         cr.stroke()
         title = payload.get("label") or payload.get("title") or payload.get("text") or payload.get("type", "overlay")
-        draw_text(cr, title, x + 16, y + 28, 16, (0.96, 0.97, 1, 1), width - 32)
-        components = payload.get("components")
-        if isinstance(components, list):
-            line_y = y + 52
-            for component in components[:12]:
-                if not isinstance(component, dict):
-                    continue
-                text = component.get("text") or component.get("label") or component.get("key")
-                if isinstance(text, str):
+        draw_text(cr, title, x + 16, y + 28, 16, (0.96, 0.97, 1, 1), width - 32, cairo.FONT_WEIGHT_BOLD)
+        line_y = y + 54
+        for component in component_rows(payload):
+            if line_y > y + height - 14:
+                break
+            kind = component.get("type")
+            if kind == "heading":
+                line_y = draw_text(cr, component.get("text", ""), x + 16, line_y, 15,
+                                   (0.96, 0.97, 1, 1), width - 32, cairo.FONT_WEIGHT_BOLD)
+            elif kind == "status_badge":
+                line_y = self.draw_badge(cr, component, x + 16, line_y, width - 32)
+            elif kind == "key_value":
+                line_y = self.draw_key_value(cr, component, x + 16, line_y, width - 32)
+            elif kind == "progress":
+                line_y = self.draw_mini_progress(cr, component, x + 16, line_y, width - 32)
+            elif kind == "warning":
+                line_y = draw_text(cr, "! " + str(component.get("text", "")), x + 16, line_y, 13,
+                                   WARN_CAIRO, width - 32)
+            elif kind == "divider":
+                cr.set_source_rgba(0.3, 0.33, 0.4, 0.8)
+                cr.set_line_width(1)
+                cr.move_to(x + 16, line_y - 6)
+                cr.line_to(x + width - 16, line_y - 6)
+                cr.stroke()
+                line_y += 14
+            elif kind == "icon":
+                line_y = self.draw_icon(cr, component, x + 16, line_y)
+            else:
+                text = component.get("text") or component.get("label") or ""
+                if isinstance(text, str) and text:
                     line_y = draw_text(cr, text, x + 16, line_y, 13, (0.82, 0.85, 0.9, 1), width - 32)
-                    if line_y > y + height - 12:
-                        break
-        elif isinstance(payload.get("text"), str):
-            draw_text(cr, payload["text"], x + 16, y + 52, 13, (0.82, 0.85, 0.9, 1), width - 32)
+
+    def draw_badge(self, cr, component, x, y, max_width):
+        status = component.get("status") if component.get("status") in STATUS_CAIRO else "neutral"
+        text = safe_text(component.get("text", ""), 80)
+        cr.set_font_size(13)
+        tw = min(cr.text_extents(text).width + 24, max_width)
+        cr.set_source_rgba(*STATUS_CAIRO[status])
+        rounded_rect(cr, x, y - 17, tw, 22, 11)
+        cr.fill()
+        cr.set_source_rgba(1, 1, 1, 1)
+        cr.move_to(x + 12, y - 1)
+        cr.show_text(text[:max(0, int(max_width / 7))])
+        return y + 30
+
+    def draw_key_value(self, cr, component, x, y, max_width):
+        key = safe_text(component.get("key", ""), 60)
+        value = safe_text(component.get("value", ""), 200)
+        cr.set_font_size(13)
+        cr.set_source_rgba(*DIM_CAIRO)
+        cr.move_to(x, y)
+        cr.show_text(key + ": " if key else "")
+        kw = cr.text_extents(key + ": " if key else "").width
+        cr.set_source_rgba(0.93, 0.94, 0.97, 1)
+        rest = max(20.0, max_width - kw)
+        shown = value
+        while shown and cr.text_extents(shown).width > rest:
+            shown = shown[:-1]
+        cr.move_to(x + kw, y)
+        cr.show_text(shown)
+        return y + 24
+
+    def draw_mini_progress(self, cr, component, x, y, max_width):
+        try:
+            value = max(0.0, min(1.0, float(component.get("value", 0.0))))
+        except Exception:
+            value = 0.0
+        bar_w = max(120.0, max_width)
+        cr.set_source_rgba(0.08, 0.09, 0.12, 0.9)
+        rounded_rect(cr, x, y - 13, bar_w, 14, 7)
+        cr.fill()
+        cr.set_source_rgba(0.30, 0.55, 1.0, 0.95)
+        if value > 0:
+            rounded_rect(cr, x, y - 13, max(14.0, bar_w * value), 14, 7)
+            cr.fill()
+        label = component.get("label")
+        if isinstance(label, str) and label:
+            return draw_text(cr, label, x, y + 18, 12, DIM_CAIRO, max_width)
+        return y + 30
+
+    def draw_icon(self, cr, component, x, y):
+        token = component.get("token") if component.get("token") in STATUS_CAIRO else "neutral"
+        glyph = ICON_GLYPHS.get(component.get("token"), "i")
+        cr.set_source_rgba(*STATUS_CAIRO.get(token, STATUS_CAIRO["neutral"]))
+        cr.arc(x + 11, y - 6, 11, 0, 2 * math.pi)
+        cr.fill()
+        cr.set_source_rgba(1, 1, 1, 1)
+        cr.set_font_size(13)
+        ext = cr.text_extents(glyph)
+        cr.move_to(x + 11 - ext.width / 2, y - 6 + ext.height / 2)
+        cr.show_text(glyph)
+        return y + 24
 
     def interactive_click(self, _widget, _event, record):
         event = self.first_event(record)

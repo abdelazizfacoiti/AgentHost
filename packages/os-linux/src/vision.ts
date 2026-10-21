@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { stat } from "node:fs/promises";
 import { findCommandPath } from "./dependencies.js";
 import { redactVisionText, visionCenter, type VisionGroundingResult, type VisionMode, type VisionTextGroup, type VisionTextItem } from "@agenthost/core";
 
@@ -16,9 +17,55 @@ export function parseTesseractTsv(tsv: string, maxItems = 500): { width: number;
   const groups = [...grouped.entries()].map(([key, group]) => { const x = Math.min(...group.map((item) => item.bounds.x)); const y = Math.min(...group.map((item) => item.bounds.y)); const right = Math.max(...group.map((item) => item.bounds.x + item.bounds.width)); const bottom = Math.max(...group.map((item) => item.bounds.y + item.bounds.height)); const bounds = { x, y, width: right - x, height: bottom - y }; return { id: `line_${key.replaceAll(":", "_")}`, text: group.map((item) => item.text).join(" "), bounds, center: visionCenter(bounds), confidence: group.reduce((sum, item) => sum + item.confidence, 0) / group.length, matchedTextIds: group.map((item) => item.id) }; });
   return { width, height, items, groups, redactionCounts: counts, truncated: items.length >= maxItems };
 }
+// OCR cache: analyze -> find_text -> find_target on the same screenshot must
+// not spawn Tesseract three times. Entries are keyed by path + size + mtime
+// + mode + maxItems, verified cheaply with one stat() (far cheaper than an
+// OCR spawn), bounded to 8 entries with a 30s TTL. Same bytes always yield
+// the same redacted result, so caching is safety-neutral.
+const OCR_CACHE_TTL_MS = 30_000;
+const OCR_CACHE_MAX = 8;
+const ocrCache = new Map<string, { at: number; result: VisionGroundingResult }>();
+
+export function clearVisionOcrCache(): void {
+  ocrCache.clear();
+}
+
+function ocrCacheKey(imagePath: string, size: number, mtimeMs: number, mode: VisionMode, maxItems: number): string {
+  return `${imagePath}\0${size}\0${mtimeMs}\0${mode}\0${maxItems}`;
+}
+
 export async function analyzeLinuxImage(input: { imagePath: string; source: "agenthost_screenshot" | "agenthost_output" | "granted_path"; basename: string; mode: VisionMode; maxItems: number }, context: LinuxVisionContext = {}): Promise<VisionGroundingResult> {
+  // Fast path: reuse a fresh OCR result for this exact file revision.
+  try {
+    const fileStat = await stat(input.imagePath);
+    const key = ocrCacheKey(input.imagePath, fileStat.size, fileStat.mtimeMs, input.mode, input.maxItems);
+    const cached = ocrCache.get(key);
+    if (cached !== undefined && Date.now() - cached.at < OCR_CACHE_TTL_MS) {
+      // Refresh recency without growing the map.
+      ocrCache.delete(key);
+      ocrCache.set(key, cached);
+      return cached.result;
+    }
+    const fresh = await runOcr(input, context);
+    if (fresh.supported) {
+      ocrCache.set(key, { at: Date.now(), result: fresh });
+      while (ocrCache.size > OCR_CACHE_MAX) {
+        const oldest = ocrCache.keys().next().value;
+        if (oldest === undefined) break;
+        ocrCache.delete(oldest);
+      }
+    }
+    return fresh;
+  } catch {
+    // stat() failed (missing file, permission): fall through to the normal
+    // path so callers get the precise unavailable/invalid reason.
+    return await runOcr(input, context);
+  }
+}
+
+async function runOcr(input: { imagePath: string; source: "agenthost_screenshot" | "agenthost_output" | "granted_path"; basename: string; mode: VisionMode; maxItems: number }, context: LinuxVisionContext = {}): Promise<VisionGroundingResult> {
   const command = context.tesseractPath ?? await findCommandPath("tesseract", context.env === undefined ? {} : { env: context.env });
-  if (command === undefined) return { supported: false, backend: "unavailable", mode: input.mode, textItems: [], groups: [], targetCandidates: [], warnings: ["Install Tesseract locally to enable OCR."], redactionCounts: {}, truncated: false, reason: "ocr_backend_unavailable" };
+  if (command === undefined) return { supported: false, backend: "unavailable", mode: input.mode, textItems: [], groups: [], targetCandidates: [], warnings: [], redactionCounts: {}, truncated: false, reason: "ocr_backend_unavailable" };
   const env: NodeJS.ProcessEnv = {}; for (const key of ["PATH", "LANG", "LC_ALL", "TESSDATA_PREFIX"]) if (context.env?.[key] ?? process.env[key]) env[key] = context.env?.[key] ?? process.env[key];
   const run = context.run ?? runTesseract; const result = await run(command, [input.imagePath, "stdout", "--psm", "11", "tsv"], env);
   if (result.timedOut) return { supported: false, backend: "tesseract", mode: input.mode, textItems: [], groups: [], targetCandidates: [], warnings: [], redactionCounts: {}, truncated: result.truncated, reason: "ocr_timeout" };

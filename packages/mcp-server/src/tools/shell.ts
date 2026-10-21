@@ -1,246 +1,67 @@
-import {
-  evaluateSafety,
-  toolFailure,
-  toolSuccess,
-  type ActionPreviewResult,
-  type ShellRunResult,
-  type ToolResult
-} from "@agenthost/core";
-import { formatCommandForSafety } from "@agenthost/os-linux";
+import { toolFailure, toolSuccess, evaluateSafety, type ShellRunResult, type ToolResult } from "@agenthost/core";
 import { z } from "zod";
-import type { AgentHostToolDefinition } from "../tool-runner.js";
 import type { AgentHostMcpContext } from "../context.js";
+import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import { createSafetyEvaluationContext } from "../grants.js";
-import {
-  acceptedConfirmation,
-  buildPreviewResult,
-  confirmationRequired,
-  missingConfirmationReason,
-  rejectedConfirmation,
-  toShellPreviewTarget
-} from "./preview.js";
 
-const shellInputSchema = z
-  .object({
-    command: z.string().trim().min(1).max(300),
-    args: z.array(z.string().max(1000)).max(100).optional(),
-    cwd: z.string().trim().min(1).max(1000).optional(),
-    timeoutMs: z.number().int().min(1).max(60_000).optional(),
-    maxOutputBytes: z.number().int().min(1).max(1024 * 1024).optional(),
-    dryRun: z.boolean().optional(),
-    confirmationToken: z.string().trim().min(1).max(500).optional()
-  })
-  .strict();
+const runInput = z.object({
+  command: z.string().trim().min(1).max(10000),
+  args: z.array(z.string().trim().max(1000)).max(100).optional(),
+  cwd: z.string().trim().max(1000).optional(),
+  env: z.record(z.string()).optional(),
+  timeoutMs: z.number().int().min(100).max(300_000).optional()
+}).strict();
 
-type ShellInput = z.infer<typeof shellInputSchema>;
-
-function commandForSafety(input: ShellInput) {
-  const commandInput = {
-    command: input.command
-  } as { command: string; args?: string[] };
-
-  if (input.args !== undefined) {
-    commandInput.args = input.args;
-  }
-
-  return formatCommandForSafety(commandInput);
-}
-
-function previewReasons(primaryReason: string, safetyReasons: string[]): string[] {
-  return safetyReasons.includes(primaryReason) ? safetyReasons : [primaryReason, ...safetyReasons];
-}
-
-export function createShellTools(): AgentHostToolDefinition<
-  ShellInput,
-  ShellRunResult | ActionPreviewResult,
-  AgentHostMcpContext
->[] {
-  return [
-    {
-      name: "shell.run_safe",
-      description: "Runs a classified command with shell disabled, timeout, and output limits.",
-      riskLevel: "medium",
-      inputSchema: shellInputSchema,
-      mcpInputSchema: {
-        type: "object",
-        properties: {
-          command: {
-            type: "string",
-            minLength: 1,
-            maxLength: 300
-          },
-          args: {
-            type: "array",
-            items: {
-              type: "string",
-              maxLength: 1000
-            },
-            maxItems: 100
-          },
-          cwd: {
-            type: "string",
-            minLength: 1,
-            maxLength: 1000
-          },
-          timeoutMs: {
-            type: "integer",
-            minimum: 1,
-            maximum: 60000
-          },
-          maxOutputBytes: {
-            type: "integer",
-            minimum: 1,
-            maximum: 1048576
-          },
-          dryRun: {
-            type: "boolean"
-          },
-          confirmationToken: {
-            type: "string",
-            minLength: 1,
-            maxLength: 500
-          }
-        },
-        required: ["command"],
-        additionalProperties: false
+export function createShellTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
+  const run: AgentHostToolDefinition<z.infer<typeof runInput>, ShellRunResult, AgentHostMcpContext> = {
+    name: "shell.run",
+    description: "Runs a shell command with safety checks.",
+    riskLevel: "high",
+    inputSchema: runInput,
+    mcpInputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", minLength: 1, maxLength: 10000 },
+        args: { type: "array", items: { type: "string" }, maxItems: 100 },
+        cwd: { type: "string" },
+        env: { type: "object" },
+        timeoutMs: { type: "integer", minimum: 100, maximum: 300000 }
       },
-      inputSummary: "Run safe shell command",
-      safety: {
-        actionType: "shell_command",
-        getInput: (input) => ({
-          shellCommand: commandForSafety(input),
-          ...(input.cwd === undefined ? {} : { filePath: input.cwd })
-        })
-      },
-      preview: {
-        isDryRun: (input) => input.dryRun === true
-      },
-      async handler(input, context, runtime): Promise<ToolResult<ShellRunResult | ActionPreviewResult>> {
-        const formattedCommand = commandForSafety(input);
-
-        if (runtime?.isDryRun) {
-          const safetyDecision =
-            runtime.safetyDecision ??
-            evaluateSafety(
-              {
-                tool: "shell.run_safe",
-                actionType: "shell_command",
-                shellCommand: formattedCommand,
-                ...(input.cwd === undefined ? {} : { filePath: input.cwd })
-              },
-              context.policy,
-              createSafetyEvaluationContext(context)
-            );
-
-          return buildPreviewResult({
-            tool: "shell.run_safe",
-            riskLevel: "medium",
-            strategy: "cli_or_script",
-            safety: safetyDecision,
-            targetSummary: formattedCommand,
-            target: toShellPreviewTarget(formattedCommand),
-            confirmation: {
-              manager: context.confirmations,
-              sessionId: context.sessionId,
-              input,
-              target: { command: formattedCommand },
-              explanation: "Use this token to execute the exact previewed shell command before it expires.",
-              riskLevel: safetyDecision.riskLevel,
-              appSensitivity: safetyDecision.appSensitivity
-            },
-            reasons: previewReasons("Classified the command without executing it.", safetyDecision.reasons),
-            observations: ["Previewed shell execution without running the command."]
-          });
-        }
-
-        if (input.confirmationToken === undefined) {
-          const { code, reason } = missingConfirmationReason(
-            runtime?.safetyDecision ??
-              evaluateSafety(
-                {
-                  tool: "shell.run_safe",
-                  actionType: "shell_command",
-                  shellCommand: formattedCommand,
-                  ...(input.cwd === undefined ? {} : { filePath: input.cwd })
-                },
-                context.policy,
-                createSafetyEvaluationContext(context)
-              )
-          );
-          return toolFailure({
-            tool: "shell.run_safe",
-            riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-            strategy: "cli_or_script",
-            confirmation: confirmationRequired(reason),
-            error: {
-              code,
-              message: reason
-            },
-            observations: [reason]
-          });
-        }
-
-        const verification = context.confirmations.verifyAndConsume(input.confirmationToken, {
-          sessionId: context.sessionId,
-          tool: "shell.run_safe",
-          input,
-          target: { command: formattedCommand },
-          riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium"
-        });
-
-        if (!verification.ok) {
-          return toolFailure({
-            tool: "shell.run_safe",
-            riskLevel: runtime?.safetyDecision?.riskLevel ?? "medium",
-            strategy: "cli_or_script",
-            confirmation: rejectedConfirmation(verification.tokenId, verification.reason),
-            error: {
-              code: "confirmation_rejected",
-              message: verification.reason
-            },
-            observations: [verification.reason]
-          });
-        }
-
-        const commandInput: {
-          command: string;
-          args?: string[];
-          cwd?: string;
-          timeoutMs?: number;
-          maxOutputBytes?: number;
-        } = {
-          command: input.command
-        };
-
-        if (input.args !== undefined) {
-          commandInput.args = input.args;
-        }
-
-        if (input.cwd !== undefined) {
-          commandInput.cwd = input.cwd;
-        }
-
-        if (input.timeoutMs !== undefined) {
-          commandInput.timeoutMs = input.timeoutMs;
-        }
-
-        if (input.maxOutputBytes !== undefined) {
-          commandInput.maxOutputBytes = input.maxOutputBytes;
-        }
-
-        return toolSuccess({
-          tool: "shell.run_safe",
-          riskLevel: "medium",
-          strategy: "cli_or_script",
-          confirmation: acceptedConfirmation(
-            verification.tokenId,
-            true,
-            "Confirmation token accepted and command executed."
-          ),
-          data: await context.linux.runSafeCommand(commandInput),
-          observations: ["Ran command with shell disabled after safety classification."]
+      required: ["command"],
+      additionalProperties: false
+    },
+    inputSummary: "Run shell command",
+    safety: { actionType: "shell_command", getInput: (i) => ({ command: i.command, args: i.args }) },
+    async handler(input, context): Promise<ToolResult<ShellRunResult>> {
+      const safety = evaluateSafety(
+        { tool: "shell.run", actionType: "shell_command", strategy: "cli_or_script" },
+        context.policy,
+        createSafetyEvaluationContext(context)
+      );
+      if (!safety.allowed) {
+        return toolFailure({
+          tool: "shell.run",
+          riskLevel: safety.riskLevel,
+          approval: safety.approval,
+          error: { code: safety.blocked ? "safety_blocked" : "approval_required", message: safety.blocked ? "Blocked by safety engine." : "Requires approval.", details: safety },
+          observations: safety.reasons
         });
       }
+
+      try {
+        const data = await context.linux.runSafeCommand({
+          command: input.command,
+          args: input.args ?? [],
+          ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+          ...(input.env === undefined ? {} : { env: input.env }),
+          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs })
+        });
+        return toolSuccess({ tool: "shell.run", riskLevel: "high", data, observations: ["Ran shell command."] });
+      } catch (e) {
+        return toolFailure({ tool: "shell.run", riskLevel: "high", error: { code: "execution_failed", message: e instanceof Error ? e.message : "Execution failed" } });
+      }
     }
-  ];
+  };
+
+  return [run];
 }

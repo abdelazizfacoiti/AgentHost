@@ -40,7 +40,8 @@ const runtimeActivityOverlaySchema = z.object({
   showProgress: z.boolean().optional(),
   interactiveControls: z.boolean().optional(),
   screenshotSuppression: z.boolean().optional(),
-  multiTaskSummary: z.boolean().optional()
+  multiTaskSummary: z.boolean().optional(),
+  persistWhenIdle: z.boolean().optional()
 }).strict();
 const browserBridgeSchema = z.object({
   enabled: z.boolean().optional(),
@@ -320,14 +321,14 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     density: fileConfig.overlay?.density ?? "normal",
     reducedMotion: fileConfig.overlay?.reducedMotion ?? false,
     terminalAutoHideMs: fileConfig.overlay?.terminalAutoHideMs ?? fileConfig.runtimeActivityOverlay?.terminalAutoHideMs ?? 5_000,
-    preferredPosition: fileConfig.overlay?.preferredPosition ?? fileConfig.runtimeActivityOverlay?.position ?? "top_left",
+    preferredPosition: fileConfig.overlay?.preferredPosition ?? fileConfig.runtimeActivityOverlay?.position ?? "top_right",
     maxWidth: fileConfig.overlay?.maxWidth ?? 520,
     multiMonitor: fileConfig.overlay?.multiMonitor ?? "primary"
   };
   const activityFile = fileConfig.runtimeActivityOverlay;
   const runtimeActivityOverlay: RuntimeActivityOverlayConfig = {
     enabled: env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED === undefined ? activityFile?.enabled ?? true : env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED === "1",
-    position: activityFile?.position ?? "top_left",
+    position: activityFile?.position ?? "top_right",
     reducedMotion: env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_REDUCED_MOTION === undefined ? activityFile?.reducedMotion ?? false : env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_REDUCED_MOTION === "1",
     terminalAutoHideMs: activityFile?.terminalAutoHideMs ?? 5_000,
     maxLabelChars: activityFile?.maxLabelChars ?? 80,
@@ -335,7 +336,8 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     showProgress: activityFile?.showProgress ?? true,
     interactiveControls: activityFile?.interactiveControls ?? false,
     screenshotSuppression: activityFile?.screenshotSuppression ?? true,
-    multiTaskSummary: activityFile?.multiTaskSummary ?? true
+    multiTaskSummary: activityFile?.multiTaskSummary ?? true,
+    persistWhenIdle: activityFile?.persistWhenIdle ?? true
   };
   const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
   const browserEnabled = env.AGENTHOST_BROWSER_BRIDGE_ENABLED === undefined ? fileConfig.browserBridge?.enabled ?? false : env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1";

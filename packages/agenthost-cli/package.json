@@ -8,7 +8,6 @@
   "scripts": { "build": "tsc -b" },
   "dependencies": {
     "@agenthost/core": "file:../core",
-    "@agenthost/app-browser": "file:../app-browser",
     "@agenthost/os-linux": "file:../os-linux"
   }
 }

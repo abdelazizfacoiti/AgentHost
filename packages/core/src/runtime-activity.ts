@@ -109,6 +109,9 @@ export interface RuntimeActivityOverlayConfig {
   interactiveControls: boolean;
   screenshotSuppression: boolean;
   multiTaskSummary: boolean;
+  /** Keep the status widget visible at all times: terminal work yields to a
+   * persistent idle widget instead of hiding. Redacted display only. */
+  persistWhenIdle: boolean;
 }
 
 const transitions: Record<RuntimeActivityState, RuntimeActivityState[]> = {

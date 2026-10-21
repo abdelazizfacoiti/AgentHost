@@ -54,7 +54,7 @@ export function createSystemTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     safety: {
       actionType: "observe"
     },
-    handler(_input, context): ToolResult<CapabilityList> {
+    async handler(_input, context): Promise<ToolResult<CapabilityList>> {
       return toolSuccess({
         tool: "system.list_capabilities",
         riskLevel: "observe",

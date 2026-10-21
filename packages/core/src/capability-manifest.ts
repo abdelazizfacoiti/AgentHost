@@ -52,6 +52,13 @@ tool uses dry-run plus a single-use confirmation token. \`agent.stop\` and
 (\`overlay.guide_present\`) and tasks (\`task.*\`) organize long work.
 Pull \`agenthost://skills\` for the skill catalog and
 \`agenthost://status\` for live stop/takeover state before starting.
+
+Fast lane (fewer turns, fewer tokens): pull \`agenthost://capabilities.md\`
+first instead of \`tools/list\`; fold window/tab observation into one
+\`computer.observe_state\` call; use \`computer.wait_for\` instead of fixed
+sleeps; batch with \`task.execute_plan\` (10 steps, one plan token); ask the
+operator for \`agenthost task approve\` to chain routine dry-run +
+confirmation server-side in one turn.
 `;
 }
 
