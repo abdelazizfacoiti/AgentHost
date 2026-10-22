@@ -74,6 +74,7 @@ import { createAgentTools } from "./tools/agent.js";
 import { applyProductionExecutionMetadata, materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
 import { listResourceEntries, readResource } from "./resources.js";
 import { runTool } from "./tool-runner.js";
+import { ToolActionOverlay } from "./action-overlay.js";
 
 const SERVER_VERSION = AGENTHOST_VERSION;
 
@@ -178,6 +179,12 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
   });
   const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? false });
+  const actionOverlay = new ToolActionOverlay(overlay, {
+    widgetId: `agenthost-action-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`,
+    placement: config.overlay?.preferredPosition ?? "top_right",
+    persistent: config.overlay?.persistent ?? true,
+    autoHideMs: config.overlay?.autoHideMs ?? 15_000
+  });
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -233,6 +240,14 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     logger,
     grants,
     overlay,
+    actionOverlay,
+    overlayScreenshotSuppression: async (capture) => {
+      try {
+        return await overlay.withScreenshotSuppressed(capture);
+      } finally {
+        await actionOverlay.refresh();
+      }
+    },
     linux,
     runtime
   };
@@ -341,9 +356,10 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   let resourceClosePromise: Promise<void> | undefined;
   const closeResources = async (): Promise<void> => {
     if (resourceClosePromise !== undefined) return await resourceClosePromise;
-    resourceClosePromise = Promise.allSettled([
-      overlay.close()
-    ]).then(() => undefined);
+    resourceClosePromise = (async () => {
+      await actionOverlay.close();
+      await overlay.close();
+    })();
     return await resourceClosePromise;
   };
   server.onclose = () => { void closeResources(); };

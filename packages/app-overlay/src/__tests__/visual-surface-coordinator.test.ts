@@ -23,6 +23,23 @@ describe("visual surface coordinator", () => {
     expect((await coordinator.state()).overlays).toHaveLength(1);
     await coordinator.close();
   });
+  it("blocks direct widget shows and updates during screenshot suppression", async () => {
+    const coordinator = new VisualSurfaceCoordinator(new HeadlessOverlayRenderer(), { sessionId: "surface-owner" });
+    await coordinator.withScreenshotSuppressed(async () => {
+      const widget: OverlayWidget = {
+        widgetId: "suppressed-widget",
+        title: "Action",
+        components: [{ type: "text", text: "Running" }],
+        sensitivity: "public"
+      };
+      const shown = await coordinator.showWidget(widget);
+      expect(shown.ok).toBe(false);
+      const updated = await coordinator.updateWidget(widget);
+      expect(updated.ok).toBe(false);
+      expect((await coordinator.state()).overlays).toHaveLength(0);
+    });
+    await coordinator.close();
+  });
   it("stores only redacted surface content", async () => {
     const coordinator = new VisualSurfaceCoordinator(new HeadlessOverlayRenderer(), { sessionId: "surface-owner" });
     await coordinator.showSurface({ ...surface("redacted"), content: { title: "Email me@example.com", components: [{ type: "text", text: "token=abc123456789012345678901234567890" }] } });

@@ -18,6 +18,7 @@ import {
   type ToolResult
 } from "@agenthost/core";
 import type { AgentHostMcpContext } from "./context.js";
+import type { ToolActionHandle } from "./action-overlay.js";
 
 export interface ToolPreviewEffect {
   summary?: string;
@@ -97,6 +98,15 @@ function schemaIssues(error: { issues?: Array<{ path?: Array<string | number>; m
 
 function resolveRisk(effect: ToolPreviewEffect | undefined, fallback: RiskLevel): RiskLevel {
   return effect?.riskLevel ?? fallback;
+}
+
+function inputPassesSchema(tool: AnyAgentHostToolDefinition, input: unknown): boolean {
+  if (tool.inputSchema === undefined || typeof tool.inputSchema.safeParse !== "function") return true;
+  try {
+    return tool.inputSchema.safeParse(input).success === true;
+  } catch {
+    return false;
+  }
 }
 
 function resolveApproval(effect: ToolPreviewEffect | undefined): ApprovalInfo {
@@ -353,6 +363,18 @@ export async function runTool<Input>(
 ): Promise<ToolResult> {
   const startedAt = Date.now();
   const audit: AuditMeta = { inputSummary: "Tool call", preview: false };
+  let action: ToolActionHandle | undefined;
+  if (tool.execution?.executionClass === "state_changing" && inputPassesSchema(tool, input)) {
+    try {
+      action = await context.actionOverlay?.begin({
+        tool: tool.name,
+        summary: inputSummaryForAudit(tool, input),
+        riskLevel: tool.riskLevel
+      });
+    } catch {
+      action = undefined;
+    }
+  }
   let result: ToolResult;
 
   try {
@@ -419,6 +441,8 @@ export async function runTool<Input>(
   } catch {
     // A local audit write failure must not turn a completed action into a second action.
   }
+
+  await action?.finish(result).catch(() => undefined);
 
   return result;
 }

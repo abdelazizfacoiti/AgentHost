@@ -92,6 +92,8 @@ The human can always intervene outside the chat:
   approval for an active task's low/medium effects
 - `agenthost task pause <taskId>` / `task resume <taskId>` — task lifecycle
 - `agenthost task watch <taskId> --overlay [--follow]` — live progress card
+- Every state-changing tool automatically shows a small action card; it never
+  replaces confirmation or stop controls
 - `agenthost overlay hide` — hide persistent cards immediately
 - `agenthost overlay status` — renderer and hide-marker state
 - `agenthost agent stop` — runtime stop when the client owns the MCP process

@@ -102,14 +102,17 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 - **Focus-safe desktop**: `window.focus` returns `previousWindow` (best effort) so agents can restore user focus; focus changes are reported, never silent.
 - **Strategy learning**: core strategy/episode helpers exist, but `strategy.*` tools are not registered in the minimal-v2 MCP server. Never store raw task content or secrets in lessons.
 - **Optional adapters**: `packages/app-ssh` and `packages/app-blender` can be enabled in the adapter registry, but this tree registers no MCP tool factory for `ssh.run_command` or `blender.run_python`; they do not appear in `tools/list`.
+- **Automatic action card**: every state-changing MCP tool opens or updates one public, click-through action card (`packages/mcp-server/src/action-overlay.ts`) before preview/handler work. It shows running/waiting/preview/done/failed/halted state in place and honors `overlay.persistent` / `overlay.autoHideMs`. Never block tool execution on overlay failures.
 - **Task progress card**: `TaskProgressOverlay` (in `packages/app-overlay/src/task-progress.ts`) renders status, checklist, `Step n/m`, elapsed time, approval command, and Pause/Resume/Stop. Pause is cooperative at a step boundary; Stop never kills an in-flight tool call. Call `pollEvents()` to drain button events. Construct the renderer and manager with the **same sessionId**.
-- **Overlay click-through**: small card windows are interactive; fullscreen surfaces are created only for pointer/arrow/highlight/spotlight primitives and must stay click-through. Do not reintroduce a fullscreen surface for ordinary cards.
+- **Screenshot suppression**: `desktop.screenshot` captures through `overlayScreenshotSuppression`; screenshot content must never include AgentHost cards. Direct `showWidget`/`updateWidget` calls are rejected while suppression is active, then surfaces are restored.
+- **Overlay click-through**: the automatic action card is click-through; small interactive card windows are reserved for Pause/Resume/Stop controls. Fullscreen surfaces are created only for pointer/arrow/highlight/spotlight primitives and must stay click-through. Do not reintroduce a fullscreen surface for ordinary cards.
 - **Overlay updates**: use `manager.updateWidget()` for in-place changes. Do not `dismiss` + `show` on every tick; that causes flicker and resets controls.
 
 ## Testing quirks
 
 - Tests live in `__tests__/` dirs inside each package's `src/`
 - Tests use Vitest (no separate config file; defaults from `vitest`)
+- `packages/mcp-server/src/__tests__/action-overlay.test.ts` — automatic action card lifecycle, persistence, auto-hide, and redaction
 - `packages/app-overlay/src/__tests__/task-progress.test.ts` — progress card states, controls, persistence and hide-marker handling
 - `packages/app-overlay/src/__tests__/linux-renderer.test.ts` — GTK IPC, fallback, restart, event drain
 - `packages/core/src/__tests__/capability-manifest.test.ts` — capability manifest tests

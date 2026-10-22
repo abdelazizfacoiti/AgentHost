@@ -41,6 +41,7 @@ import type { OverlayManager } from "@agenthost/app-overlay";
 import type { RunSafeCommandInput } from "@agenthost/os-linux";
 import type { GrantStore } from "./grants.js";
 import type { AnyAgentHostToolDefinition } from "./tool-runner.js";
+import type { ToolActionOverlay } from "./action-overlay.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -151,6 +152,9 @@ export interface AgentHostMcpContext {
   logger: AuditLogger;
   grants: GrantStore;
   overlay?: OverlayManager;
+  actionOverlay?: ToolActionOverlay;
+  /** Captures a screenshot with all visual surfaces temporarily removed. */
+  overlayScreenshotSuppression?: <T>(capture: () => Promise<T>) => Promise<T>;
   /** Live tool definitions for governed nested execution (plan executor). */
   tools?: Map<string, AnyAgentHostToolDefinition<any>>;
   linux: LinuxAutomation;

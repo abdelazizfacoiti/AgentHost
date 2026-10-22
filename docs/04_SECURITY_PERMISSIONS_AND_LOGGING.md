@@ -164,11 +164,14 @@ A local audit write failure is swallowed so a completed action is not repeated.
 
 Overlay surfaces are visual only. They never invoke target-app tools or create
 grants/tokens. Persistent cards must use public, non-sensitive summary content.
-Card windows are interactive for Pause/Resume/Stop; fullscreen pointer,
-highlight, and spotlight surfaces remain click-through and never intercept
-clicks. `agenthost overlay hide` writes `run/overlay.hide` and sweeps orphaned
-renderers. Headless/Wayland fallback reports limitations instead of claiming
-unsupported coordinates or visible success.
+Automatic action cards use tool names, redacted input summaries, risk, elapsed
+time, and error codes; they never display confirmation-token IDs. The action
+card is click-through. Interactive card windows are reserved for
+Pause/Resume/Stop; fullscreen pointer, highlight, and spotlight surfaces remain
+click-through and never intercept clicks. Screenshots suppress and restore
+overlays around capture. `agenthost overlay hide` writes `run/overlay.hide` and
+sweeps orphaned renderers. Headless/Wayland fallback reports limitations
+instead of claiming unsupported coordinates or visible success.
 
 ## Optional adapters
 

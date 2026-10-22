@@ -322,7 +322,13 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return safetyFailure("desktop.screenshot", postResolutionSafety);
       }
 
-      const data = await context.linux.screenshot({ path: outputPath, ...(input.includeActiveWindowOnly === undefined ? {} : { includeActiveWindowOnly: input.includeActiveWindowOnly }) });
+      const capture = () => context.linux.screenshot({
+        path: outputPath,
+        ...(input.includeActiveWindowOnly === undefined ? {} : { includeActiveWindowOnly: input.includeActiveWindowOnly })
+      });
+      const data = context.overlayScreenshotSuppression === undefined
+        ? await capture()
+        : await context.overlayScreenshotSuppression(capture);
 
       return toolSuccess({
         tool: "desktop.screenshot",

@@ -194,13 +194,19 @@ sections of documents that mention them are historical.
 ## Overlay lifecycle
 
 Overlay is not exposed as MCP tools in minimal-v2. The server owns a
-`VisualSurfaceCoordinator` for lifecycle shutdown; local scripts use
+`VisualSurfaceCoordinator`; every state-changing MCP tool automatically opens
+or updates one public, click-through action card before preview/handler work.
+The card reports running, waiting-for-approval, preview-ready, done, failed, or
+halted state in place. It never blocks tool execution when rendering fails and
+honors `overlay.persistent` / `overlay.autoHideMs`. Local scripts use
 `createOverlayRenderer`, `OverlayManager`, and `TaskProgressOverlay` from
 `packages/app-overlay`.
 
-Progress cards are persistent by default and remain after terminal states
+Task progress cards are persistent by default and remain after terminal states
 until dismissed, `agenthost overlay hide` is run, or the process exits.
 Elapsed time freezes at terminal transition. Pause is cooperative at a step
 boundary; Stop never kills an in-flight tool call. `agenthost overlay hide`
 writes `run/overlay.hide` and sweeps orphaned renderers; `overlay status`
-reports the registered renderer, marker, and live renderer count.
+reports the registered renderer, marker, and live renderer count. Screenshot
+capture temporarily removes and restores all overlay surfaces so AgentHost UI
+is never embedded in a screenshot.

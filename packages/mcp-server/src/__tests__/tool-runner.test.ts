@@ -10,10 +10,13 @@ import {
   requestStop,
   toolSuccess,
   type AuditLogEntry,
+  type OverlayWidget,
   type RiskLevel,
   type ToolExecutionMetadata
 } from "@agenthost/core";
 import type { AgentHostMcpContext } from "../context.js";
+import type { OverlayManager } from "@agenthost/app-overlay";
+import { ToolActionOverlay } from "../action-overlay.js";
 import { runTool, type AgentHostToolDefinition } from "../tool-runner.js";
 import { createFileTools } from "../tools/file.js";
 import { createDesktopTools } from "../tools/desktop.js";
@@ -208,11 +211,63 @@ describe("governed tool runner", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it("shows an automatic action card before and during state-changing work", async () => {
+    const home = await tempHome();
+    const showWidget = vi.fn(async (_widget: OverlayWidget) => ({ ok: true, errors: [] }));
+    const updateWidget = vi.fn(async () => ({ ok: true, reason: "overlay_widget_updated", acknowledged: true }));
+    const manager = {
+      showWidget,
+      updateWidget,
+      dismiss: vi.fn(async () => ({ ok: true, reason: "dismissed", acknowledged: true })),
+      pollEvents: vi.fn(async () => [])
+    } as unknown as OverlayManager;
+    const context = makeContext(home, []);
+    context.actionOverlay = new ToolActionOverlay(manager, { widgetId: "action-card", now: () => Date.now() });
+    const handler = vi.fn(async () => {
+      expect(showWidget).toHaveBeenCalledTimes(1);
+    });
+    const tool = writeTool(handler);
+    tool.execution = { ...stateChanging(), requiresConfirmationToken: false };
+
+    const result = await runTool(tool, { value: "hello" }, context);
+    expect(result.ok).toBe(true);
+    expect(showWidget).toHaveBeenCalledTimes(1);
+    expect(showWidget.mock.calls[0]?.[0]).toMatchObject({ widgetId: "action-card", title: "AgentHost · test.write" });
+    expect(updateWidget).toHaveBeenCalled();
+
+    const readTool: AgentHostToolDefinition<Record<string, never>, unknown> = {
+      name: "test.read",
+      description: "Test read",
+      riskLevel: "observe",
+      inputSchema: z.object({}).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Test read",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: async () => toolSuccess({ tool: "test.read", riskLevel: "observe", data: { observed: true } })
+    };
+    await runTool(readTool, {}, context);
+    expect(showWidget).toHaveBeenCalledTimes(1);
+    await context.actionOverlay.close();
+  });
+
   it("lets a screenshot preview mint a usable exact-path token", async () => {
     const home = await tempHome();
     const context = makeContext(home, []);
-    const screenshot = vi.fn(async (input: { path: string }) => ({ path: input.path, width: 1, height: 1 }));
+    let suppressed = false;
+    const screenshot = vi.fn(async (input: { path: string }) => {
+      expect(suppressed).toBe(true);
+      return { path: input.path, width: 1, height: 1 };
+    });
     (context as unknown as { linux: unknown }).linux = { screenshot };
+    context.overlayScreenshotSuppression = async (capture) => {
+      suppressed = true;
+      try {
+        return await capture();
+      } finally {
+        suppressed = false;
+      }
+    };
     const tool = applyProductionExecutionMetadata(createDesktopTools()).find((entry) => entry.name === "desktop.screenshot")!;
     const outputDir = path.join(home, "shots");
     const target = path.join(outputDir, "screenshot-test-session-screen.png");
