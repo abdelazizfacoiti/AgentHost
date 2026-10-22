@@ -14,12 +14,14 @@ const TOOL_EXECUTION_DECLARATIONS: Record<string, ToolExecutionMetadata> = {};
 const declare = (names: string[], metadata: ToolExecutionMetadata): void => { for (const name of names) TOOL_EXECUTION_DECLARATIONS[name] = metadata; };
 
 declare([
-  "adapter.list", "adapter.get", "computer.observe_state", "computer.wait_for", "desktop.screenshot", "file.exists", "file.list", "file.read", "policy.get_profile", "policy.list_profiles", "system.get_info", "system.list_capabilities", "vision.analyze_image", "vision.find_target", "vision.find_text", "window.list"
+  "adapter.list", "adapter.get", "computer.observe_state", "computer.wait_for", "file.exists", "file.list", "file.read", "policy.get_profile", "policy.list_profiles", "system.get_info", "system.list_capabilities", "vision.analyze_image", "vision.find_target", "vision.find_text", "window.list"
 ], readOnly());
 declare(["system.check_dependency"], diagnostic());
-declare(["task.create", "task.status", "task.update", "task.add_event", "task.list"], metadataOnly());
+declare(["agent.status"], readOnly());
+declare(["agent.stop", "agent.takeover_begin"], metadataOnly());
+declare(["task.create", "task.status", "task.update", "task.update_status", "task.add_event", "task.list"], metadataOnly());
 declare([
-  "desktop.click", "desktop.hotkey", "desktop.pointer", "desktop.type_text", "file.copy", "file.delete", "file.ensure_dir", "file.move", "file.write", "shell.run", "window.focus"
+  "desktop.click", "desktop.hotkey", "desktop.pointer", "desktop.screenshot", "desktop.type_text", "file.copy", "file.delete", "file.ensure_dir", "file.move", "file.write", "shell.run", "window.focus"
 ], stateChanging(true));
 declare(["blender.run_python"], stateChanging(true, "optional_adapter"));
 declare(["ssh.run_command"], stateChanging(true, "optional_adapter"));

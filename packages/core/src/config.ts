@@ -6,7 +6,6 @@ import { getPolicyProfile } from "./policies.js";
 import { PHASE20_HARD_LIMITS, PHASE20_SUPPORTED_RUNTIME_CAPABILITIES } from "./runtime-grants.js";
 import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, ForgeRuntimeSandboxMode, PolicyProfileName, ToolForgeRuntimeCapability, ToolForgeRuntimeOperation } from "./types.js";
 import type { OverlayRendererMode, OverlayPublicConfig } from "./overlay.js";
-import type { RuntimeActivityOverlayConfig } from "./runtime-activity.js";
 
 const policyProfileNameSchema = z.enum([
   "general",
@@ -25,31 +24,14 @@ const overlaySchema = z.object({
   theme: z.enum(["system", "light", "dark"]).optional(),
   density: z.enum(["compact", "normal"]).optional(),
   reducedMotion: z.boolean().optional(),
+  persistent: z.boolean().optional(),
+  autoHideMs: z.number().int().min(0).max(86_400_000).optional(),
+  /** Deprecated: accepted for older configs, ignored. Use persistent/autoHideMs. */
   terminalAutoHideMs: z.number().int().min(0).max(300_000).optional(),
   preferredPosition: z.enum(["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"]).optional(),
   maxWidth: z.number().int().min(240).max(1200).optional(),
   multiMonitor: z.enum(["primary", "all"]).optional()
 }).strict();
-const runtimeActivityOverlaySchema = z.object({
-  enabled: z.boolean().optional(),
-  position: z.enum(["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"]).optional(),
-  reducedMotion: z.boolean().optional(),
-  terminalAutoHideMs: z.number().int().min(0).max(300_000).optional(),
-  maxLabelChars: z.number().int().min(20).max(200).optional(),
-  showElapsed: z.boolean().optional(),
-  showProgress: z.boolean().optional(),
-  interactiveControls: z.boolean().optional(),
-  screenshotSuppression: z.boolean().optional(),
-  multiTaskSummary: z.boolean().optional(),
-  persistWhenIdle: z.boolean().optional()
-}).strict();
-const browserBridgeSchema = z.object({
-  enabled: z.boolean().optional(),
-  port: z.number().int().min(1024).max(65535).optional(),
-  pairingTokenFile: z.string().min(1).optional(),
-  pairingStateFile: z.string().min(1).optional()
-}).strict();
-const controlRoomSchema = z.object({ enabled: z.boolean().optional(), port: z.number().int().min(1024).max(65535).optional(), accessTokenFile: z.string().min(1).optional() }).strict();
 const executionSchema = z.object({ placement: z.enum(["foreground", "background"]).optional() }).strict();
 const speechSchema = z.object({
   enabled: z.boolean().optional(),
@@ -173,9 +155,6 @@ const configFileSchema = z
     forgeRuntimeSandboxMode: forgeRuntimeSandboxModeSchema.optional(),
     overlayRendererMode: overlayRendererModeSchema.optional(),
     overlay: overlaySchema.optional(),
-    runtimeActivityOverlay: runtimeActivityOverlaySchema.optional(),
-    browserBridge: browserBridgeSchema.optional(),
-    controlRoom: controlRoomSchema.optional(),
     execution: executionSchema.optional(),
     speech: speechSchema.optional(),
     optionalAdapters: z.record(z.object({ enabled: z.boolean() }).strict()).optional(),
@@ -206,19 +185,16 @@ function resolveLocalPath(input: string, homeDir: string): string {
   return path.isAbsolute(expanded) ? expanded : path.resolve(expanded);
 }
 
-function resolveAgentHostPath(input: string, homeDir: string, agentHostDir: string): string {
-  const resolved = resolveLocalPath(input, homeDir);
-  const relative = path.relative(agentHostDir, resolved);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error("control_room_token_path_outside_agenthost");
-  }
-  return resolved;
-}
+/** Dead pre-P1 config surfaces: accepted for older files, stripped before strict parsing. */
+const LEGACY_CONFIG_KEYS = ["runtimeActivityOverlay", "browserBridge", "controlRoom"] as const;
 
 async function readConfigFile(configPath: string): Promise<z.infer<typeof configFileSchema>> {
   try {
     const raw = await readFile(configPath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      for (const key of LEGACY_CONFIG_KEYS) delete (parsed as Record<string, unknown>)[key];
+    }
     return configFileSchema.parse(parsed);
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
@@ -320,38 +296,13 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     theme: fileConfig.overlay?.theme ?? "system",
     density: fileConfig.overlay?.density ?? "normal",
     reducedMotion: fileConfig.overlay?.reducedMotion ?? false,
-    terminalAutoHideMs: fileConfig.overlay?.terminalAutoHideMs ?? fileConfig.runtimeActivityOverlay?.terminalAutoHideMs ?? 5_000,
-    preferredPosition: fileConfig.overlay?.preferredPosition ?? fileConfig.runtimeActivityOverlay?.position ?? "top_right",
+    persistent: fileConfig.overlay?.persistent ?? true,
+    autoHideMs: fileConfig.overlay?.autoHideMs ?? (fileConfig.overlay?.persistent === false ? 15_000 : 0),
+    preferredPosition: fileConfig.overlay?.preferredPosition ?? "top_right",
     maxWidth: fileConfig.overlay?.maxWidth ?? 520,
     multiMonitor: fileConfig.overlay?.multiMonitor ?? "primary"
   };
-  const activityFile = fileConfig.runtimeActivityOverlay;
-  const runtimeActivityOverlay: RuntimeActivityOverlayConfig = {
-    enabled: env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED === undefined ? activityFile?.enabled ?? true : env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_ENABLED === "1",
-    position: activityFile?.position ?? "top_right",
-    reducedMotion: env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_REDUCED_MOTION === undefined ? activityFile?.reducedMotion ?? false : env.AGENTHOST_RUNTIME_ACTIVITY_OVERLAY_REDUCED_MOTION === "1",
-    terminalAutoHideMs: activityFile?.terminalAutoHideMs ?? 5_000,
-    maxLabelChars: activityFile?.maxLabelChars ?? 80,
-    showElapsed: activityFile?.showElapsed ?? true,
-    showProgress: activityFile?.showProgress ?? true,
-    interactiveControls: activityFile?.interactiveControls ?? false,
-    screenshotSuppression: activityFile?.screenshotSuppression ?? true,
-    multiTaskSummary: activityFile?.multiTaskSummary ?? true,
-    persistWhenIdle: activityFile?.persistWhenIdle ?? true
-  };
   const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
-  const browserEnabled = env.AGENTHOST_BROWSER_BRIDGE_ENABLED === undefined ? fileConfig.browserBridge?.enabled ?? false : env.AGENTHOST_BROWSER_BRIDGE_ENABLED === "1";
-  const browserPort = env.AGENTHOST_BROWSER_BRIDGE_PORT === undefined ? fileConfig.browserBridge?.port ?? 43117 : Number(env.AGENTHOST_BROWSER_BRIDGE_PORT);
-  const pairingTokenFile = resolveLocalPath(env.AGENTHOST_BROWSER_PAIRING_TOKEN_FILE ?? fileConfig.browserBridge?.pairingTokenFile ?? path.join(agentHostDir, "browser", "pairing-token"), homeDir);
-  const browserBridge = {
-    enabled: browserEnabled,
-    port: z.number().int().min(1024).max(65535).parse(browserPort),
-    pairingTokenFile,
-    pairingStateFile: resolveLocalPath(env.AGENTHOST_BROWSER_PAIRING_STATE_FILE ?? fileConfig.browserBridge?.pairingStateFile ?? path.join(path.dirname(pairingTokenFile), "paired-devices.json"), homeDir)
-  };
-  const controlRoomEnabled = env.AGENTHOST_CONTROL_ROOM_ENABLED === undefined ? fileConfig.controlRoom?.enabled ?? false : env.AGENTHOST_CONTROL_ROOM_ENABLED === "1";
-  const controlRoomPort = env.AGENTHOST_CONTROL_ROOM_PORT === undefined ? fileConfig.controlRoom?.port ?? 43118 : Number(env.AGENTHOST_CONTROL_ROOM_PORT);
-  const controlRoom = { enabled: controlRoomEnabled, port: z.number().int().min(1024).max(65535).parse(controlRoomPort), accessTokenFile: resolveAgentHostPath(env.AGENTHOST_CONTROL_ROOM_TOKEN_FILE ?? fileConfig.controlRoom?.accessTokenFile ?? path.join(agentHostDir, "control-room", "access-token"), homeDir, agentHostDir) };
   const placement = z.enum(["foreground", "background"]).parse(env.AGENTHOST_EXECUTION_PLACEMENT ?? fileConfig.execution?.placement ?? "foreground");
   const execution = { placement };
   const speech = {
@@ -379,9 +330,6 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     forgeRuntimeSandboxMode,
     overlayRendererMode,
     overlay,
-    runtimeActivityOverlay,
-    browserBridge,
-    controlRoom,
     execution,
     speech,
     optionalAdapters: fileConfig.optionalAdapters ?? {},

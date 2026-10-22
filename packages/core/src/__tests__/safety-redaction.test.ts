@@ -13,6 +13,12 @@ describe("redaction utilities", () => {
     );
   });
 
+  it("redacts confirmation token IDs from free text and summaries", () => {
+    const tokenId = "conf_12345678-1234-4234-9234-123456789abc";
+    expect(redactSensitiveText(`Run: agenthost confirm ${tokenId}`)).toBe("Run: agenthost confirm [redacted-confirmation-token]");
+    expect(summarizeForLog({ message: `token ${tokenId}` })).not.toContain(tokenId);
+  });
+
   it("redacts sensitive object fields recursively", () => {
     expect(
       redactForLog({

@@ -13,7 +13,9 @@ const focusInput = z.object({
   windowId: z.string().trim().min(1).max(200).optional(),
   appName: z.string().trim().min(1).max(200).optional(),
   title: z.string().trim().min(1).max(500).optional(),
-  pid: z.number().int().min(1).optional()
+  pid: z.number().int().min(1).optional(),
+  dryRun: z.boolean().optional(),
+  confirmationToken: z.string().trim().min(8).max(120).optional()
 }).strict().superRefine((input, ctx) => {
   if (input.windowId === undefined && input.appName === undefined && input.title === undefined && input.pid === undefined) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Must specify at least one of windowId, appName, title, or pid." });
@@ -66,11 +68,28 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     inputSchema: focusInput,
     mcpInputSchema: {
       type: "object",
-      properties: { windowId: { type: "string" }, appName: { type: "string" }, title: { type: "string" }, pid: { type: "integer" } },
+      properties: { windowId: { type: "string" }, appName: { type: "string" }, title: { type: "string" }, pid: { type: "integer" }, dryRun: { type: "boolean" }, confirmationToken: { type: "string", minLength: 8, maxLength: 120 } },
       additionalProperties: false
     },
     inputSummary: "Focus window",
+    auditInputSummary: (i) => `Focus window ${i.windowId ?? i.appName ?? i.title ?? String(i.pid ?? "unknown")}.`,
     safety: { actionType: "window_action", getInput: (i) => ({ appName: i.appName }) },
+    preview: {
+      isDryRun: (i) => i.dryRun === true,
+      resolveEffect: (i, context) => {
+        const safety = safetyCheck("window.focus", context, i.appName);
+        const target = i.windowId ?? i.appName ?? i.title ?? String(i.pid ?? "unknown");
+        return {
+          summary: `Focus window ${target}.`,
+          targetFingerprint: `window:${target}`,
+          riskLevel: safety.riskLevel === "observe" ? "medium" : safety.riskLevel,
+          approval: safety.approval,
+          blocked: safety.blocked,
+          reasons: safety.reasons,
+          data: { windowId: i.windowId ?? null, appName: i.appName ?? null, title: i.title ?? null, pid: i.pid ?? null }
+        };
+      }
+    },
     async handler(input, context) {
       const safety = safetyCheck("window.focus", context, input.appName);
       if (!safety.allowed) return failure("window.focus", safety);

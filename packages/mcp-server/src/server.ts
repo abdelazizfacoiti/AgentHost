@@ -10,6 +10,7 @@ import {
   createSessionId,
   JsonlAuditLogger,
   loadAgentHostConfig,
+  summarizeForLog,
   validateOptionalAdapterExecutionPolicy,
   AGENTHOST_VERSION,
   type AdapterRegistry,
@@ -69,13 +70,15 @@ import { createSystemTools } from "./tools/system.js";
 import { createWindowTools } from "./tools/window.js";
 import { createVisionTools } from "./tools/vision.js";
 import { createTaskTools } from "./tools/tasks.js";
+import { createAgentTools } from "./tools/agent.js";
 import { applyProductionExecutionMetadata, materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
 import { listResourceEntries, readResource } from "./resources.js";
+import { runTool } from "./tool-runner.js";
 
 const SERVER_VERSION = AGENTHOST_VERSION;
 
 const SERVER_INSTRUCTIONS =
-  "AgentHost is a universal local automation host. It provides desktop automation, file operations, shell commands, vision/OCR, and window management. Use GUI click/type as fallback when policy allows. High-risk actions require approval.";
+  "AgentHost is a universal local automation host. It provides desktop automation, file operations, shell commands, vision/OCR, and window management. Use GUI click/type as fallback when policy allows. State-changing calls require an exact dry-run preview and single-use confirmation token unless an active task approval covers a low/medium effect.";
 
 function blenderModuleSpecifier(): string {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -174,7 +177,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
   });
-  const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? config.runtimeActivityOverlay?.reducedMotion ?? false });
+  const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? false });
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -215,6 +218,12 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       focusAccessibilityElement: (input) =>
         focusLinuxAccessibilityElement(input, { agentHostDir: config.agentHostDir })
     };
+  const serverModulePath = fileURLToPath(import.meta.url);
+  const runtime = {
+    version: SERVER_VERSION,
+    entryPath: path.join(path.dirname(serverModulePath), `index${path.extname(serverModulePath)}`),
+    startedAt: new Date().toISOString()
+  };
   const context: AgentHostMcpContext = {
     sessionId,
     config,
@@ -224,7 +233,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     logger,
     grants,
     overlay,
-    linux
+    linux,
+    runtime
   };
   const tools = [
     ...createSystemTools(),
@@ -237,6 +247,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createDesktopTools(),
     ...createComputerTools(),
     ...createTaskTools(),
+    ...createAgentTools(),
     ...createWindowTools(),
     ...createPolicyTools()
   ];
@@ -287,13 +298,14 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     const tool = loadedTools.find((candidate) => candidate.name === request.params.name);
 
     if (tool === undefined) {
+      const requestedName = request.params.name.slice(0, 200);
       const error = {
         code: "unknown_tool",
-        message: `Unknown tool: ${request.params.name}`
+        message: `Unknown tool: ${summarizeForLog(requestedName)}`
       };
       const result: ToolResult = {
         ok: false,
-        tool: request.params.name,
+        tool: requestedName,
         riskLevel: "observe",
         approval: {
           required: false,
@@ -308,8 +320,9 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
         timestamp: new Date().toISOString(),
         sessionId: context.sessionId,
         profile: context.policy.name,
-        tool: request.params.name,
+        tool: requestedName,
         riskLevel: "observe",
+        ...(context.runtime === undefined ? {} : { serverVersion: context.runtime.version, serverPath: context.runtime.entryPath }),
         inputSummary: "Unknown tool call",
         approvalStatus: "not_required",
         ok: false,
@@ -339,22 +352,6 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     context,
     closeResources
   };
-}
-
-async function runTool(tool: any, args: any, context: AgentHostMcpContext): Promise<ToolResult> {
-  try {
-    return await tool.handler(args, context);
-  } catch (error) {
-    return {
-      ok: false,
-      tool: tool.name,
-      riskLevel: tool.riskLevel,
-      approval: { required: false, status: "not_required" },
-      data: null,
-      observations: ["Tool execution failed."],
-      error: { code: "execution_failed", message: error instanceof Error ? error.message : String(error) }
-    };
-  }
 }
 
 export async function startStdioServer(): Promise<void> {

@@ -1,5 +1,7 @@
 # Browser Extension Release
 
+> **Historical milestone document.** This tree is minimal-v2 and does not register the browser, speech, Control Room, scheduler, or Forge surfaces described below. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the live inventory.
+
 AgentHost browser bridge has separate development and public distribution paths.
 The current public repository ships source and deterministic unsigned review
 artifacts only. Signed Firefox and Chromium store releases require external

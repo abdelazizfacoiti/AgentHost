@@ -38,7 +38,14 @@ export function createSystemTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
       return toolSuccess({
         tool: "system.get_info",
         riskLevel: "observe",
-        data: await context.linux.getSystemInfo(),
+        data: {
+          ...(await context.linux.getSystemInfo()),
+          ...(context.runtime === undefined ? {} : {
+            serverVersion: context.runtime.version,
+            serverPath: context.runtime.entryPath,
+            serverStartedAt: context.runtime.startedAt
+          })
+        },
         observations: ["Returned local runtime information."]
       });
     }

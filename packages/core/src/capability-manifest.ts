@@ -2,16 +2,16 @@ import type { AgentCapability } from "./capability-permissions.js";
 
 export const CAPABILITY_FAMILY_SUMMARIES: Record<AgentCapability, { summary: string; exampleTools: string[] }> = {
   computer: { summary: "Observe and verify machine state; wait for UI conditions.", exampleTools: ["computer.observe_state", "computer.wait_for", "desktop.screenshot"] },
-  browser: { summary: "Website-agnostic tabs, navigation, and guarded DOM actions through the paired loopback bridge.", exampleTools: ["browser.list_tabs", "browser.open_url", "browser.click_element", "browser.fill_text"] },
+  browser: { summary: "Optional paired browser bridge; browser tools are absent unless that adapter is installed and enabled.", exampleTools: [] },
   filesystem: { summary: "Read, write, copy, move, and approval-gated delete inside policy roots.", exampleTools: ["file.read", "file.write", "file.copy", "file.move", "file.delete"] },
-  shell: { summary: "Classified command execution with timeouts and output limits; dangerous patterns stay blocked.", exampleTools: ["shell.run_safe"] },
-  applications: { summary: "Detect, list, open, and choose strategies for installed apps; optional adapters.", exampleTools: ["app.detect", "app.open", "adapter.list"] },
-  mcp: { summary: "System/policy discovery, governed Forge sandbox dispatch, workflow and scheduler governance.", exampleTools: ["system.list_capabilities", "forge.dispatch_generated_tool"] },
-  network: { summary: "Approval-gated external effects only; no open network access.", exampleTools: ["browser.open_url"] },
-  vision: { summary: "Local OCR grounding with image-relative targets; suggestion-only pointer handoff.", exampleTools: ["vision.find_target", "vision.prepare_pointer_action"] },
+  shell: { summary: "Classified command execution with timeouts, output limits, and control-plane path blocks.", exampleTools: ["shell.run"] },
+  applications: { summary: "Discover and inspect optional app adapters; app-specific tools exist only when their adapter is enabled.", exampleTools: ["adapter.list", "adapter.get"] },
+  mcp: { summary: "System, policy, capability, and task discovery.", exampleTools: ["system.list_capabilities", "system.get_info", "task.list"] },
+  network: { summary: "No open network tool is loaded by default; optional adapters may add reviewed routes.", exampleTools: [] },
+  vision: { summary: "Local OCR grounding with image-relative targets; suggestions only, no automatic pointer action.", exampleTools: ["vision.find_target", "vision.find_text"] },
   ocr: { summary: "Local Tesseract text extraction on approved images.", exampleTools: ["vision.analyze_image", "vision.find_text"] },
-  speech: { summary: "Optional local synthesis/playback; transmission is two-phase and confirmation-gated.", exampleTools: ["speech.synthesize", "speech.play"] },
-  skills: { summary: "Reusable skill catalog; combine multiple skills per task.", exampleTools: ["skills.list", "skills.get", "task.create"] }
+  speech: { summary: "Optional speech adapter; tools are absent unless that adapter is installed and enabled.", exampleTools: [] },
+  skills: { summary: "Portable skill documents are installed on disk, not exposed as a live MCP resource.", exampleTools: ["task.create", "task.list"] }
 };
 
 export interface CapabilityManifestInput {
@@ -28,7 +28,7 @@ export function buildCapabilityMarkdown(input: CapabilityManifestInput): string 
   const families = (Object.keys(CAPABILITY_FAMILY_SUMMARIES) as AgentCapability[])
     .map((family) => {
       const info = CAPABILITY_FAMILY_SUMMARIES[family];
-      return `- **${family}**: ${info.summary} (e.g. ${info.exampleTools.join(", ")})`;
+      return `- **${family}**: ${info.summary}${info.exampleTools.length > 0 ? ` (e.g. ${info.exampleTools.join(", ")})` : ""}`;
     })
     .join("\n");
   const classes = Object.entries(input.byExecutionClass ?? {})
@@ -45,20 +45,20 @@ recoverable, never terminal.
 
 ${families}
 
-Execution model: LOW effects run automatically, MEDIUM with logging, HIGH
-needs approval, CRITICAL needs explicit confirmation; every state-changing
-tool uses dry-run plus a single-use confirmation token. \`agent.stop\` and
-\`agenthost stop\` halt state-changing tools immediately; guides
-(\`overlay.guide_present\`) and tasks (\`task.*\`) organize long work.
-Pull \`agenthost://skills\` for the skill catalog and
-\`agenthost://status\` for live stop/takeover state before starting.
+Execution model: read-only and observe tools run under policy. Every
+state-changing tool uses an exact dry-run preview plus a single-use
+confirmation token, unless an active task approval covers a low/medium
+effect; high and blocked actions never auto-chain. Task and agent control
+metadata are exempt. \`agent.stop\` sets the emergency stop and revokes task
+approval; only the operator CLI clears stop/takeover flags. Tasks
+(\`task.*\`) organize long work. Pull \`agenthost://status\` for live
+stop/takeover state before starting.
 
 Fast lane (fewer turns, fewer tokens): pull \`agenthost://capabilities.md\`
-first instead of \`tools/list\`; fold window/tab observation into one
+first instead of \`tools/list\`; fold window observation into one
 \`computer.observe_state\` call; use \`computer.wait_for\` instead of fixed
-sleeps; batch with \`task.execute_plan\` (10 steps, one plan token); ask the
-operator for \`agenthost task approve\` to chain routine dry-run +
-confirmation server-side in one turn.
+sleeps; ask the operator for \`agenthost task approve\` to chain routine
+low/medium effects server-side in one turn.
 `;
 }
 
@@ -71,6 +71,6 @@ export function buildCapabilitiesJson(input: CapabilityManifestInput): Record<st
     ...(input.byExecutionClass === undefined ? {} : { byExecutionClass: input.byExecutionClass }),
     families: CAPABILITY_FAMILY_SUMMARIES,
     loop: ["understand", "plan", "inspect", "act", "observe", "verify", "recover"],
-    resources: ["agenthost://capabilities", "agenthost://capabilities.md", "agenthost://skills", "agenthost://status"]
+    resources: ["agenthost://capabilities", "agenthost://capabilities.md", "agenthost://status"]
   };
 }

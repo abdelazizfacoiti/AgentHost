@@ -66,9 +66,39 @@ export function resolveAllowedWriteRoots(
   return unique(roots);
 }
 
-function protectionForPath(normalizedPath: string, homeDir: string): PathSafetyResult["protectionKind"] {
+function controlPlaneRoots(agentHostDir: string | undefined, protectedPaths: string[] | undefined): string[] {
+  const roots = [
+    ...(agentHostDir === undefined
+      ? []
+      : [
+          path.join(agentHostDir, "run"),
+          path.join(agentHostDir, "tasks", "approvals"),
+          path.join(agentHostDir, "logs"),
+          path.join(agentHostDir, "setup"),
+          path.join(agentHostDir, "config.json")
+        ]),
+    ...(protectedPaths ?? [])
+  ];
+  return unique(roots.map((root) => path.resolve(root)));
+}
+
+export function isAgentHostControlPath(inputPath: string, context: SafetyEvaluationContext = {}): boolean {
+  const normalized = normalizePathForPolicy(inputPath, context);
+  return controlPlaneRoots(context.agentHostDir, context.protectedPaths).some((root) => isInsideOrEqual(normalized, root));
+}
+
+function protectionForPath(
+  normalizedPath: string,
+  homeDir: string,
+  agentHostDir: string | undefined,
+  protectedPaths: string[] | undefined
+): PathSafetyResult["protectionKind"] {
   if (normalizedPath === path.parse(normalizedPath).root) {
     return "root";
+  }
+
+  if (controlPlaneRoots(agentHostDir, protectedPaths).some((root) => isInsideOrEqual(normalizedPath, root))) {
+    return "agenthost_control";
   }
 
   const credentialRoots = CREDENTIAL_ROOT_TEMPLATES.map((root) => normalizePathForPolicy(root, { homeDir }));
@@ -103,6 +133,10 @@ function pathRisk(
     return "blocked";
   }
 
+  if (protectionKind === "agenthost_control") {
+    return access === "read" ? "medium" : "blocked";
+  }
+
   if (protectionKind === "system") {
     return access === "read" ? "high" : "blocked";
   }
@@ -132,7 +166,7 @@ export function classifyPath(
   const normalizedPath = normalizePathForPolicy(inputPath, { ...context, homeDir });
   const allowedWriteRoots = resolveAllowedWriteRoots(policy, { ...context, homeDir });
   const isAllowedWriteRoot = allowedWriteRoots.some((root) => isInsideOrEqual(normalizedPath, root));
-  const protectionKind = protectionForPath(normalizedPath, homeDir);
+  const protectionKind = protectionForPath(normalizedPath, homeDir, context.agentHostDir, context.protectedPaths);
   const riskLevel = pathRisk(access, protectionKind, isAllowedWriteRoot);
   const reasons: string[] = [];
   const matchedRules: string[] = [];

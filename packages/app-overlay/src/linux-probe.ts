@@ -1,7 +1,7 @@
 import type { OverlayCapabilityReport } from "@agenthost/core";
 import { spawn } from "node:child_process";
 
-export interface OverlayEnvironment { XDG_SESSION_TYPE?: string; DISPLAY?: string; WAYLAND_DISPLAY?: string; XAUTHORITY?: string; PATH?: string; }
+export interface OverlayEnvironment { XDG_SESSION_TYPE?: string; DISPLAY?: string; WAYLAND_DISPLAY?: string; XAUTHORITY?: string; PATH?: string; HOME?: string; AGENTHOST_HOME?: string; }
 export interface OverlayProbeOptions { gtk3Available?: boolean; }
 
 export function probeLinuxOverlay(environment: OverlayEnvironment = process.env, options: OverlayProbeOptions = {}): OverlayCapabilityReport {

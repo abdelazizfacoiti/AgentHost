@@ -1,5 +1,7 @@
 # Browser Setup and Pairing Validation
 
+> **Historical milestone document.** This tree is minimal-v2 and does not register the browser, speech, Control Room, scheduler, or Forge surfaces described below. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the live inventory.
+
 ## Scope
 
 This runbook validates the current browser setup and pairing path. It does not expand browser capabilities. Use a user-controlled public/test page only; provider names are examples, never required test targets.

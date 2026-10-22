@@ -1,5 +1,7 @@
 # Linux Release Candidate and Operations (R5/R6)
 
+> **Historical milestone document.** This tree is minimal-v2 and does not register the browser, speech, Control Room, scheduler, or Forge surfaces described below. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the live inventory.
+
 R5 packages AgentHost's general-purpose computer-use capabilities for local Linux use. It expands automation capability intentionally (general file operations, shell execution boundary, website-agnostic browser work, observe-verify-recover loop, tasks, skills, agent controls) while safety policy is enforced by the runtime: isolation, secret redaction, audit logging, loopback binding, permission boundaries, dangerous-action approval, and an emergency stop independent of the model.
 
 ## Supported boundary
@@ -52,7 +54,7 @@ agenthost start [--background]
 agenthost stop
 agenthost status
 agenthost task [list|status|pause|resume|stop|approve]
-agenthost task watch <id> [--follow] [--notify]
+agenthost task watch <id> [--follow] [--notify] [--overlay]
 agenthost task export <id> [--format md|html] [--out <path>]
 agenthost capabilities
 agenthost permissions

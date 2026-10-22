@@ -1,7 +1,7 @@
 import type { PolicyProfile, RiskLevel, SafetyDecision, SafetyEvaluationContext } from "../types.js";
 import { evaluateApprovalRequirement, isApprovalSatisfied } from "./approval.js";
 import { classifyAppSensitivity } from "./app-sensitivity.js";
-import { classifyPath } from "./path-policy.js";
+import { classifyPath, isAgentHostControlPath } from "./path-policy.js";
 
 interface ShellRule {
   id: string;
@@ -88,6 +88,24 @@ const SHELL_RULES: ShellRule[] = [
     pattern: /(^|\s)(?:apt|apt-get|dnf|yum|pacman|zypper|snap|flatpak|systemctl|service)\s+(?:install|remove|purge|upgrade|dist-upgrade|update|start|stop|restart|enable|disable)\b/i,
     riskLevel: "high",
     reason: "Package or service changes require explicit approval."
+  },
+  {
+    id: "shell.inline_code",
+    pattern: /\b(?:python[0-9.]*|node|perl|ruby|php)\s+(?:-c|-e|--eval|-r)\b/i,
+    riskLevel: "high",
+    reason: "Inline interpreter code can perform arbitrary local actions and requires explicit approval."
+  },
+  {
+    id: "shell.agenthost_control_bypass",
+    pattern: /\b(?:agenthost(?:-cli)?|agenthost-mcp)\b[\s\S]*\b(?:task\s+(?:approve|stop)|confirm|deny|resume|stop|takeover|overlay\s+hide|integrations[\s\S]*--apply)\b/i,
+    riskLevel: "blocked",
+    reason: "AgentHost operator control commands cannot be run by the agent."
+  },
+  {
+    id: "shell.agenthost_control_path",
+    pattern: /\.agenthost\/(?:run|logs|setup|tasks\/approvals)(?:\/|\b)|\.agenthost\/config\.json\b/i,
+    riskLevel: "blocked",
+    reason: "AgentHost control-plane files are operator-only."
   }
 ];
 
@@ -134,6 +152,12 @@ export function classifyShellCommand(
 
   for (const match of command.matchAll(PATH_FRAGMENT_PATTERN)) {
     const candidate = match[0];
+    if (isAgentHostControlPath(candidate, context)) {
+      riskLevel = "blocked";
+      reasons.push(`Command touches AgentHost control-plane path: ${candidate}.`);
+      matchedRules.push("shell.agenthost_control_path");
+      continue;
+    }
     const pathDecision = classifyPath(candidate, policy, { ...context, access: "read" });
 
     if (pathDecision.riskLevel === "blocked") {

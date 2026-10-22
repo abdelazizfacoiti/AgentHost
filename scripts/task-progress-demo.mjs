@@ -34,6 +34,9 @@ const controller = new TaskProgressOverlay({
 });
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+let interrupted = false;
+process.once("SIGINT", () => { interrupted = true; });
+process.once("SIGTERM", () => { interrupted = true; });
 const poller = setInterval(() => void controller.pollEvents().catch(() => undefined), 200);
 
 if (!(await controller.start())) {
@@ -42,17 +45,17 @@ if (!(await controller.start())) {
   await manager.close();
   process.exit(1);
 }
-console.log(JSON.stringify({ ok: true, renderer: capabilities.renderer, sessionId, taskId: controller.snapshot().taskId }));
+console.log(JSON.stringify({ ok: true, renderer: capabilities.renderer, sessionId, taskId: controller.snapshot().taskId, note: "Card persists until Dismiss, agenthost overlay hide, or Ctrl+C." }));
 
 const runStep = async (id, durationMs, detail) => {
   await controller.setStep(id);
   await controller.setDetail(detail);
   let remaining = durationMs;
-  while (remaining > 0 && !stopped) {
+  while (remaining > 0 && !stopped && !interrupted) {
     if (paused) {
       await controller.pause();
-      while (paused && !stopped) await sleep(150);
-      if (!stopped) await controller.resume();
+      while (paused && !stopped && !interrupted) await sleep(150);
+      if (!stopped && !interrupted) await controller.resume();
     }
     await sleep(Math.min(250, remaining));
     remaining -= 250;
@@ -61,18 +64,27 @@ const runStep = async (id, durationMs, detail) => {
 
 try {
   await runStep("reviews", 4_000, "Reading public review summaries");
-  if (!stopped) await runStep("bands", 5_000, "Extracting reported salary ranges");
-  if (!stopped) await runStep("compare", 4_000, "Comparing the offer with market ranges");
-  if (!stopped) await runStep("summary", 4_000, "Drafting the negotiation summary");
+  if (!stopped && !interrupted) await runStep("bands", 5_000, "Extracting reported salary ranges");
+  if (!stopped && !interrupted) await runStep("compare", 4_000, "Comparing the offer with market ranges");
+  if (!stopped && !interrupted) await runStep("summary", 4_000, "Drafting the negotiation summary");
 } finally {
   clearInterval(poller);
-  if (stopped) {
-    await controller.stopped("Stopped by operator");
-    await sleep(1_500);
-  } else {
-    await controller.complete("Summary ready");
-    await sleep(15_500);
-  }
+  if (stopped) await controller.stopped("Stopped by operator");
+  else if (!interrupted) await controller.complete("Summary ready");
+}
+
+// Persistent card: stay on screen until the operator dismisses it (button,
+// Escape, `agenthost overlay hide`, or Ctrl+C). Completion does not hide it.
+if (interrupted) {
   await controller.dismiss();
   await manager.close();
+  process.exit(130);
 }
+console.log("card persistent: press Dismiss / Escape, run `agenthost overlay hide`, or Ctrl+C");
+while (!interrupted) {
+  const actions = await controller.pollEvents().catch(() => []);
+  if (actions.includes("dismiss")) break;
+  await sleep(200);
+}
+await controller.dismiss();
+await manager.close();

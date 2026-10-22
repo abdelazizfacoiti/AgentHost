@@ -13,7 +13,10 @@ export interface OverlayPublicConfig {
   theme: OverlayTheme;
   density: OverlayDensity;
   reducedMotion: boolean;
-  terminalAutoHideMs: number;
+  /** Progress cards stay until explicitly dismissed (default true). */
+  persistent: boolean;
+  /** Terminal auto-hide delay in ms; 0 means never. Ignored for persistent cards. */
+  autoHideMs: number;
   preferredPosition: OverlayPlacement;
   maxWidth: number;
   multiMonitor: "primary" | "all";
@@ -54,11 +57,11 @@ export type OverlayWidgetComponent =
   | { type: "warning"; text: string }
   | { type: "image_reference"; evidenceId: string; alt: string };
 
-export interface OverlayWidget { widgetId?: string; title: string; components: OverlayWidgetComponent[]; target?: OverlayTargetBinding; placement?: OverlayPlacement; displayPolicy?: OverlayDisplayPolicy; style?: OverlayStyleTokens; animation?: OverlayAnimation; interaction?: OverlayInteractionPolicy; accessibilityLabel?: string; sensitivity: OverlaySensitivity; ttlMs?: number; }
+export interface OverlayWidget { widgetId?: string; title: string; components: OverlayWidgetComponent[]; target?: OverlayTargetBinding; placement?: OverlayPlacement; displayPolicy?: OverlayDisplayPolicy; style?: OverlayStyleTokens; animation?: OverlayAnimation; interaction?: OverlayInteractionPolicy; accessibilityLabel?: string; sensitivity: OverlaySensitivity; ttlMs?: number; persistent?: boolean; }
 export interface OverlayWidgetEvent { eventId: string; overlayId: string; event: OverlayEventName; createdAt: string; ownerSessionId: string; }
 
 export interface OverlayCapabilityReport { supported: boolean; available?: boolean; visible?: boolean; renderer: string; rendererStatus: OverlayRendererStatus; sessionType: "x11" | "wayland" | "unknown"; displayAvailable: boolean; clickThrough: boolean; interactiveWidgets: boolean; multipleDisplays: boolean; globalOverlayAvailable: boolean; clickThroughAvailable: boolean; multiDisplayAvailable: boolean; animationAvailable: boolean; interactiveWidgetsAvailable: boolean; /** True only when compositor-backed transparent windows are available. */ compositorAvailable?: boolean | undefined; /** True only when renderer can create transparent windows without covering the desktop. */ transparentWindowsAvailable?: boolean | undefined; /** Safe child rendering path selected after handshake. */ drawingBackend?: "cairo" | "gtk3-widgets" | undefined; cairoCallbacks?: boolean | undefined; fallbackRenderer?: "headless" | undefined; reason: string; limitations: string[]; }
-export interface OverlayStateSummary { overlayId: string; ownerSessionId: string; type: OverlayPrimitiveType | "widget"; target?: OverlayTargetSummary; sensitivity: OverlaySensitivity; interactive: boolean; visible: boolean; createdAt: string; updatedAt: string; expiresAt: string; lastEvent?: OverlayWidgetEvent; }
+export interface OverlayStateSummary { overlayId: string; ownerSessionId: string; type: OverlayPrimitiveType | "widget"; target?: OverlayTargetSummary; sensitivity: OverlaySensitivity; interactive: boolean; visible: boolean; createdAt: string; updatedAt: string; expiresAt: string; persistent?: boolean; lastEvent?: OverlayWidgetEvent; }
 export interface OverlayStateSnapshot { renderer: OverlayCapabilityReport; overlays: OverlayStateSummary[]; pendingEvents: OverlayWidgetEvent[]; emergencyHidden: boolean; }
 
 export interface OverlayValidationResult { ok: boolean; redactedText?: string; redactionCounts: Record<string, number>; errors: string[]; }
@@ -130,6 +133,12 @@ export function validateOverlayWidget(widget: OverlayWidget, reducedMotion = fal
   if (widget === null || typeof widget !== "object") return ["overlay_widget_invalid"];
   if (!["public", "private", "secret"].includes(widget.sensitivity)) errors.push("overlay_widget_sensitivity_invalid");
   if (widget.sensitivity === "secret") errors.push("overlay_secret_widget_blocked");
+  if (widget.persistent !== undefined) {
+    if (typeof widget.persistent !== "boolean") errors.push("overlay_widget_persistent_invalid");
+    // Persistent cards outlive the task and may be captured in screenshots, so
+    // only public summary content is allowed to stay on screen indefinitely.
+    else if (widget.persistent === true && widget.sensitivity !== "public") errors.push("overlay_persistent_requires_public");
+  }
   if (typeof widget.title !== "string" || !widget.title || widget.title.length > 200) errors.push("overlay_widget_title_invalid");
   if (typeof widget.title === "string") errors.push(...redactOverlayText(widget.title, widget.sensitivity).errors);
   if (!Array.isArray(widget.components) || widget.components.length > 30) errors.push("overlay_widget_components_invalid");

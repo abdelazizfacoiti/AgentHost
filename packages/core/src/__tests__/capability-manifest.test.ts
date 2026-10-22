@@ -11,7 +11,9 @@ describe("capability manifest", () => {
     expect(markdown).toContain("computer");
     expect(markdown).toContain("browser");
     expect(markdown).toContain("skills");
-    expect(markdown).toContain("agenthost://skills");
+    expect(markdown).toContain("agenthost://status");
+    expect(markdown).not.toContain("agenthost://skills");
+    expect(markdown).not.toContain("task.execute_plan");
     expect(markdown).toContain("observe, verify");
   });
 

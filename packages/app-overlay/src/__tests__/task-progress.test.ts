@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OverlayWidget } from "@agenthost/core";
 import { HeadlessOverlayRenderer, OverlayManager, TaskProgressOverlay, type TaskProgressAction } from "../index.js";
@@ -24,7 +27,7 @@ function event(overlayId: string, name: string, ownerSessionId = "session-1") {
 }
 
 function createController(options: Partial<ConstructorParameters<typeof TaskProgressOverlay>[0]> = {}) {
-  const manager = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId: "session-1" });
+  const manager = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId: "session-1" }, { hideMarkerPath: null });
   const actions: TaskProgressAction[] = [];
   const controller = new TaskProgressOverlay({
     manager,
@@ -142,8 +145,48 @@ describe("TaskProgressOverlay", () => {
     }
   });
 
+  it("persists terminal cards by default and freezes elapsed time", async () => {
+    let clock = 1_000;
+    const manager = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId: "session-1" }, { hideMarkerPath: null });
+    const controller = new TaskProgressOverlay({ manager, taskId: "task-persist", title: "Persistent run", steps: [{ id: "only", label: "Work" }], heartbeatMs: 60_000, now: () => clock });
+    try {
+      await controller.start();
+      clock += 5_000;
+      await controller.setDetail("Reading");
+      expect(controller.snapshot().elapsedMs).toBe(5_000);
+      await controller.complete("Ready");
+      expect((await manager.state()).overlays[0]).toMatchObject({ persistent: true });
+      clock += 20_000;
+      expect(controller.snapshot().elapsedMs).toBe(5_000);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect((await manager.state()).overlays).toHaveLength(1);
+    } finally {
+      await controller.dismiss();
+      await manager.close();
+    }
+  });
+
+  it("emergency-hides persistent cards through the cross-process hide marker", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "agenthost-overlay-hide-"));
+    const marker = path.join(directory, "overlay.hide");
+    const manager = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId: "session-1" }, { hideMarkerPath: marker });
+    const controller = new TaskProgressOverlay({ manager, taskId: "task-hide", title: "Hide me", heartbeatMs: 60_000 });
+    try {
+      await controller.start();
+      await controller.complete();
+      expect((await manager.state()).overlays).toHaveLength(1);
+      await writeFile(marker, "{}\n", "utf8");
+      expect(await controller.pollEvents()).toEqual(["dismiss"]);
+      expect((await manager.state()).overlays).toHaveLength(0);
+    } finally {
+      await controller.dismiss();
+      await manager.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("requires a widget id and an existing overlay for updates", async () => {
-    const manager = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId: "session-1" });
+    const manager = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId: "session-1" }, { hideMarkerPath: null });
     try {
       const widget: OverlayWidget = { title: "Missing", components: [], sensitivity: "public" };
       expect(await manager.updateWidget(widget)).toMatchObject({ ok: false, reason: "overlay_widget_id_required" });

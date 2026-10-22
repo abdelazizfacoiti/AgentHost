@@ -206,6 +206,8 @@ class Renderer:
         self.renderer_epoch = 0
         self.last_render_reason = None
         self.widget_css_ready = False
+        self.command_queue = []
+        self.queue_scheduled = False
         self.monitor_source = GLib.timeout_add_seconds(2, self.monitor_tick)
 
     def capability(self):
@@ -407,7 +409,9 @@ class Renderer:
         window.set_keep_above(True)
         window.set_skip_taskbar_hint(True)
         window.set_accept_focus(focus_required)
-        window.set_focus_on_map(focus_required)
+        # Never steal keyboard focus on map; interactive cards accept focus
+        # only after an explicit click so typing never jumps to the overlay.
+        window.set_focus_on_map(False)
         window.set_app_paintable(True)
         screen = Gdk.Screen.get_default()
         if screen is not None:
@@ -629,9 +633,17 @@ class Renderer:
             self.build_body(card, components)
             return
         for row, component in zip(current, components):
-            if row["data"] != component:
+            if row["data"] == component:
+                continue
+            try:
                 row["update"](component)
                 row["data"] = component
+            except Exception:
+                # A row-level failure (historically seen inside Gtk.Label.set_text
+                # under rapid updates) must not wedge the whole card: rebuild the
+                # body from scratch and move on.
+                self.build_body(card, components)
+                return
 
     def build_footer(self, card, components, record):
         footer = card["footer"]
@@ -662,21 +674,39 @@ class Renderer:
         card["separator"].set_visible(len(footer.get_children()) > 0)
         footer.show_all()
 
+    def set_accessible_name(self, widget, name):
+        try:
+            accessible = widget.get_accessible()
+            if accessible is not None:
+                accessible.set_name(safe_text(name, 200))
+        except Exception:
+            pass
+
     def build_header(self, card, record):
+        payload = record.get("payload") or {}
+        title_text = safe_text(payload.get("title") or payload.get("label") or "AgentHost", 200)
+        close_event = self.dismiss_event(record)
+        signature = (title_text, close_event)
+        # Rebuilding the header destroys/recreates the drag EventBox on every
+        # detail tick. Only rebuild when the title or close affordance actually
+        # changes; otherwise update the label text in place.
+        if card.get("header_signature") == signature and card.get("title") is not None:
+            if card["title"].get_text() != title_text:
+                card["title"].set_text(title_text)
+                self.set_accessible_name(card["window"], title_text)
+            return
         header = card["header"]
         for child in header.get_children():
             header.remove(child)
             child.destroy()
-        payload = record.get("payload") or {}
-        title = self.label(payload.get("title") or payload.get("label") or "AgentHost", "ah-title", 200)
+        title = self.label(title_text, "ah-title", 200)
         title.set_ellipsize(3)
         title.set_line_wrap(False)
         title.set_max_width_chars(38)
         drag = Gtk.EventBox()
         drag.add(title)
-        drag.connect("button-press-event", self.start_drag, card["window"])
+        drag.connect("button-press-event", self.start_drag, card)
         header.pack_start(drag, True, True, 0)
-        close_event = self.dismiss_event(record)
         button = None
         if close_event is not None:
             button = Gtk.Button(label="✕")
@@ -688,11 +718,21 @@ class Renderer:
         card["title"] = title
         card["close_button"] = button
         card["close_event"] = close_event
+        card["header_signature"] = signature
+        self.set_accessible_name(card["window"], title_text)
         header.show_all()
 
-    def start_drag(self, _widget, event, window):
+    def start_drag(self, _widget, event, card):
         if event.button == 1:
-            window.begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
+            card["move_drag"] = True
+            card["window"].begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
+        return False
+
+    def on_card_configure(self, _window, event, card):
+        # While the window manager is running a move drag, remember where the
+        # operator put the card so later content updates do not snap it back.
+        if card.get("move_drag"):
+            card["user_position"] = (int(event.x), int(event.y))
         return False
 
     def create_card(self, record):
@@ -718,7 +758,8 @@ class Renderer:
         frame.add(outer)
         window.add(frame)
         window.connect("key-press-event", self.card_key, record)
-        card = {"overlayId": record.get("overlayId"), "window": window, "frame": frame, "outer": outer, "header": header, "body": body, "separator": separator, "footer": footer, "rows": [], "footer_signature": [], "title": None, "close_button": None, "close_event": None, "last_position": None}
+        card = {"overlayId": record.get("overlayId"), "window": window, "frame": frame, "outer": outer, "header": header, "body": body, "separator": separator, "footer": footer, "rows": [], "footer_signature": [], "header_signature": None, "title": None, "close_button": None, "close_event": None, "last_position": None, "move_drag": False, "user_position": None}
+        window.connect("configure-event", self.on_card_configure, card)
         self.cards[record.get("overlayId")] = card
         return card
 
@@ -769,7 +810,10 @@ class Renderer:
         target = payload.get("target") if isinstance(payload, dict) else {}
         bounds = target.get("bounds") if isinstance(target, dict) else None
         point = target.get("point") if isinstance(target, dict) else None
-        if isinstance(bounds, dict):
+        user_position = card.get("user_position")
+        if isinstance(user_position, tuple) and not isinstance(bounds, dict) and not isinstance(point, dict):
+            x, y = float(user_position[0]), float(user_position[1])
+        elif isinstance(bounds, dict):
             try:
                 x = float(bounds.get("x", 0)) + float(bounds.get("width", 1)) + 12
                 y = float(bounds.get("y", 0))
@@ -1118,6 +1162,36 @@ def handle(line):
     if not hmac.compare_digest(renderer.token, request["token"]):
         reply(request["id"], False, error="renderer_token_invalid")
         return
+    enqueue_request(request)
+
+
+def enqueue_request(request):
+    # Rendering runs on a GLib idle callback instead of inside the stdin IO
+    # watch. Rapid show/update bursts used to wedge the main loop inside
+    # Gtk.Label.set_text; queueing serializes mutations at idle priority and
+    # coalesces per-overlay updates to the latest payload (latest wins).
+    command = request.get("command")
+    overlay_id = request.get("payload", {}).get("overlayId") if isinstance(request.get("payload"), dict) else None
+    if command in {"show", "update"} and isinstance(overlay_id, str):
+        renderer.command_queue = [
+            item for item in renderer.command_queue
+            if not (item[1] in {"show", "update"} and item[2] == overlay_id)
+        ]
+    renderer.command_queue.append((request, command, overlay_id))
+    if not renderer.queue_scheduled:
+        renderer.queue_scheduled = True
+        GLib.idle_add(process_command_queue)
+
+
+def process_command_queue():
+    renderer.queue_scheduled = False
+    while renderer.command_queue:
+        request, _command, _overlay_id = renderer.command_queue.pop(0)
+        handle_request(request)
+    return False
+
+
+def handle_request(request):
     command = request["command"]
     payload = request.get("payload")
     try:
@@ -1168,6 +1242,9 @@ def handle(line):
 
 def stdin_watch(_source, condition):
     if condition & GLib.IO_HUP:
+        while renderer.command_queue:
+            request, _command, _overlay_id = renderer.command_queue.pop(0)
+            handle_request(request)
         renderer.close()
         return False
     line = sys.stdin.readline()

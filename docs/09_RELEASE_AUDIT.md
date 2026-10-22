@@ -1,5 +1,7 @@
 # R6 Release Audit and Freeze Record
 
+> **Historical milestone document.** This tree is minimal-v2 and does not register the browser, speech, Control Room, scheduler, or Forge surfaces described below. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the live inventory.
+
 Status: `ready_with_manual_signoff` until desktop, browser, speech, Control Room, and external-distribution checks are recorded.
 
 R6 adds no product capability. It audits and hardens R5 packaging, installation, lifecycle, privacy, security, and documentation.

@@ -23,7 +23,7 @@ GUI clicking/typing is fallback only. Use guide mode for unsupported or sensitiv
 
 ## Current milestone
 
-**P1 Safety Reconciliation + R6 Closure**. Implement only approved safety, metadata, parity, logging, and release-documentation work. Verify source and tests before claiming completion.
+**P0 Trust & Truth**. Make advertised safety guarantees real (schema validation, previews/dry-run, single-use confirmation tokens, stop/takeover, audit/provenance), keep tool manifests/resources truthful, and verify source, tests, build, and smoke before claiming completion.
 
 ## Architecture rules
 
@@ -37,7 +37,7 @@ GUI clicking/typing is fallback only. Use guide mode for unsupported or sensitiv
 packages/
   core/              @agenthost/core — risk tiers, capability permissions, policies, types
   mcp-server/        @agenthost/mcp-server — MCP server, tools, server, resources
-  agenthost-cli/     CLI tool (bin: agenthost-mcp)
+  agenthost-cli/     CLI tool (bin: agenthost)
   app-overlay/       GTK3 renderer + overlay manager + task progress card
   os-linux/          OS adapters (filesystem, desktop, dependencies, window mgmt)
   app-blender/       optional Blender adapter
@@ -54,10 +54,13 @@ packages/
 | `npm run smoke:mcp` | Smoke test |
 | `npm run demo:overlay` | Static pointer/highlight/tooltip/card overlay tour |
 | `npm run demo:task-progress` | Live progress card with Pause/Resume/Stop |
-| `agenthost task watch <id> [--follow] [--notify]` | Tail redacted task progress; notify on done |
+| `npm run skill:install -- --target all` | Install portable `skills/agenthost` skill (opencode/Claude/Codex/Copilot/Cursor) |
+| `agenthost task watch <id> [--follow] [--notify] [--overlay]` | Tail redacted task progress; `--overlay` shows a persistent card |
+| `agenthost overlay hide [--orphans]` / `overlay status` | Cross-process hide marker + renderer diagnostics |
 | `agenthost task export <id> [--format md\|html]` | Shareable redacted run report |
-| `task.execute_plan` | Bounded tool sequence per task; dry-run each step for tokens first; fail-fast with replan hint |
-| `AGENTHOST_EXECUTION_PLACEMENT=background` | Run browser/desktop work offscreen (isolated profile) |
+| `agenthost confirmations` / `confirm <tokenId>` / `deny <tokenId>` | Inspect and resolve exact-preview confirmation tokens |
+| `agenthost task pause <id>` / `task resume <id>` | Task lifecycle transitions (not a stop-flag clear) |
+| `agenthost agent status` / `stop` / `takeover-begin` / `resume --stop\|--takeover` | Runtime stop/takeover flags; resume is operator-only |
 
 **Test order**: `build → lint → test`. Run a single test file: `npx vitest run packages/core/src/__tests__/<file>.test.ts`. Tests live in `__tests__/` dirs inside each package's `src/`.
 
@@ -65,16 +68,18 @@ packages/
 
 ## Default profile
 
-The default policy profile is **`general`** (not `strict`). It allows shell, files, GUI input, browser automation, screenshots. Gates communication/private-data/external/destructive as `approval_required`.
+The default policy profile is **`general`** (not `strict`). It allows shell, files, GUI input, screenshots, and optional adapters. The current minimal-v2 tree does not register browser DOM tools. Gates communication/private-data/external/destructive as `approval_required`.
 
 ## Safety model
 
-Every tool passes through: schema validation → risk classification → policy check → approval handling → execution → audit logging.
+Every tool passes through: schema validation → stop/takeover gate → effect preview → dry-run token or explicit confirmation → execution → redacted audit logging.
 
-- Risk tiers: `LOW` / `MEDIUM` / `HIGH` / `CRITICAL`
-- 11 capability families with trusted vs untrusted source boundaries
-- `agenthost task approve <id> [--max-risk low|medium]` creates 30-min operator-only approval
-- Stop enforcement via `stop-flag.ts`; `emergency_stop_requested`/`human_takeover_active` gates
+- Risk tiers: `observe` / `low` / `medium` / `high` / `blocked`
+- State-changing tools declare dry-run and confirmation-token requirements; metadata-only task/agent control is exempt.
+- Dry-run mints a 15-minute single-use token bound to tool, profile, canonical arguments, and target. `agenthost confirm <tokenId>` approves one exact preview; `deny` rejects it.
+- `agenthost task approve <id> [--max-risk low|medium]` creates a 30-min approval for an **active** task; the runner auto-chains only low/medium effects. High effects still need per-action tokens.
+- Stop enforcement via `run/stop.requested` and `run/takeover.active`; `emergency_stop_requested`/`human_takeover_active` gate only state-changing calls.
+- AgentHost control-plane paths (`run/`, `logs/`, `setup/`, `tasks/approvals/`, config) are read-medium and write/delete-blocked.
 
 ## Logging
 
@@ -86,14 +91,17 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 - `~/.agenthost/logs/` — JSONL audit logs
 - `~/.agenthost/screenshots/` — captured screenshots
 - `~/.agenthost/outputs/` — task reports and generated artifacts
+- `~/.agenthost/tasks/` — persistent task JSON
+- `~/.agenthost/run/confirmations/` — pending/accepted single-use tokens
+- `~/.agenthost/run/stop.requested`, `run/takeover.active` — operator gates
 
 ## Environment gotchas
 
 - **AZERTY keyboard**: `desktop.type_text` auto-routes ASCII letters/digits/space through `xdotool type` and everything else through clipboard paste. Install `xclip` or `xsel` or non-ASCII typing reports `clipboard backend missing` instead of mistyping.
 - **Second Firefox window**: `xdotool windowactivate` may fail with `BadWindow`. Use `xdotool search --name <pattern>` to find correct window ID.
 - **Focus-safe desktop**: `window.focus` returns `previousWindow` (best effort) so agents can restore user focus; focus changes are reported, never silent.
-- **Learning loop**: `strategy.record_episode` / `strategy.recall_episodes` feed redacted episodes (30-day TTL) that `strategy.select` scores; never store raw task content or secrets in lessons.
-- **SSH device adapter**: second adapter, first remote device (`packages/app-ssh`, `ssh.run_command`, dry-run + token like Blender). Enable via `optionalAdapters.ssh.enabled`. Key auth only; blocked remote patterns stay blocked.
+- **Strategy learning**: core strategy/episode helpers exist, but `strategy.*` tools are not registered in the minimal-v2 MCP server. Never store raw task content or secrets in lessons.
+- **Optional adapters**: `packages/app-ssh` and `packages/app-blender` can be enabled in the adapter registry, but this tree registers no MCP tool factory for `ssh.run_command` or `blender.run_python`; they do not appear in `tools/list`.
 - **Task progress card**: `TaskProgressOverlay` (in `packages/app-overlay/src/task-progress.ts`) renders status, checklist, `Step n/m`, elapsed time, approval command, and Pause/Resume/Stop. Pause is cooperative at a step boundary; Stop never kills an in-flight tool call. Call `pollEvents()` to drain button events. Construct the renderer and manager with the **same sessionId**.
 - **Overlay click-through**: small card windows are interactive; fullscreen surfaces are created only for pointer/arrow/highlight/spotlight primitives and must stay click-through. Do not reintroduce a fullscreen surface for ordinary cards.
 - **Overlay updates**: use `manager.updateWidget()` for in-place changes. Do not `dismiss` + `show` on every tick; that causes flicker and resets controls.
@@ -102,7 +110,7 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 
 - Tests live in `__tests__/` dirs inside each package's `src/`
 - Tests use Vitest (no separate config file; defaults from `vitest`)
-- `packages/app-overlay/src/__tests__/task-progress.test.ts` — progress card states, controls, auto-hide
+- `packages/app-overlay/src/__tests__/task-progress.test.ts` — progress card states, controls, persistence and hide-marker handling
 - `packages/app-overlay/src/__tests__/linux-renderer.test.ts` — GTK IPC, fallback, restart, event drain
 - `packages/core/src/__tests__/capability-manifest.test.ts` — capability manifest tests
 - Integration tests may require an X11 display (`:0`).
@@ -132,6 +140,7 @@ After implementation:
 - `.agents/skills/caveman-help/` — quick-reference card
 - `.agents/skills/caveman-review/` — compressed code review comments
 - `.agents/skills/caveman-stats/` — token usage stats
+- `skills/agenthost/SKILL.md` — portable laptop-control routing skill; installed by `scripts/install-agenthost-skill.mjs` (keep the `.agents/skills/agenthost/` copy in sync)
 - `customize-opencode` skill — for opencode config changes only
 
 ## Important constraints from docs
@@ -141,7 +150,9 @@ After implementation:
 - Headless/Wayland fallback reports limitation instead of claiming unsupported coordinates
 - Release scans reject credential-like material, token values, current-user absolute paths, screenshots/audio/logs, caches, runtime state, dangling dev symlinks, Python caches
 - Uninstall preserves runtime data by default
-- `agenthost overlay hide` kills orphaned GTK renderer processes
+- Progress cards persist after terminal states until explicit dismissal (Dismiss/Escape, `agenthost overlay hide`, emergency hide, or process exit); elapsed time freezes
+- Persistent overlays must be `sensitivity: "public"`; legacy `overlay.terminalAutoHideMs` is accepted and ignored
+- `agenthost overlay hide` writes `run/overlay.hide` (live managers poll it) and sweeps orphaned GTK renderers; `--orphans` only sweeps
 - Overlay renderer PID files and temporary demo scripts belong outside the repo; remove them after use
 
 ## Runtime

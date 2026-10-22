@@ -135,8 +135,15 @@ export interface LinuxAutomation {
   }): Promise<AccessibilityFocusElementResult>;
 }
 
+export interface AgentHostRuntimeInfo {
+  version: string;
+  entryPath: string;
+  startedAt: string;
+}
+
 export interface AgentHostMcpContext {
   sessionId: string;
+  runtime?: AgentHostRuntimeInfo;
   config: AgentHostConfig;
   policy: PolicyProfile;
   registry: CapabilityRegistrySnapshot;

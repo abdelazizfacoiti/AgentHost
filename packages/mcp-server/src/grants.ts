@@ -93,11 +93,13 @@ export class GrantStore {
 export function createSafetyEvaluationContext(context: AgentHostMcpContext): {
   ownerSessionId: string;
   agentHostDir: string;
+  protectedPaths: string[];
   grants: CapabilityGrant[];
 } {
   return {
     ownerSessionId: context.sessionId,
     agentHostDir: context.config.agentHostDir,
+    protectedPaths: [context.config.configPath, context.config.logFile],
     grants: context.grants.listActiveGrants()
   };
 }

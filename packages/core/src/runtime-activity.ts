@@ -98,22 +98,6 @@ export interface RuntimeActivityProjection {
   redacted: true;
 }
 
-export interface RuntimeActivityOverlayConfig {
-  enabled: boolean;
-  position: "top_left" | "top_center" | "top_right" | "bottom_left" | "bottom_center" | "bottom_right";
-  reducedMotion: boolean;
-  terminalAutoHideMs: number;
-  maxLabelChars: number;
-  showElapsed: boolean;
-  showProgress: boolean;
-  interactiveControls: boolean;
-  screenshotSuppression: boolean;
-  multiTaskSummary: boolean;
-  /** Keep the status widget visible at all times: terminal work yields to a
-   * persistent idle widget instead of hiding. Redacted display only. */
-  persistWhenIdle: boolean;
-}
-
 const transitions: Record<RuntimeActivityState, RuntimeActivityState[]> = {
   preparing: ["inspecting", "acting", "waiting_for_approval", "waiting_for_user", "blocked", "failed", "cancelled", "stopping"],
   inspecting: ["acting", "waiting_for_approval", "waiting_for_user", "recovering", "blocked", "failed", "cancelled", "stopping", "completed"],

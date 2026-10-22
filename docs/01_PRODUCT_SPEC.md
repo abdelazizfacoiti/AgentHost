@@ -1,5 +1,11 @@
 # AgentHost Product Specification
 
+> **Current minimal-v2 status:** only the 37 tools documented in
+> `docs/03_MCP_TOOLS_AND_ADAPTERS.md` are registered. Browser Bridge,
+> accessibility, speech, Forge, workflow/scheduler, checkpoints/receipts,
+> Control Room, and `task.execute_plan` are not live surfaces in this tree.
+> Sections describing them below are historical roadmap/spec material.
+
 ## Product definition
 
 AgentHost is a local general-purpose computer-use agent: a safe, permissioned body for Codex and other agents on a real workstation. The model reasons about a user goal and uses the computer's available interfaces to accomplish it — inspecting the environment, planning, acting, observing results, verifying outcomes, and recovering from failures. It is also a visual copilot for showing bounded, operator-visible guidance. The core is provider-agnostic and application-agnostic; product examples never become hardcoded architecture.
@@ -10,13 +16,13 @@ Codex / agent
   -> schema + execution metadata + risk + policy + grants
   -> dry-run and confirmation when required
   -> safest available local strategy
-  -> bounded result + receipt + redacted audit record
+  -> bounded result + redacted audit record
 ```
 
 ## Capability model
 
-AgentHost exposes capability families — computer, browser, filesystem, shell,
-applications, MCP, network, vision, OCR, speech, skills — and the model
+AgentHost exposes capability families — computer, filesystem, shell,
+applications/adapters, MCP, vision, OCR, tasks, and agent control — and the model
 composes them dynamically per task. The strategy order below survives only as
 an internal cost/optimization heuristic; it never defines what AgentHost is
 capable of doing.
@@ -32,7 +38,7 @@ capable of doing.
 7. pointer GUI fallback
 8. guide mode
 
-The browser extension is preferred for structured DOM work, but is not required. Browser failure never silently invokes another strategy. Accessibility, OCR, pointer, and guide alternatives are explicit and independently safety-gated.
+When a browser adapter is not loaded, use GUI desktop automation. No fallback silently invokes another strategy; OCR, pointer, and guide alternatives remain explicit and independently safety-gated.
 
 ## Current implementation status
 
@@ -150,7 +156,7 @@ Linux is first. X11 supports the GTK3 overlay and pointer/window backends when d
 - no passwords, cookies, tokens, private keys, browser storage, or secret extraction;
 - no public bridge, stealth control, hidden persistence, background autonomy, sudo, dependency installation, or unsafe network access;
 - optional adapters never become core features by implication;
-- policy, grants, dry-run, confirmation, exact-target checks, receipts, checkpoints, and redacted audit logging remain in force.
+- policy, grants, dry-run, confirmation, exact-target checks, stop/takeover, and redacted audit logging remain in force.
 
 ## Control Room MVP (Milestone A4)
 

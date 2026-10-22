@@ -124,6 +124,8 @@ export interface ToolResult<T = unknown> {
   ok: boolean;
   tool: string;
   riskLevel: RiskLevel;
+  serverVersion?: string;
+  serverPath?: string;
   strategy?: AutomationStrategy;
   preview?: boolean;
   confirmation?: ToolConfirmationInfo;
@@ -665,93 +667,6 @@ export interface ScheduledJobManualRunApprovalRecoveryAction { code: string; sum
 export interface ScheduledJobManualRunApprovalValidity { manualRunRequestId: string; reviewId?: string; approvalStatus: ScheduledJobManualRunApprovalStatus; validityStatus: ScheduledJobManualRunApprovalValidityStatus; evaluatedAt: string; approvedAt?: string; expiresAt?: string; remainingSeconds?: number; freshnessValid: boolean; hashesValid: boolean; grantsValid: boolean; readinessValid: boolean; activationValid: boolean; contractValid: boolean; preflightValid: boolean; acknowledgementValid: boolean; jobValid: boolean; stale: boolean; revoked: boolean; blockers: string[]; warnings: string[]; staleDependencies: ScheduledJobManualRunApprovalStaleDependency[]; recoveryActions: ScheduledJobManualRunApprovalRecoveryAction[]; recommendedNextAction: string; executionAuthorized: false; executable: false; actionsExecuted: false; confirmationTokensCreated: false; }
 export interface ScheduledJobManualRunApprovalAuditExplanation { manualRunRequestId: string; validity: ScheduledJobManualRunApprovalValidity; lifecycle: Array<{ id: string; kind: string; status: string; timestamp?: string | undefined }>; dependencySummary: Array<{ name: string; matches: boolean; reasonCode?: string | undefined }>; recoveryActions: ScheduledJobManualRunApprovalRecoveryAction[]; redacted: true; }
 
-export interface ControlRoomConfig {
-  enabled: boolean;
-  port: number;
-  accessTokenFile: string;
-}
-
-export type ControlRoomTaskStatus = "active" | "recent" | "completed" | "failed" | "cancelled" | "blocked";
-export type ControlRoomTaskSource = "workflow_trace" | "assistance_session" | "forge_runtime" | "direct_activity" | "scheduler_metadata" | "runtime_activity";
-export type ControlRoomTimelineKind = "task_received" | "planning_review" | "tool_prepared" | "policy_decision" | "confirmation_requested" | "confirmation_resolved" | "tool_started" | "screenshot_captured" | "target_grounded" | "tool_completed" | "verification" | "retry_recovery" | "completed" | "failed" | "cancelled" | "blocked" | "metadata";
-
-export interface ControlRoomTaskProjection {
-  taskId: string;
-  source: ControlRoomTaskSource;
-  sourceRecordId: string;
-  sessionId?: string;
-  status: ControlRoomTaskStatus;
-  createdAt: string;
-  updatedAt: string;
-  category: string;
-  riskLevel: RiskLevel;
-  toolCount: number;
-  screenshotCount: number;
-  confirmationCount: number;
-  durationMs?: number;
-  executable: boolean;
-  actionsExecuted: boolean;
-  redacted: true;
-}
-
-export interface ControlRoomTimelineEvent {
-  eventId: string;
-  taskId: string;
-  source: ControlRoomTaskSource;
-  sourceRecordId: string;
-  timestamp: string;
-  kind: ControlRoomTimelineKind;
-  tool?: string;
-  strategy?: AutomationStrategy;
-  riskLevel?: RiskLevel;
-  preview?: boolean;
-  ok?: boolean;
-  errorCode?: string;
-  actionDecision?: ActionEffectDecisionSummary;
-  verification?: ActionVerificationSummary;
-  summary: string;
-  opaqueIds?: string[];
-}
-
-export interface ControlRoomScreenshotProjection {
-  screenshotId: string;
-  taskId?: string;
-  sessionId?: string;
-  capturedAt: string;
-  captureKind: "full_screen" | "active_window";
-  imageWidth: number;
-  imageHeight: number;
-  redacted: true;
-  sensitivity: "public" | "private" | "secret";
-  thumbnailAvailable: boolean;
-  retention: "available" | "expired" | "unavailable";
-}
-
-export interface ControlRoomHealthProjection {
-  service: "available" | "unavailable";
-  renderer?: Record<string, unknown>;
-  browser?: Record<string, unknown>;
-  browserSetup?: Record<string, unknown>;
-  stores: { activity: "available" | "unavailable"; workflows: "available" | "unavailable"; forge: "available" | "unavailable"; scheduler: "available" | "unavailable" };
-  speech?: Record<string, unknown>;
-  runtimeActivity?: Record<string, unknown>;
-  strategies?: Record<string, unknown>;
-  routes?: Record<string, unknown>;
-  planning?: Record<string, unknown>;
-  capabilityGraph?: Record<string, unknown>;
-  limitations: string[];
-}
-
-export interface ControlRoomDashboardProjection {
-  generatedAt: string;
-  range: { from: string; to: string };
-  counts: { active: number; recent: number; completed: number; failed: number; cancelled: number; blocked: number; toolExecutions: number; screenshotCaptures: number; confirmationRequests: number };
-  averageDurationMs?: number;
-  recentActivity: ControlRoomTimelineEvent[];
-  activeActivities?: Array<Record<string, unknown>>;
-  health: ControlRoomHealthProjection;
-}
-
 export type ExecutionPlacement = "foreground" | "background";
 export interface ExecutionConfig {
   /** Background runs browser/desktop work offscreen so the user keeps their screen. */
@@ -769,10 +684,7 @@ export interface AgentHostConfig {
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
   overlayRendererMode?: import("./overlay.js").OverlayRendererMode;
   overlay?: import("./overlay.js").OverlayPublicConfig;
-  browserBridge?: BrowserBridgeConfig;
-  controlRoom?: ControlRoomConfig;
   speech?: SpeechConfig;
-  runtimeActivityOverlay?: import("./runtime-activity.js").RuntimeActivityOverlayConfig;
   optionalAdapters?: Record<string, { enabled: boolean }>;
   policy: PolicyProfile;
 }
@@ -787,14 +699,6 @@ export interface SpeechConfig {
   maxArtifactBytes: number;
   synthesisTimeoutMs: number;
   playbackTimeoutMs: number;
-}
-
-export interface BrowserBridgeConfig {
-  enabled: boolean;
-  port: number;
-  pairingTokenFile: string;
-  /** Persistent revocable browser-device records. Defaults beside pairingTokenFile. */
-  pairingStateFile?: string;
 }
 
 export type BrowserFamily = "firefox" | "chromium";
@@ -1083,7 +987,7 @@ export interface PathSafetyResult {
   normalizedPath: string;
   access: PathAccessMode;
   isProtectedPath: boolean;
-  protectionKind: "none" | "root" | "home" | "credential" | "browser_profile" | "system";
+  protectionKind: "none" | "root" | "home" | "credential" | "browser_profile" | "system" | "agenthost_control";
   isAllowedWriteRoot: boolean;
   allowedWriteRoots: string[];
   riskLevel: RiskLevel;
@@ -1096,6 +1000,7 @@ export interface SafetyEvaluationContext {
   homeDir?: string;
   cwd?: string;
   agentHostDir?: string;
+  protectedPaths?: string[];
   grants?: CapabilityGrant[];
 }
 
@@ -1555,6 +1460,9 @@ export interface SystemInfo {
   profile: PolicyProfileName;
   strategies: AutomationStrategy[];
   tools: string[];
+  serverVersion?: string;
+  serverPath?: string;
+  serverStartedAt?: string;
 }
 
 export interface CapabilityList {
@@ -2276,9 +2184,12 @@ export interface AuditLogEntry {
   profile: PolicyProfileName;
   tool: string;
   riskLevel: RiskLevel;
+  serverVersion?: string;
+  serverPath?: string;
   strategy?: AutomationStrategy;
   preview?: boolean;
   confirmationStatus?: ConfirmationStatus;
+  /** Non-reversible audit reference; never the confirmable token ID. */
   confirmationTokenId?: string;
   confirmationReason?: string;
   receiptId?: string;

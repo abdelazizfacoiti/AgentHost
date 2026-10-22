@@ -1,5 +1,7 @@
 # Privacy, support, and manual verification boundary
 
+> **Historical milestone document.** This tree is minimal-v2 and does not register the browser, speech, Control Room, scheduler, or Forge surfaces described below. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the live inventory.
+
 AgentHost is local-first. The MCP server, overlay renderer, OCR, speech providers, stores, and logs are local components. There is no public listener, cloud OCR/TTS, credential extraction, or automatic extension installation.
 
 Release support is documented in `SUPPORT.md`; security reports belong in

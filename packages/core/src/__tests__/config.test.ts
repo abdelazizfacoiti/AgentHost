@@ -15,37 +15,29 @@ describe("loadAgentHostConfig", () => {
     expect(config.policy.name).toBe("general");
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
     expect(config.overlayRendererMode).toBe("auto");
-    expect(config.runtimeActivityOverlay).toEqual(expect.objectContaining({ enabled: true, position: "top_right", interactiveControls: false, screenshotSuppression: true, multiTaskSummary: true, persistWhenIdle: true }));
-    expect(config.browserBridge).toEqual(expect.objectContaining({
-      enabled: false,
-      port: 43117,
-      pairingTokenFile: path.join(homeDir, ".agenthost", "browser", "pairing-token"),
-      pairingStateFile: path.join(homeDir, ".agenthost", "browser", "paired-devices.json")
-    }));
-    expect(config.controlRoom).toEqual(expect.objectContaining({ enabled: false, port: 43118 }));
+    expect(config.overlay).toEqual(expect.objectContaining({ persistent: true, autoHideMs: 0, preferredPosition: "top_right", reducedMotion: false }));
+    expect((config as unknown as Record<string, unknown>).runtimeActivityOverlay).toBeUndefined();
+    expect((config as unknown as Record<string, unknown>).browserBridge).toBeUndefined();
+    expect((config as unknown as Record<string, unknown>).controlRoom).toBeUndefined();
     expect(config.speech).toEqual(expect.objectContaining({ enabled: true, providerPreference: ["espeak-ng", "piper", "speech-dispatcher"] }));
   });
 
-  it("loads explicit browser pairing state path without broad defaults", async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-browser-"));
+  it("strips dead legacy config blocks instead of failing strict validation", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-legacy-"));
     const agentHostDir = path.join(homeDir, ".agenthost");
     await mkdir(agentHostDir, { recursive: true });
     const configPath = path.join(agentHostDir, "config.json");
     await writeFile(configPath, JSON.stringify({
-      browserBridge: {
-        enabled: true,
-        port: 43119,
-        pairingTokenFile: "~/.agenthost/browser/enrollment-token",
-        pairingStateFile: "~/.agenthost/browser/devices.json"
-      }
+      runtimeActivityOverlay: { enabled: true, terminalAutoHideMs: 5000 },
+      browserBridge: { enabled: true, port: 43119, host: "0.0.0.0" },
+      controlRoom: { enabled: true, port: 43120 }
     }), "utf8");
     const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
-    expect(config.browserBridge).toEqual({
-      enabled: true,
-      port: 43119,
-      pairingTokenFile: path.join(homeDir, ".agenthost", "browser", "enrollment-token"),
-      pairingStateFile: path.join(homeDir, ".agenthost", "browser", "devices.json")
-    });
+    const legacy = config as unknown as Record<string, unknown>;
+    expect(legacy.runtimeActivityOverlay).toBeUndefined();
+    expect(legacy.browserBridge).toBeUndefined();
+    expect(legacy.controlRoom).toBeUndefined();
+    expect(config.overlay).toEqual(expect.objectContaining({ persistent: true, autoHideMs: 0 }));
   });
 
   it("accepts explicit AGENTHOST_CONFIG path and schema version", async () => {
@@ -55,17 +47,6 @@ describe("loadAgentHostConfig", () => {
     const config = await loadAgentHostConfig({ env: { AGENTHOST_CONFIG: configPath }, homeDir });
     expect(config.configPath).toBe(configPath);
     expect(config.schemaVersion).toBe(1);
-  });
-
-  it("rejects configurable browser bridge hosts", async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-browser-host-"));
-    const agentHostDir = path.join(homeDir, ".agenthost");
-    await mkdir(agentHostDir, { recursive: true });
-    const configPath = path.join(agentHostDir, "config.json");
-    await writeFile(configPath, JSON.stringify({
-      browserBridge: { enabled: true, host: "0.0.0.0" }
-    }), "utf8");
-    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
   });
 
   it("loads profile and paths from a config file", async () => {
@@ -246,21 +227,23 @@ describe("loadAgentHostConfig", () => {
     expect(config.forgeRuntimeSandboxMode).toBe("bubblewrap");
   });
 
+  it("maps overlay persistence and auto-hide configuration", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-overlay-persist-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    await writeFile(configPath, JSON.stringify({ overlay: { persistent: false } }), "utf8");
+    expect((await loadAgentHostConfig({ env: {}, homeDir, configPath })).overlay).toMatchObject({ persistent: false, autoHideMs: 15_000 });
+    await writeFile(configPath, JSON.stringify({ overlay: { autoHideMs: 30_000 } }), "utf8");
+    expect((await loadAgentHostConfig({ env: {}, homeDir, configPath })).overlay).toMatchObject({ persistent: true, autoHideMs: 30_000 });
+    await writeFile(configPath, JSON.stringify({ overlay: { terminalAutoHideMs: 5_000 } }), "utf8");
+    expect((await loadAgentHostConfig({ env: {}, homeDir, configPath })).overlay).toMatchObject({ persistent: true, autoHideMs: 0 });
+  });
+
   it("allows explicitly selecting the local overlay renderer mode", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-overlay-"));
     const config = await loadAgentHostConfig({ env: { AGENTHOST_OVERLAY_MODE: "gtk3-x11" }, homeDir });
     expect(config.overlayRendererMode).toBe("gtk3-x11");
-  });
-
-  it("loads and validates Control Room configuration", async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-control-room-"));
-    const config = await loadAgentHostConfig({ env: { AGENTHOST_CONTROL_ROOM_ENABLED: "1", AGENTHOST_CONTROL_ROOM_PORT: "43119" }, homeDir });
-    expect(config.controlRoom).toMatchObject({ enabled: true, port: 43119, accessTokenFile: path.join(homeDir, ".agenthost", "control-room", "access-token") });
-  });
-
-  it("rejects Control Room token paths outside AgentHost home", async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-control-room-path-"));
-    await expect(loadAgentHostConfig({ env: { AGENTHOST_CONTROL_ROOM_TOKEN_FILE: "/tmp/control-room-token" }, homeDir })).rejects.toThrow("control_room_token_path_outside_agenthost");
   });
 
   it("defaults execution placement to foreground", async () => {

@@ -21,6 +21,11 @@ import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../too
 import { createSafetyEvaluationContext } from "../grants.js";
 
 const nonEmptyString = z.string().trim().min(1).max(1000);
+const confirmationTokenSchema = z.string().trim().min(8).max(120).optional();
+const executionMcpProperties = {
+  dryRun: { type: "boolean" },
+  confirmationToken: { type: "string", minLength: 8, maxLength: 120 }
+};
 
 const activeWindowSchema = z
   .object({
@@ -43,7 +48,9 @@ const screenshotInputSchema = z
   .object({
     outputDir: nonEmptyString.optional(),
     filename: z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._-]+\.png$/).optional(),
-    includeActiveWindowOnly: z.boolean().optional()
+    includeActiveWindowOnly: z.boolean().optional(),
+    dryRun: z.boolean().optional(),
+    confirmationToken: confirmationTokenSchema
   })
   .strict();
 
@@ -51,7 +58,8 @@ const hotkeyInputSchema = z
   .object({
     keys: z.array(z.string().trim().min(1).max(100)).min(1).max(10),
     activeWindow: activeWindowSchema,
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: confirmationTokenSchema
   })
   .strict();
 
@@ -60,7 +68,8 @@ const typeTextInputSchema = z
     text: z.string().min(1).max(10_000),
     activeWindow: activeWindowSchema,
     dataSensitivity: z.enum(["none", "low", "sensitive", "secret"]).optional(),
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: confirmationTokenSchema
   })
   .strict();
 
@@ -70,7 +79,8 @@ const clickInputSchema = z
     y: z.number().int().min(0),
     button: z.enum(["left", "middle", "right"]).optional(),
     activeWindow: activeWindowSchema,
-    dryRun: z.boolean().optional()
+    dryRun: z.boolean().optional(),
+    confirmationToken: confirmationTokenSchema
   })
   .strict();
 
@@ -78,7 +88,7 @@ const pointerInputSchema = z.object({
   x: z.number().int().min(0).optional(), y: z.number().int().min(0).optional(),
   direction: z.enum(["up", "down", "left", "right"]).optional(), amount: z.number().int().min(1).max(20).optional(),
   startX: z.number().int().min(0).optional(), startY: z.number().int().min(0).optional(), endX: z.number().int().min(0).optional(), endY: z.number().int().min(0).optional(), durationMs: z.number().int().min(0).max(2000).optional(),
-  activeWindow: activeWindowSchema, dryRun: z.boolean().optional()
+  activeWindow: activeWindowSchema, dryRun: z.boolean().optional(), confirmationToken: confirmationTokenSchema
 }).strict();
 
 type ScreenshotInput = z.infer<typeof screenshotInputSchema>;
@@ -103,7 +113,8 @@ function screenshotPath(input: ScreenshotInput, context: AgentHostMcpContext): s
     input.outputDir === undefined
       ? path.join(context.config.agentHostDir, "screenshots")
       : normalizePathForPolicy(input.outputDir, { agentHostDir: context.config.agentHostDir });
-  const filename = input.filename ?? `screenshot-${context.sessionId}-${Date.now()}.png`;
+  const scope = input.includeActiveWindowOnly === true ? "window" : "screen";
+  const filename = input.filename ?? `screenshot-${context.sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}-${scope}.png`;
   return normalizePathForPolicy(path.join(outputDir, filename), { agentHostDir: context.config.agentHostDir });
 }
 
@@ -221,6 +232,41 @@ function safetyFailure(tool: string, safety: ReturnType<typeof evaluateSafety>):
   });
 }
 
+async function desktopPreview(
+  tool: string,
+  actionType: "gui_click" | "gui_type",
+  input: { activeWindow: z.infer<typeof activeWindowSchema> },
+  context: AgentHostMcpContext,
+  summary: (window: string) => string,
+  target: (window: string) => string,
+  data: Record<string, unknown>
+) {
+  const activeWindow = toActiveWindowContext(input.activeWindow);
+  const validation = await validateActiveWindow(context, activeWindow);
+  const windowLabel = activeWindow.windowId ?? activeWindow.appName ?? activeWindow.title ?? String(activeWindow.pid ?? "unknown");
+  if (!validation.supported || !validation.matched) {
+    return {
+      summary: summary(windowLabel),
+      targetFingerprint: target(windowLabel),
+      riskLevel: "medium" as const,
+      approval: { required: false, status: "not_required" as const },
+      blocked: true,
+      reasons: [validation.reason ?? "active_window_mismatch"],
+      data: { activeWindow: validation.activeWindow ?? null, requestedWindow: activeWindow, ...data }
+    };
+  }
+  const safety = initialGuiSafety(tool, context, actionType, validation.activeWindow!);
+  return {
+    summary: summary(windowLabel),
+    targetFingerprint: target(windowLabel),
+    riskLevel: safety.riskLevel,
+    approval: safety.approval,
+    blocked: safety.blocked,
+    reasons: safety.reasons,
+    data: { activeWindow: validation.activeWindow, ...data }
+  };
+}
+
 export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
   const screenshot: AgentHostToolDefinition<ScreenshotInput, DesktopScreenshotResult, AgentHostMcpContext> = {
     name: "desktop.screenshot",
@@ -232,14 +278,32 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
       properties: {
         outputDir: { type: "string" },
         filename: { type: "string", pattern: "^[A-Za-z0-9._-]+\\.png$" },
-        includeActiveWindowOnly: { type: "boolean" }
+        includeActiveWindowOnly: { type: "boolean" },
+        ...executionMcpProperties
       },
       additionalProperties: false
     },
     inputSummary: "Capture screenshot",
-    safety: {
-      actionType: "file_write",
-      getInput: (input) => ({ filePath: screenshotPath(input, { config: { agentHostDir: "" } } as any) })
+    safety: { actionType: "file_write" },
+    preview: {
+      isDryRun: (input) => input.dryRun === true,
+      resolveEffect: (input, context) => {
+        const outputPath = screenshotPath(input, context);
+        const safety = evaluateSafety(
+          { tool: "desktop.screenshot", actionType: "file_write", strategy: "gui_control", filePath: outputPath },
+          context.policy,
+          createSafetyEvaluationContext(context)
+        );
+        return {
+          summary: `Capture screenshot to ${outputPath}`,
+          targetFingerprint: outputPath,
+          riskLevel: safety.riskLevel,
+          approval: safety.approval,
+          blocked: safety.blocked,
+          reasons: safety.reasons,
+          data: { path: outputPath, includeActiveWindowOnly: input.includeActiveWindowOnly ?? false }
+        };
+      }
     },
     async handler(input, context): Promise<ToolResult<DesktopScreenshotResult>> {
       const outputPath = screenshotPath(input, context);
@@ -285,12 +349,17 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           maxItems: 10
         },
         activeWindow: activeWindowMcpSchema,
-        dryRun: { type: "boolean" }
+        ...executionMcpProperties
       },
       required: ["keys", "activeWindow"],
       additionalProperties: false
     },
     inputSummary: "Send hotkey",
+    auditInputSummary: (i) => `Send hotkey ${i.keys.join("+")} to ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
+    preview: {
+      isDryRun: (i) => i.dryRun === true,
+      resolveEffect: (i, context) => desktopPreview("desktop.hotkey", "gui_click", i, context, (window) => `Send hotkey ${i.keys.join("+")} to ${window}.`, (window) => `hotkey:${window}:${i.keys.join("+")}`, { keys: i.keys })
+    },
     safety: {
       actionType: "inspect",
       getInput: (input) => {
@@ -353,12 +422,17 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         text: { type: "string", minLength: 1, maxLength: 10000 },
         activeWindow: activeWindowMcpSchema,
         dataSensitivity: { type: "string", enum: ["none", "low", "sensitive", "secret"] },
-        dryRun: { type: "boolean" }
+        ...executionMcpProperties
       },
       required: ["text", "activeWindow"],
       additionalProperties: false
     },
     inputSummary: "Type text",
+    auditInputSummary: (i) => `Type ${i.text.length} characters into ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
+    preview: {
+      isDryRun: (i) => i.dryRun === true,
+      resolveEffect: (i, context) => desktopPreview("desktop.type_text", "gui_type", i, context, (window) => `Type ${i.text.length} characters into ${window}.`, (window) => `type:${window}:${i.text.length}`, { textLength: i.text.length, dataSensitivity: i.dataSensitivity ?? "none" })
+    },
     safety: {
       actionType: "inspect",
       getInput: (input) => {
@@ -386,7 +460,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
       const postResolutionSafety = evaluateSafety(
         {
           tool: "desktop.type_text",
-          actionType: "gui_click",
+          actionType: "gui_type",
           strategy: "gui_control",
           ...(input.dataSensitivity === undefined ? {} : { dataSensitivity: input.dataSensitivity }),
           ...(validation.activeWindow!.appName === undefined ? {} : { appName: validation.activeWindow!.appName })
@@ -423,12 +497,17 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         y: { type: "integer", minimum: 0 },
         button: { type: "string", enum: ["left", "middle", "right"] },
         activeWindow: activeWindowMcpSchema,
-        dryRun: { type: "boolean" }
+        ...executionMcpProperties
       },
       required: ["x", "y", "activeWindow"],
       additionalProperties: false
     },
     inputSummary: "Click at coordinates",
+    auditInputSummary: (i) => `Click ${i.button ?? "left"} at (${i.x}, ${i.y}) in ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
+    preview: {
+      isDryRun: (i) => i.dryRun === true,
+      resolveEffect: (i, context) => desktopPreview("desktop.click", "gui_click", i, context, (window) => `Click ${i.button ?? "left"} at (${i.x}, ${i.y}) in ${window}.`, (window) => `click:${window}:${i.x}:${i.y}:${i.button ?? "left"}`, { x: i.x, y: i.y, button: i.button ?? "left" })
+    },
     safety: {
       actionType: "inspect",
       getInput: (input) => {
@@ -503,12 +582,17 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         endY: { type: "integer", minimum: 0 },
         durationMs: { type: "integer", minimum: 0, maximum: 2000 },
         activeWindow: activeWindowMcpSchema,
-        dryRun: { type: "boolean" }
+        ...executionMcpProperties
       },
       required: ["activeWindow"],
       additionalProperties: false
     },
     inputSummary: "Pointer action",
+    auditInputSummary: (i) => `Pointer ${i.direction ?? (i.startX !== undefined ? "drag" : "action")} in ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
+    preview: {
+      isDryRun: (i) => i.dryRun === true,
+      resolveEffect: (i, context) => desktopPreview("desktop.pointer", "gui_click", i, context, (window) => `Pointer action in ${window}.`, (window) => `pointer:${window}:${i.x ?? ""}:${i.y ?? ""}:${i.direction ?? ""}:${i.startX ?? ""}:${i.startY ?? ""}:${i.endX ?? ""}:${i.endY ?? ""}`, { x: i.x, y: i.y, direction: i.direction, amount: i.amount, startX: i.startX, startY: i.startY, endX: i.endX, endY: i.endY })
+    },
     safety: {
       actionType: "inspect",
       getInput: (input) => {

@@ -14,6 +14,9 @@ export interface TaskProgressOverlayOptions {
   title: string;
   steps?: TaskProgressStep[];
   placement?: OverlayPlacement;
+  /** Persist after terminal states until the operator dismisses (default true).
+   * Passing a positive autoHideMs restores terminal auto-hide behavior. */
+  persistent?: boolean;
   autoHideMs?: number;
   heartbeatMs?: number;
   runningTaskCount?: number;
@@ -52,7 +55,10 @@ export class TaskProgressOverlay {
   #waitingCommand: string | undefined;
   #runningTaskCount: number;
   #heartbeat: ReturnType<typeof setInterval> | undefined;
+  #keepalive: ReturnType<typeof setInterval> | undefined;
   #autoHide: ReturnType<typeof setTimeout> | undefined;
+  #terminalElapsedMs: number | undefined;
+  #persistence: boolean;
   #renderQueue: Promise<void> = Promise.resolve();
   #disposed = false;
   #started = false;
@@ -64,11 +70,12 @@ export class TaskProgressOverlay {
     this.#runningTaskCount = Math.max(1, options.runningTaskCount ?? 1);
     this.#now = options.now ?? (() => Date.now());
     this.#startedAt = this.#now();
+    this.#persistence = (options.autoHideMs === undefined || options.autoHideMs <= 0) && options.persistent !== false;
     this.#normalizeSteps();
   }
 
   snapshot(): TaskProgressSnapshot {
-    return { taskId: this.#options.taskId, title: this.#title, status: this.#status, stepIndex: this.#activeIndex(), stepCount: this.#steps.length, steps: this.#steps.map((step) => ({ ...step })), elapsedMs: Math.max(0, this.#now() - this.#startedAt), ...(this.#detail === undefined ? {} : { detail: this.#detail }), ...(this.#waitingCommand === undefined ? {} : { waitingCommand: this.#waitingCommand }), runningTaskCount: this.#runningTaskCount };
+    return { taskId: this.#options.taskId, title: this.#title, status: this.#status, stepIndex: this.#activeIndex(), stepCount: this.#steps.length, steps: this.#steps.map((step) => ({ ...step })), elapsedMs: this.#terminalElapsedMs ?? Math.max(0, this.#now() - this.#startedAt), ...(this.#detail === undefined ? {} : { detail: this.#detail }), ...(this.#waitingCommand === undefined ? {} : { waitingCommand: this.#waitingCommand }), runningTaskCount: this.#runningTaskCount };
   }
 
   async start(): Promise<boolean> {
@@ -102,8 +109,14 @@ export class TaskProgressOverlay {
 
   async setStatus(status: TaskProgressStatus): Promise<void> {
     this.#status = status;
-    if (TERMINAL.has(status)) this.#stopHeartbeat();
-    await this.#render();
+    if (TERMINAL.has(status)) await this.#afterTerminal();
+    else {
+      this.#stopKeepalive();
+      if (this.#autoHide !== undefined) clearTimeout(this.#autoHide);
+      this.#autoHide = undefined;
+      this.#startHeartbeat();
+      await this.#render();
+    }
   }
 
   async pause(): Promise<void> { await this.setStatus("paused"); }
@@ -121,9 +134,7 @@ export class TaskProgressOverlay {
     this.#status = "done";
     this.#waitingCommand = undefined;
     for (const step of this.#steps) step.state = step.state === "failed" ? "failed" : "done";
-    this.#stopHeartbeat();
-    await this.#render();
-    this.#scheduleAutoHide();
+    await this.#afterTerminal();
   }
 
   async fail(detail?: string): Promise<void> {
@@ -132,18 +143,14 @@ export class TaskProgressOverlay {
     this.#waitingCommand = undefined;
     const active = this.#steps.find((step) => step.state === "active");
     if (active !== undefined) active.state = "failed";
-    this.#stopHeartbeat();
-    await this.#render();
-    this.#scheduleAutoHide();
+    await this.#afterTerminal();
   }
 
   async stopped(detail?: string): Promise<void> {
     if (detail !== undefined) this.#detail = detail;
     this.#status = "stopped";
     this.#waitingCommand = undefined;
-    this.#stopHeartbeat();
-    await this.#render();
-    this.#scheduleAutoHide();
+    await this.#afterTerminal();
   }
 
   async pollEvents(): Promise<TaskProgressAction[]> {
@@ -165,6 +172,7 @@ export class TaskProgressOverlay {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#stopHeartbeat();
+    this.#stopKeepalive();
     if (this.#autoHide !== undefined) clearTimeout(this.#autoHide);
     this.#autoHide = undefined;
     await this.#renderQueue.catch(() => undefined);
@@ -242,6 +250,7 @@ export class TaskProgressOverlay {
       placement: this.#options.placement ?? "top_right",
       sensitivity: "public",
       ttlMs: 300_000,
+      ...(this.#persistence ? { persistent: true } : {}),
       interaction: { interactive: true, focus: "never", dismissible: true, allowedEvents: ["pause", "resume", "emergency_stop_requested", "dismissed"] }
     };
   }
@@ -280,6 +289,34 @@ export class TaskProgressOverlay {
     if (this.#heartbeat === undefined) return;
     clearInterval(this.#heartbeat);
     this.#heartbeat = undefined;
+  }
+
+  async #afterTerminal(): Promise<void> {
+    if (this.#terminalElapsedMs === undefined) this.#terminalElapsedMs = Math.max(0, this.#now() - this.#startedAt);
+    this.#stopHeartbeat();
+    await this.#render();
+    if (this.#persistence) this.#startKeepalive();
+    else this.#scheduleAutoHide();
+  }
+
+  #startKeepalive(): void {
+    if (!this.#persistence || this.#disposed) return;
+    this.#stopKeepalive();
+    // Slow keepalive: if the renderer restarted (or a hide raced the last
+    // paint), re-create the card instead of leaving the operator blind.
+    const interval = setInterval(() => {
+      if (this.#disposed) return;
+      void this.#render();
+    }, 30_000);
+    const unref = interval as unknown as { unref?: () => void };
+    if (typeof unref.unref === "function") unref.unref();
+    this.#keepalive = interval;
+  }
+
+  #stopKeepalive(): void {
+    if (this.#keepalive === undefined) return;
+    clearInterval(this.#keepalive);
+    this.#keepalive = undefined;
   }
 
   #scheduleAutoHide(): void {

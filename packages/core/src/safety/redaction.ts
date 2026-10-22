@@ -5,6 +5,7 @@ const SENSITIVE_ASSIGNMENT_PATTERN =
   /\b(api[_-]?key|auth|cookie|password|passwd|private[_-]?key|refresh[_-]?token|confirmation[_-]?token|secret|token)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}\]]+)/gi;
 
 const AUTH_HEADER_PATTERN = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
+const CONFIRMATION_TOKEN_PATTERN = /\bconf_[A-Za-z0-9-]{8,100}\b/g;
 const PRIVATE_KEY_PATTERN = /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi;
 const MAX_REDACTION_DEPTH = 8;
 
@@ -20,6 +21,7 @@ export function redactSensitiveText(input: string): string {
   return input
     .replace(PRIVATE_KEY_PATTERN, "[redacted-private-key]")
     .replace(AUTH_HEADER_PATTERN, "$1 [redacted]")
+    .replace(CONFIRMATION_TOKEN_PATTERN, "[redacted-confirmation-token]")
     .replace(SENSITIVE_ASSIGNMENT_PATTERN, (_match, key: string, separator: string) => `${key}${separator}[redacted]`);
 }
 

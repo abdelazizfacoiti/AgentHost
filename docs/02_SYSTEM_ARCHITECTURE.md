@@ -1,5 +1,10 @@
 # AgentHost System Architecture
 
+> **Current minimal-v2 status:** the live MCP surface is the tool set in
+> `docs/03_MCP_TOOLS_AND_ADAPTERS.md`. Control Room, Browser Bridge, runtime
+> activity, and the aspirational planning/routing services below are not
+> registered in this tree.
+
 ## Runtime shape
 
 ```text
@@ -75,18 +80,25 @@ Headless/disabled renderers plus optional GTK3/X11 renderer child. Renderer comm
 
 `packages/core/src/runtime-activity.ts` defines strict lifecycle/source/label/progress contracts and legal transitions. `runtime-activity-store.ts` persists bounded owner-scoped redacted JSONL under `~/.agenthost/runtime-activity/`; `runtime-activity-service.ts` normalizes tool results; `runtime-activity-overlay.ts` projects the highest-priority activity through `OverlayManager`. Renderer bindings contain ephemeral overlay IDs and epochs and are invalidated on restart. Control Room consumes same projection, avoiding direct-activity double counting. Screenshot capture is serialized and requires acknowledged overlay suppression before capture and acknowledged restoration after capture.
 
-### Governed plan execution boundary
+### Governed tool-call boundary
 
-`task.execute_plan` runs a bounded (max 10 steps, 8 KB inputs) tool sequence
-against one active task: dry-run validation first, then one confirmation
-token for the plan, with each step still passing the full
-schema → policy → confirmation pipeline (mint each step's token with dry-runs
-first). Stop/takeover gates are checked before every step, per-step progress
-is logged to the task event log (`task watch` tails it), and execution halts
-at the first failure with the failing step, error code, and a replan hint.
-`task.execute_plan` never nests (recursion is rejected at validation), and the
-live tool map on the MCP context is the only way steps resolve — unknown tool
-names fail the plan before anything executes.
+There is no `task.execute_plan` tool in minimal-v2. Every call to a registered
+tool passes through one central runner:
+
+```text
+schema validation -> stop/takeover gate -> effect preview -> dry-run token or
+explicit confirmation -> single-use token consume -> handler -> redacted audit
+```
+
+Previews resolve the actual target without executing. Dry-run returns the
+preview and mints a 15-minute single-use token. Non-dry execution without a
+token returns `confirmation_required`; an operator approves with
+`agenthost confirm <tokenId>`. Active task approval can auto-chain low/medium
+effects for an active task only. Stop and takeover are checked before every
+state-changing call; read-only observation remains available. The audit entry
+includes server version and entry path so clients can verify which runtime
+served the call. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the current tool
+inventory.
 
 ### Browser session handoff boundary
 

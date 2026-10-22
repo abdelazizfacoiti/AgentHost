@@ -7,11 +7,11 @@
 
 **Give any AI agent a safe, visible body on a real computer.** AgentHost is a
 local, provider-agnostic computer-use runtime: the model reasons about a goal
-and composes computer, browser, filesystem, shell, application, vision/OCR,
-speech, and skill capabilities to accomplish it — observing each result,
-verifying outcomes, and recovering from failures. Every action passes through
-schema validation → risk classification → policy check → approval handling →
-execution → audit logging. Unlike other computer-use tools, **you can see
+and composes computer, filesystem, shell, vision/OCR, and desktop capabilities
+to accomplish it — observing each result, verifying outcomes, and recovering
+from failures. Every action passes through schema validation → risk
+classification → policy check → preview/dry-run → confirmation → execution →
+redacted audit logging. Unlike other computer-use tools, **you can see
 what is happening**: an on-screen progress card shows the current step, elapsed
 time, and pause/resume/stop controls, and pointer primitives can highlight a
 target without intercepting clicks.
@@ -56,14 +56,24 @@ clients: don't ingest every tool schema up front — pull
 `agenthost://capabilities.md` first, or paste `agenthost capabilities --markdown`
 into static configs. Contributors: [`git clone` path below](#source-checkout).
 
+Teach the assistant *when* to reach for AgentHost with the portable skill:
+
+```bash
+npm run skill:install -- --target all          # opencode, Claude Code, Codex, Copilot, Cursor
+npm run skill:install -- --target copilot --project /path/to/repo
+npm run skill:install -- --print               # paste into any other tool
+```
+
+The skill file lives at [`skills/agenthost/SKILL.md`](skills/agenthost/SKILL.md).
+
 ## Why AgentHost
 
 | | AgentHost |
 |---|---|
-| **Safety model** | Risk tiers (LOW→auto, MEDIUM→logged, HIGH→approval, CRITICAL→explicit) + capability grants + exact-target confirmations + audit receipts on *every* tool |
+| **Safety model** | Risk tiers + capability grants + exact-preview, target-bound single-use tokens for state changes + short-lived active-task approval for low/medium effects + a redacted audit entry on *every* call |
 | **Visibility** | On-screen progress card with step checklist, elapsed time, and pause/resume/stop controls; pointer and highlight primitives pass clicks through |
 | **Speed** | WindowId focus skips re-listing; 2s window-list cache; cached PATH lookups (see numbers below) |
-| **Provider-agnostic** | Any model via MCP stdio; lazy capability/skill resources keep system prompts small |
+| **Provider-agnostic** | Any model via MCP stdio; live capability resources keep system prompts small |
 | **Private by construction** | Local stdio transport, redacted logs/traces/overlays, emergency stop independent of the model |
 | **Verified** | Extensive Vitest suite, `build → lint → test` on every change, smoke-tested MCP handshake |
 
@@ -106,14 +116,20 @@ No external benchmark claims — run it yourself and compare.
 ```text
 agenthost doctor [--json]
 agenthost setup [--resume]
-agenthost start [--background] / stop / status
-agenthost task watch <id> [--follow] [--notify]
+agenthost start / stop / status
+agenthost confirmations [list] / confirm <tokenId> / deny <tokenId>
+agenthost agent status / stop / takeover-begin / resume --stop|--takeover
+agenthost task watch <id> [--follow] [--notify] [--overlay]
 agenthost task export <id> [--format md|html] [--out <path>]
 agenthost task approve <id> [--max-risk low|medium]
+agenthost task pause <id> / task resume <id>
+agenthost overlay hide [--orphans] / overlay status
 ```
 
-`task export` renders a run's redacted event log to shareable Markdown or
-self-contained HTML — post your agent's runs in issues and PRs.
+`start --background` is not supported: run `agenthost start` in the foreground
+or let the MCP client spawn it. `task export` renders a run's redacted event
+log to shareable Markdown or self-contained HTML — post your agent's runs in
+issues and PRs.
 [Sample report](examples/task-reports/sample-hespress-run.md).
 
 ## Source checkout
@@ -137,11 +153,11 @@ npm run start:mcp
 
 ## Safety boundary
 
-- No public listeners, hidden persistence, or autonomous background work.
+- No public listeners, hidden persistence, or unsupported background process.
 - No credential extraction, CAPTCHA/MFA/login/payment bypass, or sudo.
 - No silent send/submit/upload/delete/pay/buy; no arbitrary generated code.
 - No browser cookies, storage, or debugger access.
-- No raw private content, tokens, or secrets in logs, receipts, or overlays.
+- No raw private content, tokens, or secrets in logs or overlays.
   Visual surfaces never control target applications.
 
 Details: [Security, permissions, and logging](docs/04_SECURITY_PERMISSIONS_AND_LOGGING.md).

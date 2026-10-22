@@ -4,10 +4,15 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
-  "bin": { "agenthost": "./dist/index.js" },
-  "scripts": { "build": "tsc -b" },
+  "bin": {
+    "agenthost": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
   "dependencies": {
     "@agenthost/core": "file:../core",
-    "@agenthost/os-linux": "file:../os-linux"
+    "@agenthost/os-linux": "file:../os-linux",
+    "@agenthost/app-overlay": "file:../app-overlay"
   }
 }

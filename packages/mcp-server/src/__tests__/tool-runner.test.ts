@@ -1,0 +1,256 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { z } from "zod";
+import {
+  acceptConfirmation,
+  createTask,
+  getPolicyProfile,
+  requestStop,
+  toolSuccess,
+  type AuditLogEntry,
+  type RiskLevel,
+  type ToolExecutionMetadata
+} from "@agenthost/core";
+import type { AgentHostMcpContext } from "../context.js";
+import { runTool, type AgentHostToolDefinition } from "../tool-runner.js";
+import { createFileTools } from "../tools/file.js";
+import { createDesktopTools } from "../tools/desktop.js";
+import { createShellTools } from "../tools/shell.js";
+import { applyProductionExecutionMetadata } from "../tool-metadata.js";
+
+const roots: string[] = [];
+async function tempHome(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-runner-"));
+  roots.push(root);
+  return root;
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+function stateChanging(): ToolExecutionMetadata {
+  return {
+    executionClass: "state_changing",
+    externalEffect: false,
+    requiresDryRun: true,
+    requiresConfirmationToken: true,
+    requiresExactTarget: true,
+    source: "base",
+    availability: "available"
+  };
+}
+
+function readOnly(): ToolExecutionMetadata {
+  return {
+    executionClass: "read_only",
+    externalEffect: false,
+    requiresDryRun: false,
+    requiresConfirmationToken: false,
+    requiresExactTarget: false,
+    source: "base",
+    availability: "available"
+  };
+}
+
+function makeContext(home: string, logs: AuditLogEntry[]): AgentHostMcpContext {
+  return {
+    sessionId: "test-session",
+    config: { agentHostDir: home, configPath: path.join(home, "config.json"), logFile: path.join(home, "logs", "audit.jsonl") },
+    policy: getPolicyProfile("general"),
+    grants: { listActiveGrants: () => [] },
+    logger: { log: async (entry: AuditLogEntry) => { logs.push(entry); } },
+    runtime: { version: "9.9.9-test", entryPath: "/opt/agenthost/mcp-server/dist/index.js", startedAt: "2026-01-01T00:00:00.000Z" }
+  } as unknown as AgentHostMcpContext;
+}
+
+function writeTool(handler: (input: { value: string }) => Promise<unknown>, riskLevel: RiskLevel = "medium"): AgentHostToolDefinition<{ value: string; dryRun?: boolean; confirmationToken?: string }, unknown> {
+  return {
+    name: "test.write",
+    description: "Test write",
+    riskLevel: "medium",
+    inputSchema: z.object({ value: z.string().min(1), dryRun: z.boolean().optional(), confirmationToken: z.string().optional() }).strict(),
+    mcpInputSchema: {},
+    inputSummary: "Test write",
+    safety: { actionType: "inspect" },
+    preview: {
+      isDryRun: (input) => input.dryRun === true,
+      resolveEffect: (input) => ({ summary: `Write ${input.value}`, targetFingerprint: input.value, riskLevel, data: { value: input.value } })
+    },
+    execution: stateChanging(),
+    handler: async (input) => {
+      await handler(input);
+      return toolSuccess({ tool: "test.write", riskLevel: "medium", data: { wrote: input.value } });
+    }
+  } as AgentHostToolDefinition<{ value: string; dryRun?: boolean; confirmationToken?: string }, unknown>;
+}
+
+describe("governed tool runner", () => {
+  it("rejects invalid input before calling the handler", async () => {
+    const home = await tempHome();
+    const logs: AuditLogEntry[] = [];
+    const handler = vi.fn(async () => undefined);
+    const result = await runTool(writeTool(handler), { value: "" }, makeContext(home, logs));
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("invalid_input");
+    expect(handler).not.toHaveBeenCalled();
+    expect(logs.at(-1)?.errorCode).toBe("invalid_input");
+  });
+
+  it("previews, issues a token, executes once after acceptance, and audits provenance", async () => {
+    const home = await tempHome();
+    const logs: AuditLogEntry[] = [];
+    const handler = vi.fn(async () => undefined);
+    const tool = writeTool(handler);
+    const context = makeContext(home, logs);
+
+    const preview = await runTool(tool, { value: "hello", dryRun: true }, context);
+    expect(preview.ok).toBe(true);
+    expect(preview.preview).toBe(true);
+    expect(handler).not.toHaveBeenCalled();
+    const tokenId = preview.confirmation?.tokenId;
+    expect(tokenId).toMatch(/^conf_/);
+
+    const blocked = await runTool(tool, { value: "hello", confirmationToken: tokenId }, context);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error?.code).toBe("confirmation_not_approved");
+    expect(handler).not.toHaveBeenCalled();
+    expect(JSON.stringify(logs.at(-1))).not.toContain(tokenId);
+
+    await acceptConfirmation(home, tokenId!);
+    const executed = await runTool(tool, { value: "hello", confirmationToken: tokenId }, context);
+    expect(executed.ok).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(executed.confirmation?.status).toBe("tokenAccepted");
+    expect(executed.serverVersion).toBe("9.9.9-test");
+    expect(executed.serverPath).toBe("/opt/agenthost/mcp-server/dist/index.js");
+    expect(logs.at(-1)).toMatchObject({ tool: "test.write", ok: true, serverVersion: "9.9.9-test", serverPath: "/opt/agenthost/mcp-server/dist/index.js" });
+    expect(JSON.stringify(logs)).not.toContain(tokenId);
+
+    const reused = await runTool(tool, { value: "hello", confirmationToken: tokenId }, context);
+    expect(reused.ok).toBe(false);
+    expect(reused.error?.code).toBe("confirmation_token_not_found");
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not execute blocked previews", async () => {
+    const home = await tempHome();
+    const handler = vi.fn(async () => undefined);
+    const tool = writeTool(handler);
+    tool.preview = { resolveEffect: () => ({ summary: "Blocked", riskLevel: "blocked", blocked: true, reasons: ["synthetic block"] }) };
+    const result = await runTool(tool, { value: "hello" }, makeContext(home, []));
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("safety_blocked");
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("halts state-changing tools under stop while allowing read-only observation", async () => {
+    const home = await tempHome();
+    await requestStop(home, "test stop");
+    const context = makeContext(home, []);
+    const writeHandler = vi.fn(async () => undefined);
+    const writeResult = await runTool(writeTool(writeHandler), { value: "hello" }, context);
+    expect(writeResult.error?.code).toBe("emergency_stop_requested");
+    expect(writeHandler).not.toHaveBeenCalled();
+
+    const readTool: AgentHostToolDefinition<Record<string, never>, unknown> = {
+      name: "test.read",
+      description: "Test read",
+      riskLevel: "observe",
+      inputSchema: z.object({}).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Test read",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: async () => toolSuccess({ tool: "test.read", riskLevel: "observe", data: { observed: true } })
+    };
+    const readResult = await runTool(readTool, {}, context);
+    expect(readResult.ok).toBe(true);
+  });
+
+  it("governs real file writes and blocks control-plane targets", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const write = applyProductionExecutionMetadata(createFileTools()).find((tool) => tool.name === "file.write")!;
+    const target = path.join(home, "notes.txt");
+
+    const preview = await runTool(write, { path: target, content: "hello", dryRun: true }, context);
+    expect(preview.ok).toBe(true);
+    expect(preview.preview).toBe(true);
+    const tokenId = preview.confirmation?.tokenId;
+    await acceptConfirmation(home, tokenId!);
+    const executed = await runTool(write, { path: target, content: "hello", confirmationToken: tokenId }, context);
+    expect(executed.ok).toBe(true);
+    expect(await (await import("node:fs/promises")).readFile(target, "utf8")).toBe("hello");
+
+    const blocked = await runTool(write, { path: path.join(home, "run", "evil.txt"), content: "x", dryRun: true }, context);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error?.code).toBe("safety_blocked");
+    expect(blocked.approval.status).toBe("denied");
+
+    const read = applyProductionExecutionMetadata(createFileTools()).find((tool) => tool.name === "file.read")!;
+    const bounded = await runTool(read, { path: target, maxBytes: 2 }, context) as { data: { content: string; truncated: boolean } };
+    expect(bounded.data).toEqual(expect.objectContaining({ content: "he", truncated: true }));
+  });
+
+  it("blocks shell commands whose cwd would enter the AgentHost control plane", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const run = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
+    (context as unknown as { linux: unknown }).linux = { runSafeCommand: run };
+    const tool = applyProductionExecutionMetadata(createShellTools()).find((entry) => entry.name === "shell.run")!;
+
+    const preview = await runTool(tool, { command: "cat", args: ["stop.requested"], cwd: path.join(home, "run"), dryRun: true }, context);
+    expect(preview.ok).toBe(false);
+    expect(preview.error?.code).toBe("safety_blocked");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("lets a screenshot preview mint a usable exact-path token", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const screenshot = vi.fn(async (input: { path: string }) => ({ path: input.path, width: 1, height: 1 }));
+    (context as unknown as { linux: unknown }).linux = { screenshot };
+    const tool = applyProductionExecutionMetadata(createDesktopTools()).find((entry) => entry.name === "desktop.screenshot")!;
+    const outputDir = path.join(home, "shots");
+    const target = path.join(outputDir, "screenshot-test-session-screen.png");
+
+    const preview = await runTool(tool, { outputDir, dryRun: true }, context);
+    expect(preview.ok).toBe(true);
+    expect(preview.data).toMatchObject({ summary: `Capture screenshot to ${target}` });
+    const tokenId = preview.confirmation?.tokenId;
+    expect(tokenId).toMatch(/^conf_/);
+    await acceptConfirmation(home, tokenId!);
+    const executed = await runTool(tool, { outputDir, confirmationToken: tokenId }, context);
+    expect(executed.ok).toBe(true);
+    expect(screenshot).toHaveBeenCalledWith(expect.objectContaining({ path: target }));
+  });
+
+  it("auto-chains only low/medium effects covered by an active task approval", async () => {
+    const home = await tempHome();
+    const task = await createTask(home, "Batch safe work");
+    const approvalPath = path.join(home, "tasks", "approvals", "active.json");
+    await mkdir(path.dirname(approvalPath), { recursive: true });
+    await writeFile(approvalPath, JSON.stringify({
+      approvalId: "approval-1",
+      taskId: task.taskId,
+      maxRisk: "medium",
+      origin: "cli",
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString()
+    }));
+
+    const context = makeContext(home, []);
+    const handler = vi.fn(async () => undefined);
+    const medium = await runTool(writeTool(handler, "medium"), { value: "covered" }, context);
+    expect(medium.ok).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    const high = await runTool(writeTool(handler, "high"), { value: "needs-token" }, context);
+    expect(high.ok).toBe(false);
+    expect(high.error?.code).toBe("confirmation_required");
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});

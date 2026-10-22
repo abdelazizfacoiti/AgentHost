@@ -15,41 +15,29 @@ The benchmark is not an end-to-end latency claim. It measures deterministic loca
 
 Measure context sizes separately with serialized bounded MCP responses and retain only byte counts. Do not persist raw prompts to improve cache hit rate.
 
-## Fast-actions lane (P1/R6-safe)
+## Fast-actions lane
 
-Goal: fewer model turns and less per-action overhead without changing the
-safety pipeline (schema → risk → policy → approval → dry-run/confirmation →
-exact-target → receipt → redacted audit).
+Goal: fewer model turns without changing the safety pipeline
+(schema → risk → policy → dry-run/confirmation → exact-target → audit).
 
-- **Resources first**: pull `agenthost://capabilities.md`, then
-  `agenthost://skills` and `agenthost://status`, then
-  `agent.discover_capabilities`. Call `tools/list` last. This avoids
-  ingesting 250+ schemas up front.
+- **Resources first**: pull `agenthost://capabilities.md` and
+  `agenthost://status`, then call `tools/list` only if a schema is missing.
 - **Folded observation**: `computer.observe_state` with `includeWindows`
-  and `includeBrowserTabs` replaces three observation turns with one call;
-  window/tab probes now run concurrently with active-window/capability/
-  geometry probes.
-- **No sleeps**: `computer.wait_for` polls active-window state at ~150ms
-  and returns once the UI settles instead of burning a model turn waiting.
-- **Batched plans**: `task.execute_plan` runs up to 10 steps under one plan
-  token (each step still passes the full pipeline). Results carry per-step
-  `durationMs` plus total `durationMs` for local measurement.
+  returns active window, capabilities, geometry, and the window list in one
+  call.
+- **No fixed sleeps**: `computer.wait_for` polls active-window state at
+  ~150ms and returns once the UI settles.
 - **One-turn routine effects**: `agenthost task approve <id>` pre-approves
-  low/medium non-external effects for 30 minutes; the central runner chains
-  the exact dry-run + single-use confirmation server-side. Approval lookups
-  are cached for 5s and invalidated on approve/clear.
-- **Parallel sinks**: audit log, Control Room activity, and workflow-trace
-  capture now run concurrently per tool call; audit is still awaited before
-  return so no record is lost.
+  low/medium effects for an active task for 30 minutes; the runner mints and
+  consumes the exact single-use token server-side. High and blocked effects
+  still require `agenthost confirm <tokenId>`.
 
 Verify with:
 
 ```bash
 npm run build
-npm run benchmark:routing
-npm run benchmark:desktop
-npx vitest run packages/mcp-server/src/__tests__/task-execute-plan.test.ts
-npx vitest run packages/mcp-server/src/__tests__/general-purpose-agent.test.ts
+npm run test
+npm run smoke:mcp
 ```
 
 Where OpenClaw optimizes for breadth (channels, multi-agent routing,

@@ -49,8 +49,10 @@ The card shows:
 
 Pause and Resume are cooperative: the demo stops at the next step boundary.
 Stop requests the end of the run and shows `Stopping…`; it never freezes or
-kills an in-flight tool call. The card auto-hides 15 seconds after a terminal
-state.
+kills an in-flight tool call. The card **persists** after a terminal state
+(`Done`, `Failed`, `Stopped`) until the operator dismisses it with the
+**Dismiss** button, Escape, `agenthost overlay hide`, or Ctrl-C. Elapsed time
+freezes when the task ends.
 
 ## Desktop prerequisites
 
@@ -74,8 +76,11 @@ success. A compositor with an RGBA visual is required for transparent windows.
 4. Click **Stop** and confirm the card shows the stopped state and exits.
 5. Click through the transparent area around pointer/highlight primitives and
    confirm the desktop underneath still receives clicks.
-6. Confirm the card reports `Done` and hides itself after about 15 seconds.
+6. Confirm the card reports `Done` and stays visible until **Dismiss**, Escape,
+   or `agenthost overlay hide`.
 7. Press Ctrl-C during a run and confirm no renderer process or window remains.
+8. Drag the card by its title, let the next step update land, and confirm it
+   stays where you put it.
 
 ## Safety and non-execution boundaries
 

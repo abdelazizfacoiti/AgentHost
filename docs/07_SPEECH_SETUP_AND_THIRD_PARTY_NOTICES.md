@@ -1,5 +1,7 @@
 # Local Speech Setup and Notices
 
+> **Historical milestone document.** This tree is minimal-v2 and does not register the browser, speech, Control Room, scheduler, or Forge surfaces described below. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the live inventory.
+
 AgentHost speech is local/offline only. Install providers manually through the operating system. AgentHost never installs packages, downloads models, or contacts cloud TTS services.
 
 ## Recommended provider

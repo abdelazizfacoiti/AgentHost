@@ -1,5 +1,7 @@
 # AgentHost Implementation Roadmap v2
 
+> **Historical milestone document.** This tree is minimal-v2 and does not register the browser, speech, Control Room, scheduler, or Forge surfaces described below. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the live inventory.
+
 ## Development and documentation loop
 
 Use plan, explicit approval, scoped implementation, build/test/lint/smoke, review, and documentation sync. Verify implementation claims against source and tests. Preserve schema validation, execution metadata, policy, grants, dry-run, confirmation, redaction, receipts, checkpoints, and audit boundaries.

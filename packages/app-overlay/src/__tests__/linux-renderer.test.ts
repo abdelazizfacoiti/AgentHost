@@ -24,7 +24,7 @@ const supported: OverlayCapabilityReport = {
   limitations: []
 };
 
-interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; missingLiveRegistration?: boolean; }
+interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; missingLiveRegistration?: boolean; rejectShow?: boolean; }
 
 function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWithoutNullStreams {
   const child = new EventEmitter() as unknown as { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; killed: boolean; kill: () => boolean; };
@@ -44,6 +44,11 @@ function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWith
       const epoch = request.payload?.rendererEpoch ?? 1;
       if (request.command === "hello" && behavior.noHandshake === true) { newline = buffer.indexOf("\n"); continue; }
       if (request.command !== "hello" && behavior.noRenderAck === true) { newline = buffer.indexOf("\n"); continue; }
+      if (request.command === "show" && behavior.rejectShow === true) {
+        child.stdout.write(JSON.stringify({ version: 1, id: request.id, ok: false, error: "overlay_not_found" }) + "\n");
+        newline = buffer.indexOf("\n");
+        continue;
+      }
       const data = request.command === "hello"
         ? behavior.invalidHandshake === true ? { invalid: true } : { protocolVersion: 1, rendererEpoch: behavior.wrongEpoch === true ? epoch + 1 : epoch, capabilities: behavior.unsupportedRenderer === true ? { supported: false, reason: "overlay_compositor_unavailable" } : { supported: true } }
         : ["show", "update", "dismiss", "clear", "emergency_hide"].includes(request.command)
@@ -165,6 +170,18 @@ describe("GTK renderer controller", () => {
       expect(result.ok).toBe(false);
       expect(result.reason).toBe("overlay_compositor_unavailable");
       expect((await renderer.diagnostics()).fallbackReason).toBe("overlay_compositor_unavailable");
+    } finally { await renderer.close(); }
+  });
+
+  it("never kills a healthy renderer for a logical rejection", async () => {
+    const renderer = new LinuxOverlayRenderer({ mode: "gtk3-x11", probe: () => supported, spawnProcess: () => fakeSpawnProcess({ rejectShow: true }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    try {
+      const result = await renderer.show({ overlayId: "missing", type: "pointer", payload: {} });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe("overlay_not_found");
+      const diagnostics = await renderer.diagnostics();
+      expect(diagnostics.childState).toBe("running");
+      expect(diagnostics.lastFailure).toBe("overlay_not_found");
     } finally { await renderer.close(); }
   });
 
