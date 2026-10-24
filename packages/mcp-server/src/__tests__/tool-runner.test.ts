@@ -360,4 +360,51 @@ describe("governed tool runner", () => {
     expect(privatePending.ok).toBe(false);
     expect(privatePending.error?.code).toBe("confirmation_required");
   });
+
+  it("warns once when the exact same call repeats without progress", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const probe: AgentHostToolDefinition<{ query: string }, unknown> = {
+      name: "desktop.probe",
+      description: "Test probe",
+      riskLevel: "observe",
+      inputSchema: z.object({ query: z.string().min(1) }).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Probe desktop",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: async () => toolSuccess({ tool: "desktop.probe", riskLevel: "observe", data: { found: true } })
+    };
+    const results = [];
+    for (let index = 0; index < 5; index += 1) results.push(await runTool(probe, { query: "domains" }, context));
+    expect(results[2]?.observations?.join(" ")).not.toContain("run 4 times");
+    expect(results[3]?.observations?.join(" ")).toContain("run 4 times");
+    expect(results[4]?.observations?.join(" ")).not.toContain("run 8 times");
+  });
+
+  it("surfaces approval waits for read-only tools that need confirmation", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const finish = vi.fn(async () => undefined);
+    const begin = vi.fn(async () => ({ finish }));
+    (context as unknown as { actionOverlay: unknown }).actionOverlay = { begin };
+    const privateRead: AgentHostToolDefinition<{ path: string }, unknown> = {
+      name: "file.read",
+      description: "Read private data",
+      riskLevel: "low",
+      inputSchema: z.object({ path: z.string().min(1) }).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Read private data",
+      safety: {
+        actionType: "file_read",
+        getInput: (input) => ({ filePath: input.path, appName: "Gmail", dataSensitivity: "sensitive" as const })
+      },
+      execution: readOnly(),
+      handler: async () => toolSuccess({ tool: "file.read", riskLevel: "medium", data: { read: true } })
+    };
+    const result = await runTool(privateRead, { path: "/tmp/private.txt" }, context);
+    expect(result.error?.code).toBe("confirmation_required");
+    expect(begin).toHaveBeenCalledWith(expect.objectContaining({ tool: "file.read" }));
+    expect(finish).toHaveBeenCalledWith(result);
+  });
 });

@@ -62,8 +62,12 @@ the same loaded set.
 | `task.update_status` | low | metadata_only |
 | `task.add_event` | low | metadata_only |
 
-`task.create` starts a persistent task and clears any active task approval.
+`task.create` starts a persistent task, accepts observable `definitionOfDone`
+criteria (max 12), and clears any active task approval.
 `task.update_status` supports `paused`, `active`, `completed`, and `cancelled`.
+Completing a task that has criteria requires `verifiedCriteria` covering every
+criterion; otherwise the call fails with `definition_of_done_unverified` and no
+state changes. Verified criteria are logged as `verification` events.
 Completed and cancelled tasks are terminal and clear active approval.
 
 `agent.stop` and `agent.takeover_begin` are not gated by the flags they set.
@@ -111,15 +115,17 @@ agenthost task approve <taskId> [--max-risk low|medium]
 agenthost task pause <taskId>
 agenthost task resume <taskId>
 agenthost agent status
+agenthost agent pause [--reason text]
 agenthost agent stop [--reason text]
 agenthost agent takeover-begin [--reason text]
-agenthost agent resume --stop|--takeover
+agenthost agent resume --stop|--takeover|--pause
 ```
 
 `agenthost stop` kills an AgentHost-managed background process and writes the
-stop flag. `agenthost agent stop` writes the run flag and clears active task
-approval; it is the appropriate emergency stop when the MCP process is owned
-by the client.
+stop flag. `agenthost agent pause` holds state-changing tools until
+`agenthost agent resume --pause`. `agenthost agent stop` writes the run flag and
+clears active task approval; it is the appropriate emergency stop when the MCP
+process is owned by the client.
 
 ## Files and shell
 

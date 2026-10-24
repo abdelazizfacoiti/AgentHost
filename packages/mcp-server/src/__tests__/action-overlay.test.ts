@@ -68,6 +68,8 @@ describe("automatic action overlay", () => {
       observations: ["No action was executed."]
     }));
     expect(badge(fake.updated.at(-1)!)).toBe("Waiting for approval");
+    expect(fake.updated.at(-1)!.interaction).toMatchObject({ dismissible: true });
+    expect(fake.updated.at(-1)!.components).toContainEqual({ type: "button", label: "Dismiss", event: "dismissed" });
     expect(JSON.stringify(fake.updated.at(-1))).not.toContain("conf_");
 
     const failed = await overlay.begin({ tool: "desktop.click", summary: "Click left at (10, 20)", riskLevel: "medium" });
@@ -90,6 +92,71 @@ describe("automatic action overlay", () => {
     await handle.finish(toolSuccess({ tool: "file.write", riskLevel: "medium", data: { wrote: true } }));
     await vi.advanceTimersByTimeAsync(2_100);
     expect(fake.dismiss).toHaveBeenCalledWith("action-card");
+    await overlay.close();
+    vi.useRealTimers();
+  });
+
+  it("keeps approval waits visible until the operator acts", async () => {
+    vi.useFakeTimers();
+    const fake = fakeManager();
+    const overlay = new ToolActionOverlay(fake.manager, { widgetId: "action-card", persistent: false, autoHideMs: 1_000, now: () => Date.now() });
+    const handle = await overlay.begin({ tool: "file.write", summary: "Write file", riskLevel: "medium" });
+    await handle.finish(toolFailure({
+      tool: "file.write",
+      riskLevel: "medium",
+      preview: true,
+      error: { code: "confirmation_required", message: "An operator must confirm the prepared preview." },
+      observations: ["No action was executed."]
+    }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fake.dismiss).not.toHaveBeenCalled();
+    await overlay.close();
+    vi.useRealTimers();
+  });
+
+  it("applies operator pause, resume, stop, and close from the card", async () => {
+    vi.useFakeTimers();
+    const fake = fakeManager();
+    const events: Array<{ overlayId: string; event: string }> = [];
+    vi.mocked(fake.manager.pollEvents).mockImplementation(async () => events.splice(0, events.length) as never);
+    const onPause = vi.fn(async () => undefined);
+    const onResume = vi.fn(async () => undefined);
+    const onStop = vi.fn(async () => undefined);
+    const overlay = new ToolActionOverlay(fake.manager, {
+      widgetId: "action-card",
+      eventPollMs: 100,
+      now: () => Date.now(),
+      onPause,
+      onResume,
+      onStop
+    });
+    const handle = await overlay.begin({ tool: "file.write", summary: "Write file", riskLevel: "medium" });
+
+    events.push({ overlayId: "action-card", event: "pause" });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(onPause).toHaveBeenCalledTimes(1);
+    expect(badge(fake.updated.at(-1)!)).toBe("Paused");
+    expect(fake.updated.at(-1)!.components).toContainEqual({ type: "button", label: "Resume", event: "resume" });
+
+    events.push({ overlayId: "action-card", event: "resume" });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(onResume).toHaveBeenCalledTimes(1);
+    expect(badge(fake.updated.at(-1)!)).toBe("Running");
+
+    events.push({ overlayId: "action-card", event: "emergency_stop_requested" });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(badge(fake.updated.at(-1)!)).toBe("Halted");
+    expect(fake.updated.at(-1)!.components).toContainEqual({ type: "button", label: "Dismiss", event: "dismissed" });
+
+    events.push({ overlayId: "action-card", event: "dismissed" });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(fake.dismiss).toHaveBeenCalledWith("action-card");
+    const shown = fake.shown.length;
+    await handle.finish(toolSuccess({ tool: "file.write", riskLevel: "medium", data: { wrote: true } }));
+    await overlay.refresh();
+    expect(fake.shown).toHaveLength(shown);
+
     await overlay.close();
     vi.useRealTimers();
   });

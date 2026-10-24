@@ -95,7 +95,7 @@ export function clearPause(agentHostDir: string): Promise<void> {
 
 export function evaluateRunStateGate(state: RunStateSnapshot): {
   allowed: boolean;
-  code?: "emergency_stop_requested" | "human_takeover_active";
+  code?: "emergency_stop_requested" | "human_takeover_active" | "pause_requested";
   reason?: string;
 } {
   if (state.stop.requested) {
@@ -111,6 +111,14 @@ export function evaluateRunStateGate(state: RunStateSnapshot): {
       allowed: false,
       code: "human_takeover_active",
       reason: state.takeover.reason ?? "A human operator has taken control; state-changing tools are halted."
+    };
+  }
+
+  if (state.pause.requested) {
+    return {
+      allowed: false,
+      code: "pause_requested",
+      reason: state.pause.reason ?? "The operator paused AgentHost; state-changing tools are held until resume."
     };
   }
 

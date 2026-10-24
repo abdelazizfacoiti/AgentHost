@@ -56,10 +56,14 @@ coding tools directly.
    them with `agenthost agent resume --stop` or `--takeover`.
 5. **No secrets through the GUI.** Never type passwords, API keys, tokens, or
    payment data. Ask the operator to enter them.
-6. **Track work.** For multi-step jobs use `task.create`, `task.update`, and
-   `task.add_event` so progress survives failures and the operator can watch it.
-   Use `task.update_status` to pause, resume, complete, or cancel. Do not start
-   a new task until the current one is finished unless the user asks.
+6. **Track work with a definition of done.** For multi-step jobs use
+   `task.create` with observable `definitionOfDone` criteria, then
+   `task.update` and `task.add_event` so progress survives failures. Verify
+   every criterion, then call `task.update_status` with `status: "completed"`
+   and `verifiedCriteria`; completion is refused while any criterion is
+   unverified. When the requested outcome is visible, stop and report instead
+   of repeating the same call. Do not start a new task until the current one
+   is finished unless the user asks.
 7. **Prefer bulk text entry.** Use `desktop.type_text` for text, not per-character
    key presses; use `desktop.hotkey` for shortcuts.
 8. **Leave the machine as found.** Restore focus/state when the task ends; report
@@ -136,8 +140,12 @@ The human can always intervene outside the chat:
   replaces confirmation or stop controls
 - `agenthost overlay hide` — hide persistent cards immediately
 - `agenthost overlay status` — renderer and hide-marker state
+- `agenthost agent pause [--reason text]` — hold state-changing tools
 - `agenthost agent stop` — runtime stop when the client owns the MCP process
-- `agenthost agent resume --stop|--takeover` — operator-only gate clear
+- `agenthost agent resume --stop|--takeover|--pause` — operator-only gate clear
+- The action card exposes Pause/Resume/Stop and a close button; approval waits
+  stay visible and are raised above other windows. The close button still
+  works after the MCP server exits.
 
 Progress cards persist until explicitly dismissed, so a finished task remains
 visible until the operator closes it.

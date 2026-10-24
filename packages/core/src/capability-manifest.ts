@@ -52,8 +52,19 @@ Credential, security, and protected system paths stay blocked. An active
 task approval may cover bounded low/medium work; high and blocked effects
 never auto-chain. Task and agent control metadata are exempt. \`agent.stop\`
 sets the emergency stop and revokes task approval; only the operator CLI
-clears stop/takeover flags. Tasks (\`task.*\`) organize long work. Pull
+clears stop/takeover/pause flags. Tasks (\`task.*\`) organize long work. Pull
 \`agenthost://status\` for live stop/takeover state before starting.
+
+Definition of done: record observable criteria with \`task.create\`
+(\`definitionOfDone\`), verify each one, then call \`task.update_status\`
+with \`status: "completed"\` and \`verifiedCriteria\` listing every criterion.
+Completion is refused while any criterion is unverified. When the requested
+outcome is visible, stop and report instead of repeating the same call; the
+runtime warns when an identical call repeats.
+
+Operator controls: the action card stays on top for approvals, exposes
+Pause/Resume/Stop, and its close button works even after the MCP server exits.
+\`agenthost agent pause\` / \`resume --pause\` set and clear the pause gate.
 
 Fast lane (fewer turns, fewer tokens): pull \`agenthost://capabilities.md\`
 first instead of \`tools/list\`; fold window observation into one

@@ -4,7 +4,10 @@ import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 
-const createInput = z.object({ goal: z.string().trim().min(1).max(2000) }).strict();
+const createInput = z.object({
+  goal: z.string().trim().min(1).max(2000),
+  definitionOfDone: z.array(z.string().trim().min(1).max(300)).max(12).optional()
+}).strict();
 const idInput = z.object({ taskId: z.string().trim().min(1).max(200) }).strict();
 const updateInput = z.object({
   taskId: z.string().trim().min(1).max(200),
@@ -13,7 +16,8 @@ const updateInput = z.object({
 }).strict();
 const statusInput = z.object({
   taskId: z.string().trim().min(1).max(200),
-  status: z.enum(["active", "paused", "completed", "cancelled"])
+  status: z.enum(["active", "paused", "completed", "cancelled"]),
+  verifiedCriteria: z.array(z.string().trim().min(1).max(300)).max(12).optional()
 }).strict();
 const eventInput = z.object({
   taskId: z.string().trim().min(1).max(200),
@@ -38,16 +42,27 @@ function taskNotFound(tool: string): ToolResult<never> {
 export function createTaskTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
   const create: AgentHostToolDefinition<z.infer<typeof createInput>, AgentTask, AgentHostMcpContext> = {
     name: "task.create",
-    description: "Creates a persistent task with a user goal. Starting a new task clears any active task approval.",
+    description: "Creates a persistent task with a user goal and observable definition-of-done criteria. Starting a new task clears any active task approval.",
     riskLevel: "low",
     inputSchema: createInput,
-    mcpInputSchema: schema({ goal: { type: "string", minLength: 1, maxLength: 2000 } }, ["goal"]),
+    mcpInputSchema: schema({
+      goal: { type: "string", minLength: 1, maxLength: 2000 },
+      definitionOfDone: { type: "array", maxItems: 12, items: { type: "string", minLength: 1, maxLength: 300 } }
+    }, ["goal"]),
     inputSummary: "Create task",
     safety: { actionType: "inspect" },
     async handler(input, context): Promise<ToolResult<AgentTask>> {
       try {
-        const task = await createTask(context.config.agentHostDir, input.goal);
-        return toolSuccess({ tool: "task.create", riskLevel: "low", data: task, observations: ["Plan, inspect, act, observe, verify; log recovery events as you go."] });
+        const task = await createTask(context.config.agentHostDir, input.goal, input.definitionOfDone);
+        return toolSuccess({
+          tool: "task.create",
+          riskLevel: "low",
+          data: task,
+          observations: [
+            "Define done as observable outcomes. Complete the task only after every criterion is verified.",
+            "Plan, inspect, act, observe, verify; log recovery events as you go."
+          ]
+        });
       } catch (error) {
         return taskFailure("task.create", error);
       }
@@ -97,16 +112,57 @@ export function createTaskTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
 
   const setStatus: AgentHostToolDefinition<z.infer<typeof statusInput>, AgentTask, AgentHostMcpContext> = {
     name: "task.update_status",
-    description: "Pauses, resumes, completes, or cancels a task. Terminal tasks cannot change state.",
+    description: "Pauses, resumes, completes, or cancels a task. Completing a task with definition-of-done criteria requires verifiedCriteria covering every criterion. Terminal tasks cannot change state.",
     riskLevel: "low",
     inputSchema: statusInput,
-    mcpInputSchema: schema({ taskId: { type: "string" }, status: { type: "string", enum: ["active", "paused", "completed", "cancelled"] } }, ["taskId", "status"]),
+    mcpInputSchema: schema({
+      taskId: { type: "string" },
+      status: { type: "string", enum: ["active", "paused", "completed", "cancelled"] },
+      verifiedCriteria: { type: "array", maxItems: 12, items: { type: "string", minLength: 1, maxLength: 300 } }
+    }, ["taskId", "status"]),
     inputSummary: "Update task status",
     safety: { actionType: "inspect" },
     async handler(input, context): Promise<ToolResult<AgentTask>> {
       try {
+        const existing = await loadTask(context.config.agentHostDir, input.taskId);
+        if (existing === undefined) return taskNotFound("task.update_status");
+        const criteria = existing.definitionOfDone ?? [];
+        if (input.status === "completed" && existing.status !== "completed") {
+          if (criteria.length > 0) {
+            const verified = new Set((input.verifiedCriteria ?? []).map((criterion) => criterion.trim().toLowerCase()));
+            const missing = criteria.filter((criterion) => !verified.has(criterion.trim().toLowerCase()));
+            if (missing.length > 0) {
+              return toolFailure({
+                tool: "task.update_status",
+                riskLevel: "low",
+                error: {
+                  code: "definition_of_done_unverified",
+                  message: "Task was not completed because definition-of-done criteria are unverified.",
+                  details: { missing }
+                },
+                observations: [
+                  "No task state was changed.",
+                  `Verify these criteria first: ${missing.join("; ")}`,
+                  "Retry completion with verifiedCriteria listing every criterion."
+                ]
+              });
+            }
+            for (const criterion of criteria) {
+              await appendTaskEvent(context.config.agentHostDir, input.taskId, "verification", `Definition of done met: ${criterion}`);
+            }
+          }
+        }
         const task = await transitionTask(context.config.agentHostDir, input.taskId, input.status);
-        return toolSuccess({ tool: "task.update_status", riskLevel: "low", data: task });
+        return toolSuccess({
+          tool: "task.update_status",
+          riskLevel: "low",
+          data: task,
+          observations: input.status === "completed" && criteria.length > 0
+            ? [`Definition of done verified (${criteria.length}/${criteria.length}): ${criteria.join("; ")}`, "Task is complete. Report the outcome instead of continuing to act."]
+            : input.status === "completed"
+              ? ["No definition of done was recorded; completion is unverified. Record observable criteria on the next task."]
+              : [`Task status is now ${task.status}.`]
+        });
       } catch (error) {
         return taskFailure("task.update_status", error);
       }

@@ -1,7 +1,7 @@
 import type { OverlayManager } from "@agenthost/app-overlay";
 import type { OverlayPlacement, OverlayWidget, OverlayWidgetComponent, RiskLevel, ToolResult } from "@agenthost/core";
 
-export type ToolActionPhase = "running" | "waiting_approval" | "preview" | "done" | "halted" | "error";
+export type ToolActionPhase = "running" | "paused" | "waiting_approval" | "preview" | "done" | "halted" | "error";
 
 export interface ToolActionInput {
   tool: string;
@@ -19,7 +19,12 @@ export interface ToolActionOverlayOptions {
   persistent?: boolean;
   autoHideMs?: number;
   heartbeatMs?: number;
+  eventPollMs?: number;
   now?: () => number;
+  onPause?: () => Promise<void> | void;
+  onResume?: () => Promise<void> | void;
+  onStop?: () => Promise<void> | void;
+  isPaused?: () => Promise<boolean> | boolean;
 }
 
 interface ActiveAction {
@@ -41,6 +46,7 @@ interface LastAction {
 
 const BADGES: Record<ToolActionPhase, { status: "neutral" | "info" | "success" | "warning" | "danger"; text: string }> = {
   running: { status: "info", text: "Running" },
+  paused: { status: "warning", text: "Paused" },
   waiting_approval: { status: "warning", text: "Waiting for approval" },
   preview: { status: "info", text: "Preview ready" },
   done: { status: "success", text: "Done" },
@@ -48,7 +54,7 @@ const BADGES: Record<ToolActionPhase, { status: "neutral" | "info" | "success" |
   error: { status: "danger", text: "Failed" }
 };
 
-const HALT_CODES = new Set(["emergency_stop_requested", "human_takeover_active", "safety_blocked"]);
+const HALT_CODES = new Set(["emergency_stop_requested", "human_takeover_active", "pause_requested", "safety_blocked"]);
 
 function elapsedLabel(milliseconds: number): string {
   const total = Math.max(0, Math.floor(milliseconds / 1000));
@@ -90,14 +96,23 @@ export class ToolActionOverlay {
   readonly #persistent: boolean;
   readonly #autoHideMs: number;
   readonly #heartbeatMs: number;
+  readonly #eventPollMs: number;
   readonly #now: () => number;
+  readonly #onPause: (() => Promise<void> | void) | undefined;
+  readonly #onResume: (() => Promise<void> | void) | undefined;
+  readonly #onStop: (() => Promise<void> | void) | undefined;
+  readonly #isPaused: (() => Promise<boolean> | boolean) | undefined;
   readonly #active = new Map<string, ActiveAction>();
   #last: LastAction | undefined;
   #renderQueue: Promise<void> = Promise.resolve();
   #heartbeat: ReturnType<typeof setInterval> | undefined;
+  #eventPoll: ReturnType<typeof setInterval> | undefined;
   #autoHide: ReturnType<typeof setTimeout> | undefined;
   #started = false;
   #hiddenByOperator = false;
+  #paused = false;
+  #stopRequested = false;
+  #polling = false;
   #disposed = false;
   #sequence = 0;
 
@@ -108,13 +123,22 @@ export class ToolActionOverlay {
     this.#persistent = options.persistent ?? true;
     this.#autoHideMs = options.autoHideMs ?? 15_000;
     this.#heartbeatMs = Math.max(250, options.heartbeatMs ?? 1_000);
+    this.#eventPollMs = Math.max(100, options.eventPollMs ?? 350);
     this.#now = options.now ?? (() => Date.now());
+    this.#onPause = options.onPause;
+    this.#onResume = options.onResume;
+    this.#onStop = options.onStop;
+    this.#isPaused = options.isPaused;
   }
 
   async begin(input: ToolActionInput): Promise<ToolActionHandle> {
     if (this.#disposed) return this.#noopHandle();
     this.#hiddenByOperator = false;
+    this.#stopRequested = false;
     this.#clearAutoHide();
+    if (this.#isPaused) {
+      try { this.#paused = await this.#isPaused(); } catch { /* Keep the last known pause state. */ }
+    }
     const action: ActiveAction = {
       id: `action_${++this.#sequence}`,
       tool: safeToolName(input.tool),
@@ -124,6 +148,7 @@ export class ToolActionOverlay {
     };
     this.#active.set(action.id, action);
     this.#startHeartbeat();
+    this.#startEventPoll();
     await this.#render();
 
     let settled = false;
@@ -144,7 +169,8 @@ export class ToolActionOverlay {
         };
         if (this.#active.size === 0) {
           this.#stopHeartbeat();
-          this.#scheduleAutoHide();
+          const needsOperator = phase === "waiting_approval" || phase === "halted";
+          if (!this.#paused && !this.#stopRequested && !needsOperator) this.#scheduleAutoHide();
         } else {
           this.#startHeartbeat();
         }
@@ -153,7 +179,7 @@ export class ToolActionOverlay {
     };
   }
 
-  snapshot(): { active: number; phase: ToolActionPhase; tool?: string; title?: string; started: boolean; hidden: boolean } {
+  snapshot(): { active: number; phase: ToolActionPhase; tool?: string; title?: string; started: boolean; hidden: boolean; paused: boolean; stopRequested: boolean } {
     const phase = this.#currentPhase();
     const current = this.#currentAction();
     const tool = current?.tool ?? this.#last?.tool;
@@ -163,7 +189,9 @@ export class ToolActionOverlay {
       ...(tool === undefined ? {} : { tool }),
       ...(this.#started ? { title: this.#widget().title } : {}),
       started: this.#started,
-      hidden: this.#hiddenByOperator
+      hidden: this.#hiddenByOperator,
+      paused: this.#paused,
+      stopRequested: this.#stopRequested
     };
   }
 
@@ -173,10 +201,12 @@ export class ToolActionOverlay {
 
   async dismiss(): Promise<void> {
     this.#stopHeartbeat();
+    this.#stopEventPoll();
     this.#clearAutoHide();
     this.#active.clear();
     this.#last = undefined;
     this.#hiddenByOperator = false;
+    this.#stopRequested = false;
     if (!this.#started) return;
     this.#started = false;
     try {
@@ -201,14 +231,18 @@ export class ToolActionOverlay {
   }
 
   #currentPhase(): ToolActionPhase {
+    if (this.#stopRequested) return "halted";
+    if (this.#paused) return "paused";
     if (this.#active.size > 0) return "running";
     return this.#last?.phase ?? "running";
   }
 
   #detailText(phase: ToolActionPhase, current: ActiveAction | undefined): string {
     const summary = current?.summary ?? this.#last?.summary ?? "Working";
-    if (phase === "waiting_approval") return `${summary} No action executed; review with "agenthost confirmations".`;
+    if (phase === "paused") return `${summary} Paused by the operator. Resume to allow the next state-changing action.`;
+    if (phase === "waiting_approval") return `${summary} No action executed. Run "agenthost confirmations" to review and approve.`;
     if (phase === "preview") return `${summary} No action executed.`;
+    if (phase === "halted" && this.#stopRequested) return `${summary} Stop requested. The current action may finish, but no new state-changing action will start.`;
     if (phase === "halted") return `${summary} Halted by the operator or safety policy.`;
     if (phase === "error") return `${summary} ${this.#last?.errorCode ?? "Action failed."}`;
     return summary;
@@ -227,27 +261,46 @@ export class ToolActionOverlay {
       { type: "status_badge", status: badge.status, text: badge.text },
       { type: "text", text: this.#detailText(phase, current) }
     ];
+    if (phase === "waiting_approval") components.push({ type: "warning", text: "Approval required. Run: agenthost confirmations" });
+    if (phase === "paused") components.push({ type: "warning", text: "Paused. Resume here or run: agenthost agent resume --pause" });
+    if (phase === "halted" && this.#stopRequested) components.push({ type: "warning", text: "Stop is active. Dismiss this card or run: agenthost agent resume --stop" });
     if (this.#active.size > 1) components.push({ type: "key_value", key: "Actions", value: `${this.#active.size} running` });
     components.push({ type: "key_value", key: "Risk", value: riskLabel(risk) });
     components.push({ type: "key_value", key: "Elapsed", value: elapsedLabel(elapsed) });
+    for (const [label, event] of this.#buttons(phase)) components.push({ type: "button", label, event });
+    const title = phase === "waiting_approval"
+      ? "AgentHost · Approval required"
+      : phase === "paused"
+        ? "AgentHost · Paused"
+        : phase === "halted"
+          ? "AgentHost · Halted"
+          : this.#active.size > 1
+            ? `AgentHost · ${this.#active.size} actions running`
+            : `AgentHost · ${tool}`;
     return {
       widgetId: this.#widgetId,
-      title: this.#active.size > 1 ? `AgentHost · ${this.#active.size} actions running` : `AgentHost · ${tool}`,
+      title,
       components,
       placement: this.#placement,
+      style: { semantic: phase === "error" ? "danger" : phase === "waiting_approval" || phase === "paused" || phase === "halted" ? "warning" : "info", elevation: phase === "waiting_approval" ? "high" : "medium" },
+      interaction: { interactive: true, focus: "never", dismissible: true, allowedEvents: ["pause", "resume", "emergency_stop_requested", "dismissed"] },
       sensitivity: "public",
       ttlMs: 300_000,
       ...(this.#persistent ? { persistent: true } : {})
     };
   }
 
+  #buttons(phase: ToolActionPhase): Array<[string, "pause" | "resume" | "emergency_stop_requested" | "dismissed"]> {
+    if (this.#stopRequested) return [["Dismiss", "dismissed"]];
+    if (phase === "paused") return [["Resume", "resume"], ["Stop", "emergency_stop_requested"], ...(this.#active.size === 0 ? [["Dismiss", "dismissed"] as [string, "dismissed"]] : [])];
+    if (phase === "running") return [["Pause", "pause"], ["Stop", "emergency_stop_requested"]];
+    if (phase === "waiting_approval") return [["Stop", "emergency_stop_requested"], ["Dismiss", "dismissed"]];
+    return [["Pause", "pause"], ["Dismiss", "dismissed"]];
+  }
+
   async #render(): Promise<void> {
     this.#renderQueue = this.#renderQueue.catch(() => undefined).then(async () => {
       if (this.#disposed || this.#hiddenByOperator) return;
-      if (this.#active.size > 0) {
-        const hidden = await this.#operatorHidden();
-        if (hidden) return;
-      }
       const widget = this.#widget();
       try {
         if (!this.#started) {
@@ -267,20 +320,66 @@ export class ToolActionOverlay {
     await this.#renderQueue;
   }
 
-  async #operatorHidden(): Promise<boolean> {
+  async #pollOperatorEvents(): Promise<void> {
+    if (this.#disposed || this.#hiddenByOperator || this.#polling) return;
+    this.#polling = true;
     try {
+      if (this.#isPaused) {
+        const paused = await this.#isPaused();
+        if (paused !== this.#paused) {
+          this.#paused = paused;
+          await this.#render();
+        }
+      }
       const events = await this.#manager.pollEvents();
-      if (!events.some((event) => event.overlayId === this.#widgetId && (event.event === "hide" || event.event === "dismissed"))) return false;
+      for (const event of events) {
+        if (event.overlayId !== this.#widgetId) continue;
+        if (event.event === "hide" || event.event === "dismissed") {
+          await this.#hideByOperator();
+          return;
+        }
+        if (event.event === "pause") {
+          if (this.#paused) continue;
+          this.#paused = true;
+          try { await this.#onPause?.(); } catch { /* Operator control is best effort. */ }
+          await this.#render();
+          return;
+        }
+        if (event.event === "resume") {
+          if (!this.#paused) continue;
+          this.#paused = false;
+          try { await this.#onResume?.(); } catch { /* Operator control is best effort. */ }
+          await this.#render();
+          return;
+        }
+        if (event.event === "emergency_stop_requested" || event.event === "cancel" || event.event === "cancelled") {
+          if (this.#stopRequested) continue;
+          this.#stopRequested = true;
+          try { await this.#onStop?.(); } catch { /* Operator control is best effort. */ }
+          await this.#render();
+          return;
+        }
+      }
     } catch {
-      return false;
+      /* Event polling is advisory; the card remains usable. */
+    } finally {
+      this.#polling = false;
     }
+  }
+
+  async #hideByOperator(): Promise<void> {
     this.#hiddenByOperator = true;
     this.#started = false;
     this.#active.clear();
     this.#last = undefined;
     this.#stopHeartbeat();
+    this.#stopEventPoll();
     this.#clearAutoHide();
-    return true;
+    try {
+      await this.#manager.dismiss(this.#widgetId);
+    } catch {
+      /* GTK already removed the card locally when close was clicked. */
+    }
   }
 
   #startHeartbeat(): void {
@@ -298,6 +397,20 @@ export class ToolActionOverlay {
     if (this.#heartbeat === undefined) return;
     clearInterval(this.#heartbeat);
     this.#heartbeat = undefined;
+  }
+
+  #startEventPoll(): void {
+    if (this.#eventPoll !== undefined || this.#disposed || this.#hiddenByOperator) return;
+    const interval = setInterval(() => void this.#pollOperatorEvents(), this.#eventPollMs);
+    const unref = interval as unknown as { unref?: () => void };
+    if (typeof unref.unref === "function") unref.unref();
+    this.#eventPoll = interval;
+  }
+
+  #stopEventPoll(): void {
+    if (this.#eventPoll === undefined) return;
+    clearInterval(this.#eventPoll);
+    this.#eventPoll = undefined;
   }
 
   #scheduleAutoHide(): void {

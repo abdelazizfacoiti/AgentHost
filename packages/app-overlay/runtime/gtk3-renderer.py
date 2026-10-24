@@ -342,6 +342,18 @@ class Renderer:
             return "hide"
         return None
 
+    def semantic_style(self, record):
+        payload = record.get("payload") if isinstance(record, dict) else {}
+        style = payload.get("style") if isinstance(payload, dict) else {}
+        return (style or {}).get("semantic", "neutral") if isinstance(style, dict) else "neutral"
+
+    def emit_operator_event(self, record, event):
+        # Emit before removing so a dead parent still leaves no stale card:
+        # the operator can always close the window they can see.
+        self.emit(record, event)
+        if event in {"dismissed", "hide"}:
+            self.dismiss(record.get("overlayId"))
+
     def ensure_widget_css(self, screen):
         if self.widget_css_ready or screen is None:
             return
@@ -349,6 +361,10 @@ class Renderer:
         provider.load_from_data(b"""
         window { background-color: rgba(0,0,0,0); }
         .ah-card { background-image: linear-gradient(145deg, rgba(24,28,39,0.98), rgba(13,16,24,0.98)); border-width: 1px; border-style: solid; border-color: rgba(126,156,210,0.30); border-radius: 16px; color: #eef2fa; }
+        .ah-card-warning { border-width: 2px; border-color: rgba(255,188,74,0.78); }
+        .ah-card-alert { border-width: 2px; border-color: rgba(255,120,120,0.86); }
+        .ah-title-warning { color: #ffd58a; }
+        .ah-title-alert { color: #ffb3b3; }
         .ah-surface { background-color: rgba(0,0,0,0); }
         .ah-highlight { background-color: rgba(45,126,255,0.10); border-width: 3px; border-style: solid; border-color: #4d8dff; border-radius: 10px; }
         .ah-title { color: #f7f9ff; font-weight: bold; font-size: 16px; }
@@ -667,7 +683,7 @@ class Renderer:
             enabled = interactive and event in allowed
             button.set_sensitive(enabled)
             if enabled:
-                button.connect("clicked", lambda _button, current=record, name=event: self.emit(current, name))
+                button.connect("clicked", lambda _button, current=record, name=event: self.emit_operator_event(current, name))
             footer.pack_start(button, False, False, 0)
         card["footer_signature"] = [component for component in components if component.get("type") in {"button", "choice"}]
         footer.set_visible(len(footer.get_children()) > 0)
@@ -686,7 +702,8 @@ class Renderer:
         payload = record.get("payload") or {}
         title_text = safe_text(payload.get("title") or payload.get("label") or "AgentHost", 200)
         close_event = self.dismiss_event(record)
-        signature = (title_text, close_event)
+        semantic = self.semantic_style(record)
+        signature = (title_text, close_event, semantic)
         # Rebuilding the header destroys/recreates the drag EventBox on every
         # detail tick. Only rebuild when the title or close affordance actually
         # changes; otherwise update the label text in place.
@@ -700,6 +717,10 @@ class Renderer:
             header.remove(child)
             child.destroy()
         title = self.label(title_text, "ah-title", 200)
+        if semantic == "warning":
+            title.get_style_context().add_class("ah-title-warning")
+        elif semantic == "danger":
+            title.get_style_context().add_class("ah-title-alert")
         title.set_ellipsize(3)
         title.set_line_wrap(False)
         title.set_max_width_chars(38)
@@ -713,7 +734,7 @@ class Renderer:
             button.set_relief(Gtk.ReliefStyle.NONE)
             button.set_focus_on_click(False)
             button.get_style_context().add_class("ah-close")
-            button.connect("clicked", lambda _button, current=record, name=close_event: self.emit(current, name))
+            button.connect("clicked", lambda _button, current=record, name=close_event: self.emit_operator_event(current, name))
             header.pack_start(button, False, False, 0)
         card["title"] = title
         card["close_button"] = button
@@ -763,6 +784,31 @@ class Renderer:
         self.cards[record.get("overlayId")] = card
         return card
 
+    def apply_card_style(self, card, record):
+        context = card["frame"].get_style_context()
+        for name in ("ah-card-warning", "ah-card-alert"):
+            context.remove_class(name)
+        semantic = self.semantic_style(record)
+        if semantic == "warning":
+            context.add_class("ah-card-warning")
+        elif semantic == "danger":
+            context.add_class("ah-card-alert")
+        previous = card.get("semantic")
+        card["semantic"] = semantic
+        attention = semantic in {"warning", "danger"}
+        window = card.get("window")
+        if window is not None:
+            window.set_keep_above(True)
+            try:
+                window.set_urgency_hint(attention)
+            except Exception:
+                pass
+            if attention and previous != semantic:
+                try:
+                    window.raise_()
+                except Exception:
+                    pass
+
     def render_card(self, record):
         overlay_id = record.get("overlayId")
         card = self.cards.get(overlay_id)
@@ -770,6 +816,7 @@ class Renderer:
         if card is None:
             card = self.create_card(record)
         payload = record.get("payload") or {}
+        self.apply_card_style(card, record)
         components = component_rows(payload)
         if not components and payload.get("type") == "progress":
             try:
@@ -788,6 +835,10 @@ class Renderer:
         if first:
             card["window"].show_all()
             self.fade_in(card["window"], record)
+            try:
+                card["window"].raise_()
+            except Exception:
+                pass
         self.position_card(card, record)
         self.draw_ready.add(overlay_id)
 
@@ -844,7 +895,7 @@ class Renderer:
         if event.keyval == Gdk.KEY_Escape:
             event_name = self.dismiss_event(record)
             if event_name is not None:
-                self.emit(record, event_name)
+                self.emit_operator_event(record, event_name)
                 return True
         return False
 

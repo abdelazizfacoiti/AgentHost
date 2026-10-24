@@ -12,6 +12,10 @@ import {
   loadAgentHostConfig,
   summarizeForLog,
   validateOptionalAdapterExecutionPolicy,
+  readRunState,
+  requestPause,
+  clearPause,
+  requestStop,
   AGENTHOST_VERSION,
   type AdapterRegistry,
   type AgentHostConfig,
@@ -182,7 +186,11 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     widgetId: `agenthost-action-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`,
     placement: config.overlay?.preferredPosition ?? "top_right",
     persistent: config.overlay?.persistent ?? true,
-    autoHideMs: config.overlay?.autoHideMs ?? 15_000
+    autoHideMs: config.overlay?.autoHideMs ?? 15_000,
+    onPause: async () => { await requestPause(config.agentHostDir, "Paused from the AgentHost action card"); },
+    onResume: () => clearPause(config.agentHostDir),
+    onStop: async () => { await requestStop(config.agentHostDir, "Stop requested from the AgentHost action card"); },
+    isPaused: async () => (await readRunState(config.agentHostDir)).pause.requested
   });
   const linux: LinuxAutomation =
     options.linux ?? {

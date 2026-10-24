@@ -58,7 +58,7 @@ packages/
 | `agenthost task export <id> [--format md\|html]` | Shareable redacted run report |
 | `agenthost confirmations` / `confirm <tokenId>` / `deny <tokenId>` | Inspect and resolve exact-preview confirmation tokens |
 | `agenthost task pause <id>` / `task resume <id>` | Task lifecycle transitions (not a stop-flag clear) |
-| `agenthost agent status` / `stop` / `takeover-begin` / `resume --stop\|--takeover` | Runtime stop/takeover flags; resume is operator-only |
+| `agenthost agent status` / `pause` / `stop` / `takeover-begin` / `resume --stop\|--takeover\|--pause` | Runtime pause/stop/takeover flags; resume is operator-only |
 
 **Test order**: `build → lint → test`. Run a single test file: `npx vitest run packages/core/src/__tests__/<file>.test.ts`. Tests live in `__tests__/` dirs inside each package's `src/`.
 
@@ -76,7 +76,8 @@ Every tool passes through: schema validation → stop/takeover gate → effect p
 - Routine state-changing tools execute directly. Consequential actions — external/destructive effects, private-data reads, or high risk — require a dry-run preview and exact confirmation; metadata-only task/agent control is exempt.
 - Dry-run for a consequential action mints a 15-minute single-use token bound to tool, canonical arguments, and target. `agenthost confirm <tokenId>` approves one exact preview; `deny` rejects it. Accepted confirmation sets `confirmationSatisfied` for the handler safety recheck.
 - `agenthost task approve <id> [--max-risk low|medium]` creates a 30-min approval for an **active** task; the runner auto-chains only low/medium effects. High and consequential effects still need per-action tokens.
-- Stop enforcement via `run/stop.requested` and `run/takeover.active`; `emergency_stop_requested`/`human_takeover_active` gate only state-changing calls.
+- Stop/pause enforcement via `run/stop.requested`, `run/takeover.active`, and `run/pause.requested`; `emergency_stop_requested`/`human_takeover_active`/`pause_requested` gate only state-changing calls.
+- The automatic action card exposes Pause/Resume/Stop and a close button; approval waits stay visible, raise above other windows, and the close button still works after the MCP server exits.
 - AgentHost control-plane paths (`run/`, `logs/`, `setup/`, `tasks/approvals/`, config) are read-medium and write/delete-blocked.
 
 ## Logging

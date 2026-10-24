@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, acceptConfirmation, beginTakeover, clearActiveTaskApproval, clearStop, defaultAgentHostHome, defaultPublicConfigPath, endTakeover, legacyConfigPath, listConfirmations, loadAgentHostConfig, normalizeSha256, readActiveTaskApproval, readRunState, readSha256Sidecar, redactLocalPath, rejectConfirmation, requestStop, sha256File, transitionTask } from "@agenthost/core";
+import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, acceptConfirmation, beginTakeover, clearActiveTaskApproval, clearPause, clearStop, defaultAgentHostHome, defaultPublicConfigPath, endTakeover, legacyConfigPath, listConfirmations, loadAgentHostConfig, normalizeSha256, readActiveTaskApproval, readRunState, readSha256Sidecar, redactLocalPath, rejectConfirmation, requestPause, requestStop, sha256File, transitionTask } from "@agenthost/core";
 import { renderTaskHtml, renderTaskMarkdown } from "./task-export.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -163,7 +163,14 @@ async function taskCommand(args: ReturnType<typeof parseFlags>): Promise<Output>
     if (!record) return fail(`task ${action}`, "task_not_found");
     if (action === "status") return { ok: true, command: "task status", data: record };
     try {
+      const pauseReason = `cli_task_pause:${safe}`;
       const updated = await transitionTask(agentHome, safe, action === "pause" ? "paused" : "active");
+      if (action === "pause") {
+        await requestPause(agentHome, pauseReason);
+      } else {
+        const runState = await readRunState(agentHome);
+        if (runState.pause.requested && runState.pause.reason === pauseReason) await clearPause(agentHome);
+      }
       return { ok: true, command: `task ${action}`, data: updated };
     } catch (error) {
       return fail(`task ${action}`, error instanceof Error ? error.message : "task_transition_failed");
@@ -277,10 +284,17 @@ async function attachTaskOverlay(taskId: string, goal: string, initial: Json): P
       taskId,
       title: `Task ${taskId}: ${String(goal).slice(0, 100)}`,
       onAction: (action) => {
-        if (action === "pause") locallyPaused = true;
-        if (action === "resume") locallyPaused = false;
+        if (action === "pause") {
+          locallyPaused = true;
+          void requestPause(agentHome, `cli_task_overlay_pause:${taskId}`).catch(() => undefined);
+        }
+        if (action === "resume") {
+          locallyPaused = false;
+          void clearPause(agentHome).catch(() => undefined);
+        }
         if (action === "stop") {
-          void safeWrite(path.join(agentHome, "run", "stop.requested"), `${JSON.stringify({ stopped: true, reason: "overlay_stop", at: new Date().toISOString() })}\n`).catch(() => undefined);
+          void requestStop(agentHome, "overlay_stop").catch(() => undefined);
+          void clearActiveTaskApproval(agentHome).catch(() => undefined);
           void controller.requestStop();
         }
       }
@@ -374,15 +388,22 @@ async function agentCommand(args: ReturnType<typeof parseFlags>): Promise<Output
     await clearActiveTaskApproval(agentHome);
     return { ok: true, command: "agent takeover-begin", data: { runState: await readRunState(agentHome) } };
   }
+  if (action === "pause") {
+    const reason = args.values.get("reason") ?? "cli_agent_pause";
+    await requestPause(agentHome, reason);
+    return { ok: true, command: "agent pause", data: { runState: await readRunState(agentHome) } };
+  }
   if (action === "resume") {
     const clearStopFlag = args.flags.has("stop");
     const clearTakeoverFlag = args.flags.has("takeover");
-    if (!clearStopFlag && !clearTakeoverFlag) return fail("agent resume", "usage: agenthost agent resume --stop|--takeover [--stop --takeover]");
+    const clearPauseFlag = args.flags.has("pause");
+    if (!clearStopFlag && !clearTakeoverFlag && !clearPauseFlag) return fail("agent resume", "usage: agenthost agent resume --stop|--takeover|--pause [flags may be combined]");
     if (clearStopFlag) await clearStop(agentHome);
     if (clearTakeoverFlag) await endTakeover(agentHome);
-    return { ok: true, command: "agent resume", data: { runState: await readRunState(agentHome), cleared: { stop: clearStopFlag, takeover: clearTakeoverFlag } } };
+    if (clearPauseFlag) await clearPause(agentHome);
+    return { ok: true, command: "agent resume", data: { runState: await readRunState(agentHome), cleared: { stop: clearStopFlag, takeover: clearTakeoverFlag, pause: clearPauseFlag } } };
   }
-  return fail("agent", "usage: agenthost agent status|stop [--reason text]|takeover-begin [--reason text]|resume --stop|--takeover");
+  return fail("agent", "usage: agenthost agent status|pause [--reason text]|stop [--reason text]|takeover-begin [--reason text]|resume --stop|--takeover|--pause");
 }
 
 async function capabilitiesCommand(args?: ReturnType<typeof parseFlags>): Promise<Output> {

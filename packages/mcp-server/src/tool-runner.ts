@@ -407,12 +407,52 @@ async function executeGoverned(
   return result;
 }
 
+interface RepeatEntry {
+  count: number;
+}
+
+const REPEAT_TRACKER = new WeakMap<AgentHostMcpContext, Map<string, RepeatEntry>>();
+const REPEAT_EXEMPT = /^(?:task|agent|system|adapter|policy)\./;
+
+function stableKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableKey).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableKey(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function noteRepeatedCall(context: AgentHostMcpContext, toolName: string, input: unknown): number {
+  if (REPEAT_EXEMPT.test(toolName)) return 0;
+  const comparable = input !== null && typeof input === "object" && !Array.isArray(input)
+    ? Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([key]) => key !== "dryRun" && key !== "confirmationToken"))
+    : input;
+  let session = REPEAT_TRACKER.get(context);
+  if (session === undefined) {
+    session = new Map();
+    REPEAT_TRACKER.set(context, session);
+  }
+  const key = `${toolName}:${stableKey(comparable)}`;
+  const entry = session.get(key) ?? { count: 0 };
+  entry.count += 1;
+  if (session.size > 200 && !session.has(key)) {
+    const oldest = session.keys().next().value;
+    if (oldest !== undefined) session.delete(oldest);
+  }
+  session.set(key, entry);
+  return entry.count;
+}
+
 export async function runTool<Input>(
   tool: AnyAgentHostToolDefinition<AgentHostMcpContext>,
   input: Input,
   context: AgentHostMcpContext
 ): Promise<ToolResult> {
   const startedAt = Date.now();
+  if (tool.name === "task.create") REPEAT_TRACKER.delete(context);
   const audit: AuditMeta = { inputSummary: "Tool call", preview: false };
   let action: ToolActionHandle | undefined;
   if (tool.execution?.executionClass === "state_changing" && inputPassesSchema(tool, input)) {
@@ -462,6 +502,28 @@ export async function runTool<Input>(
   if (runtime !== undefined) {
     result.serverVersion ??= runtime.version;
     result.serverPath ??= runtime.entryPath;
+  }
+
+  if (action === undefined && result.error?.code === "confirmation_required") {
+    try {
+      action = await context.actionOverlay?.begin({
+        tool: tool.name,
+        summary: audit.inputSummary,
+        riskLevel: result.riskLevel
+      });
+    } catch {
+      action = undefined;
+    }
+  }
+
+  const repeats = noteRepeatedCall(context, tool.name, input);
+  if (repeats === 4 || repeats === 8) {
+    result.observations = [
+      ...(result.observations ?? []),
+      repeats === 4
+        ? `This exact call has now run ${repeats} times. If the requested outcome is already satisfied, verify the definition of done and report instead of repeating.`
+        : `This exact call has now run ${repeats} times. Stop looping: verify the definition of done, then complete the task or report the blocker.`
+    ];
   }
 
   try {

@@ -56,7 +56,7 @@ agenthost start
 agenthost stop
 agenthost status
 agenthost confirmations [list] / confirm <tokenId> / deny <tokenId>
-agenthost agent status / stop / takeover-begin / resume --stop|--takeover
+agenthost agent status / pause / stop / takeover-begin / resume --stop|--takeover|--pause
 agenthost task [list|status|pause|resume|stop|approve]
 agenthost task watch <id> [--follow] [--notify] [--overlay]
 agenthost task export <id> [--format md|html] [--out <path>]

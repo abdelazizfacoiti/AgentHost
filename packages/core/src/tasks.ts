@@ -15,6 +15,8 @@ export interface AgentTaskEvent {
 export interface AgentTask {
   taskId: string;
   goal: string;
+  /** Observable criteria that must all be verified before the task is done. */
+  definitionOfDone?: string[];
   status: AgentTaskStatus;
   phase: string;
   currentAction: string;
@@ -87,11 +89,13 @@ export async function saveTask(agentHostDir: string, task: AgentTask): Promise<v
   await chmod(target, 0o600);
 }
 
-export async function createTask(agentHostDir: string, goal: string): Promise<AgentTask> {
+export async function createTask(agentHostDir: string, goal: string, definitionOfDone: string[] = []): Promise<AgentTask> {
   const now = new Date().toISOString();
+  const criteria = [...new Set(definitionOfDone.map((item) => item.trim()).filter((item) => item.length > 0))].slice(0, 12).map((item) => item.slice(0, 300));
   const task: AgentTask = {
     taskId: `task_${randomUUID()}`,
     goal,
+    ...(criteria.length === 0 ? {} : { definitionOfDone: criteria }),
     status: "active",
     phase: "understand",
     currentAction: "inspect environment",
@@ -100,6 +104,7 @@ export async function createTask(agentHostDir: string, goal: string): Promise<Ag
     updatedAt: now
   };
   log(task, "note", `Task created: ${goal.slice(0, 200)}`);
+  if (criteria.length > 0) log(task, "note", `Definition of done (${criteria.length}): ${criteria.join("; ")}`);
   await clearActiveTaskApproval(agentHostDir);
   await saveTask(agentHostDir, task);
   return task;

@@ -17,6 +17,8 @@ import {
   clearStop,
   beginTakeover,
   endTakeover,
+  requestPause,
+  clearPause,
   evaluateRunStateGate
 } from "../index.js";
 import { createTask, loadTask, transitionTask, updateTask } from "../tasks.js";
@@ -146,9 +148,12 @@ describe("active task approvals", () => {
 describe("task lifecycle", () => {
   it("creates, updates, pauses, resumes, and freezes terminal tasks", async () => {
     const home = await tempHome();
-    const task = await createTask(home, "Ship the change");
+    const task = await createTask(home, "Ship the change", ["Tests pass", "Release installed", "Tests pass", "  "]);
     expect(task.status).toBe("active");
-    expect(await loadTask(home, task.taskId)).toMatchObject({ goal: "Ship the change" });
+    expect(await loadTask(home, task.taskId)).toMatchObject({
+      goal: "Ship the change",
+      definitionOfDone: ["Tests pass", "Release installed"]
+    });
 
     const updated = await updateTask(home, task.taskId, { phase: "build", currentAction: "run tests" });
     expect(updated.phase).toBe("build");
@@ -184,6 +189,7 @@ describe("shell control-plane protection", () => {
     const context = { agentHostDir: path.join(home, ".agenthost") };
 
     expect(classifyShellCommand("agenthost task approve task_1", policy, context)).toMatchObject({ blocked: true });
+    expect(classifyShellCommand("agenthost agent pause", policy, context)).toMatchObject({ blocked: true });
     expect(classifyShellCommand("agenthost confirm conf_12345678", policy, context)).toMatchObject({ blocked: true });
     expect(classifyShellCommand("cat ~/.agenthost/config.json", policy, context)).toMatchObject({ blocked: true });
     expect(classifyShellCommand("python3 -c 'print(1)'", policy, context)).toMatchObject({ riskLevel: "high" });
@@ -204,6 +210,11 @@ describe("run-state flags", () => {
     await beginTakeover(home, "human at keyboard");
     expect(evaluateRunStateGate(await readRunState(home))).toMatchObject({ allowed: false, code: "human_takeover_active" });
     await endTakeover(home);
+    expect(evaluateRunStateGate(await readRunState(home)).allowed).toBe(true);
+
+    await requestPause(home, "operator needs the keyboard");
+    expect(evaluateRunStateGate(await readRunState(home))).toMatchObject({ allowed: false, code: "pause_requested" });
+    await clearPause(home);
     expect(evaluateRunStateGate(await readRunState(home)).allowed).toBe(true);
 
     await writeFile(path.join(home, "run", "stop.requested"), "not json");

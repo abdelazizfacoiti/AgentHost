@@ -106,7 +106,7 @@ agenthost doctor [--json]
 agenthost setup [--resume]
 agenthost start / stop / status
 agenthost confirmations [list] / confirm <tokenId> / deny <tokenId>
-agenthost agent status / stop / takeover-begin / resume --stop|--takeover
+agenthost agent status / pause / stop / takeover-begin / resume --stop|--takeover|--pause
 agenthost task watch <id> [--follow] [--notify] [--overlay]
 agenthost task export <id> [--format md|html] [--out <path>]
 agenthost task approve <id> [--max-risk low|medium]

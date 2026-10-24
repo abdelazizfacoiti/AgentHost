@@ -71,9 +71,10 @@ observation remains available.
 Control paths:
 
 - MCP: `agent.status`, `agent.stop`, `agent.takeover_begin`.
-- CLI: `agenthost agent status|stop|takeover-begin`.
+- CLI: `agenthost agent status|pause|stop|takeover-begin`.
 - Clearing is operator-only: `agenthost agent resume --stop`,
-  `agenthost agent resume --takeover`, or both flags.
+  `agenthost agent resume --takeover`, `agenthost agent resume --pause`, or a
+  combination of flags.
 - `agenthost stop` writes the stop flag and terminates an AgentHost-managed
   background process if one exists.
 - There is intentionally no MCP tool to clear a stop or takeover.
