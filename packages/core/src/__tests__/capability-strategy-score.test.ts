@@ -12,7 +12,6 @@ function strategy(overrides: Partial<CapabilityStrategyDefinition> = {}): Capabi
     supportedOperatingSystems: ["linux"],
     supportedApplications: [],
     supportedAdapters: [],
-    compatibleProfiles: ["dev"],
     compatibleAgentHostRange: "0.1.0",
     compatibleAdapterRanges: {},
     requiredCapabilities: [],

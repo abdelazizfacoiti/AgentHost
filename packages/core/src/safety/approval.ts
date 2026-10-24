@@ -1,10 +1,11 @@
-import type { ApprovalInfo, PolicyProfile, RiskLevel } from "../types.js";
+import type { ApprovalInfo, RuntimePolicy, RiskLevel } from "../types.js";
 
 export function evaluateApprovalRequirement(
   riskLevel: RiskLevel,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   reasons: string[] = [],
-  exactGrantPresent = false
+  exactGrantPresent = false,
+  confirmationSatisfied = false
 ): ApprovalInfo {
   const reason = reasons.join(" ");
 
@@ -20,16 +21,25 @@ export function evaluateApprovalRequirement(
     return {
       required: false,
       status: "denied",
-      reason: reason.length > 0 ? reason : "High-risk actions are blocked by this policy profile."
+      reason: reason.length > 0 ? reason : "High-risk actions are blocked by this policy."
     };
   }
 
-  // Exact scoped grants make high-risk effect eligible for governed execution;
-  // confirmation remains enforced by central runner/handler.
-  if (riskLevel === "high" && exactGrantPresent) {
+  if (confirmationSatisfied) {
     return {
       required: false,
-      status: "not_required"
+      status: "approved",
+      reason: "An exact single-use confirmation was accepted for this action."
+    };
+  }
+
+  // Exact scoped grants make a high-risk effect eligible for governed
+  // execution; the runner still requires an exact single-use confirmation.
+  if (riskLevel === "high" && exactGrantPresent) {
+    return {
+      required: true,
+      status: "required",
+      reason: reason.length > 0 ? reason : "High-risk action requires exact confirmation."
     };
   }
 
@@ -37,7 +47,7 @@ export function evaluateApprovalRequirement(
     return {
       required: true,
       status: "required",
-      reason: reason.length > 0 ? reason : "High-risk action requires approval."
+      reason: reason.length > 0 ? reason : "High-risk action requires exact confirmation."
     };
   }
 

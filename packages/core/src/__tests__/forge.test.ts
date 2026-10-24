@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPolicyProfile, proposeToolForgeGrants, reviewToolForgeManifest, validateToolForgeManifest } from "../index.js";
+import { getDefaultPolicy, proposeToolForgeGrants, reviewToolForgeManifest, validateToolForgeManifest } from "../index.js";
 
 const validManifest = {
   schemaVersion: "agenthost.forge.v1",
@@ -125,7 +125,7 @@ describe("Tool Forge core helpers", () => {
 
   it("reviews risk and missing grants", () => {
     const review = reviewToolForgeManifest(validManifest, {
-      policy: getPolicyProfile("strict"),
+      policy: getDefaultPolicy(),
       grants: []
     });
 

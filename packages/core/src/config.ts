@@ -2,20 +2,10 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { getPolicyProfile } from "./policies.js";
+import { getDefaultPolicy } from "./policies.js";
 import { PHASE20_HARD_LIMITS, PHASE20_SUPPORTED_RUNTIME_CAPABILITIES } from "./runtime-grants.js";
-import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, ForgeRuntimeSandboxMode, PolicyProfileName, ToolForgeRuntimeCapability, ToolForgeRuntimeOperation } from "./types.js";
+import type { AgentHostConfig, CapabilityGrant, CapabilityGrantMatch, CapabilityGrantRequirements, ForgeRuntimeSandboxMode, ToolForgeRuntimeCapability, ToolForgeRuntimeOperation } from "./types.js";
 import type { OverlayRendererMode, OverlayPublicConfig } from "./overlay.js";
-
-const policyProfileNameSchema = z.enum([
-  "general",
-  "strict",
-  "dev",
-  "gui-dev",
-  "demo-unlocked-local",
-  "private-data",
-  "autopilot-future-disabled-by-default"
-]);
 
 const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "firejail", "unshare"]);
 const overlayRendererModeSchema = z.enum(["headless", "auto", "gtk3-x11", "gtk3-native", "webkit-gtk-react", "disabled"]);
@@ -151,7 +141,6 @@ const configFileSchema = z
     schemaVersion: z.literal(1).optional(),
     agentHostDir: z.string().min(1).optional(),
     logFile: z.string().min(1).optional(),
-    profile: policyProfileNameSchema.optional(),
     forgeRuntimeSandboxMode: forgeRuntimeSandboxModeSchema.optional(),
     overlayRendererMode: overlayRendererModeSchema.optional(),
     overlay: overlaySchema.optional(),
@@ -186,7 +175,7 @@ function resolveLocalPath(input: string, homeDir: string): string {
 }
 
 /** Dead pre-P1 config surfaces: accepted for older files, stripped before strict parsing. */
-const LEGACY_CONFIG_KEYS = ["runtimeActivityOverlay", "browserBridge", "controlRoom"] as const;
+const LEGACY_CONFIG_KEYS = ["runtimeActivityOverlay", "browserBridge", "controlRoom", "profile"] as const;
 
 async function readConfigFile(configPath: string): Promise<z.infer<typeof configFileSchema>> {
   try {
@@ -283,8 +272,6 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   const fileConfig = await readConfigFile(configPath);
 
   const agentHostDir = resolveLocalPath(env.AGENTHOST_HOME ?? fileConfig.agentHostDir ?? initialAgentHostDir, homeDir);
-  const profile = (env.AGENTHOST_PROFILE ?? fileConfig.profile ?? "general") as PolicyProfileName;
-  const parsedProfile = policyProfileNameSchema.parse(profile);
   const forgeRuntimeSandboxMode = forgeRuntimeSandboxModeSchema.parse(
     (env.AGENTHOST_FORGE_RUNTIME_SANDBOX_MODE ?? fileConfig.forgeRuntimeSandboxMode ?? "auto") as ForgeRuntimeSandboxMode
   );
@@ -326,13 +313,12 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     agentHostDir,
     configPath,
     logFile,
-    profile: parsedProfile,
     forgeRuntimeSandboxMode,
     overlayRendererMode,
     overlay,
     execution,
     speech,
     optionalAdapters: fileConfig.optionalAdapters ?? {},
-    policy: getPolicyProfile(parsedProfile, { grants })
+    policy: getDefaultPolicy({ grants })
   };
 }

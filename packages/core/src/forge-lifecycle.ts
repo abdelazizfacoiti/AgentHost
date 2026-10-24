@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
   CapabilityGrant,
-  PolicyProfileName,
   ToolForgeArtifactRecord,
   ToolForgeArtifactStatus,
   ToolForgeArtifactSummary,
@@ -120,7 +119,6 @@ export function createToolForgeArtifactRecord(input: {
 export function createToolForgeReviewRecord(input: {
   manifest: ToolForgeManifest;
   manifestHash: string;
-  profile: PolicyProfileName;
   review: ToolForgeReviewResult;
   proposals: ToolForgeGrantProposalResult;
   blockedPermissions: string[];
@@ -136,7 +134,6 @@ export function createToolForgeReviewRecord(input: {
     manifestVersion: input.manifest.version,
     manifestHash: input.manifestHash,
     timestamp: now,
-    profile: input.profile,
     riskLevel: input.review.riskLevel,
     dataSensitivity: input.review.dataSensitivity,
     dangerousPermissions: [...input.review.dangerousPermissions],
@@ -144,7 +141,7 @@ export function createToolForgeReviewRecord(input: {
     missingGrants: [...input.review.missingGrants],
     proposedGrants: input.proposals.proposals.map((proposal) => proposal.grant),
     decisionStatus: input.decisionStatus ?? "pending",
-    explanation: input.explanation ?? "Review created from the current manifest and active profile.",
+    explanation: input.explanation ?? "Review created from the current manifest and active policy.",
     saferAlternatives: [...input.review.saferAlternatives],
     review: input.review
   };
@@ -190,7 +187,6 @@ export function summarizeToolForgeReview(record: ToolForgeReviewRecord): ToolFor
     manifestVersion: record.manifestVersion,
     manifestHash: record.manifestHash,
     timestamp: record.timestamp,
-    profile: record.profile,
     riskLevel: record.riskLevel,
     decisionStatus: record.decisionStatus
   };

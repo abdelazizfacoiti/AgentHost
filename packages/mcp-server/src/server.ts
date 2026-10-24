@@ -17,7 +17,7 @@ import {
   type AgentHostConfig,
   type AuditLogger,
   type CapabilityRegistry,
-  type PolicyProfile,
+  type RuntimePolicy,
   type ToolResult
 } from "@agenthost/core";
 import {
@@ -64,7 +64,6 @@ import { createAdapterTools } from "./tools/adapter.js";
 import { createDesktopTools } from "./tools/desktop.js";
 import { createComputerTools } from "./tools/computer.js";
 import { createFileTools } from "./tools/file.js";
-import { createPolicyTools } from "./tools/policy.js";
 import { createShellTools } from "./tools/shell.js";
 import { createSystemTools } from "./tools/system.js";
 import { createWindowTools } from "./tools/window.js";
@@ -137,7 +136,7 @@ async function registerOptionalBlenderRuntime(config: AgentHostConfig, adapters:
 
 export interface AgentHostServerOptions {
   config?: AgentHostConfig;
-  policy?: PolicyProfile;
+  policy?: RuntimePolicy;
   registry?: CapabilityRegistry;
   adapters?: AdapterRegistry;
   logger?: AuditLogger;
@@ -263,8 +262,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createComputerTools(),
     ...createTaskTools(),
     ...createAgentTools(),
-    ...createWindowTools(),
-    ...createPolicyTools()
+    ...createWindowTools()
   ];
 
   const loadedTools = materializeToolDefinitions(applyProductionExecutionMetadata(tools));
@@ -292,7 +290,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     try {
       const { mimeType, text } = await readResource(
-        { registry: context.registry, adapters: context.adapters, policy: context.policy, config: context.config },
+        { registry: context.registry, adapters: context.adapters, config: context.config },
         request.params.uri
       );
       return { contents: [{ uri: request.params.uri, mimeType, text }] };
@@ -334,7 +332,6 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       await logger.log({
         timestamp: new Date().toISOString(),
         sessionId: context.sessionId,
-        profile: context.policy.name,
         tool: requestedName,
         riskLevel: "observe",
         ...(context.runtime === undefined ? {} : { serverVersion: context.runtime.version, serverPath: context.runtime.entryPath }),

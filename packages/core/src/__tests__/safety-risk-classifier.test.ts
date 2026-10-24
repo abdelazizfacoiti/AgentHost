@@ -1,480 +1,136 @@
 import { describe, expect, it } from "vitest";
-import { evaluateApprovalRequirement, evaluateSafety, getPolicyProfile } from "../index.js";
+import { evaluateApprovalRequirement, evaluateSafety, getDefaultPolicy } from "../index.js";
 
 const homeDir = "/home/tester";
 
 describe("evaluateSafety", () => {
   it("allows observe-level actions without approval", () => {
-    const result = evaluateSafety(
-      {
-        tool: "system.get_info",
-        actionType: "observe"
-      },
-      getPolicyProfile("strict"),
-      { homeDir }
-    );
-
+    const result = evaluateSafety({ tool: "system.get_info", actionType: "observe" }, getDefaultPolicy(), { homeDir });
     expect(result.riskLevel).toBe("observe");
     expect(result.allowed).toBe(true);
     expect(result.approval.status).toBe("not_required");
   });
 
-  it("requires approval for medium risk in strict profile but not dev profile", () => {
-    const strictResult = evaluateSafety(
-      {
-        tool: "app.open",
-        actionType: "app_launch",
-        appName: "GIMP"
-      },
-      getPolicyProfile("strict"),
-      { homeDir }
-    );
-    const devResult = evaluateSafety(
-      {
-        tool: "app.open",
-        actionType: "app_launch",
-        appName: "GIMP"
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
-
-    expect(strictResult.riskLevel).toBe("medium");
-    expect(strictResult.allowed).toBe(false);
-    expect(strictResult.approval.status).toBe("required");
-    expect(devResult.allowed).toBe(true);
-    expect(devResult.approval.status).toBe("not_required");
+  it("allows routine local actions without confirmation", () => {
+    const app = evaluateSafety({ tool: "app.open", actionType: "app_launch", appName: "GIMP" }, getDefaultPolicy(), { homeDir });
+    const click = evaluateSafety({ tool: "desktop.click", actionType: "gui_click", appName: "GIMP" }, getDefaultPolicy(), { homeDir });
+    const type = evaluateSafety({ tool: "desktop.type_text", actionType: "gui_type", appName: "GIMP", dataSensitivity: "low" }, getDefaultPolicy(), { homeDir });
+    const write = evaluateSafety({ tool: "file.write", actionType: "file_write", filePath: "~/Documents/notes.txt" }, getDefaultPolicy(), { homeDir });
+    expect([app, click, type, write].every((result) => result.allowed)).toBe(true);
+    expect([app, click, type, write].every((result) => result.approval.status === "not_required")).toBe(true);
   });
 
-  it("demo profile allows normal local actions but keeps sensitive apps blocked", () => {
-    const demo = getPolicyProfile("demo-unlocked-local");
-    const write = evaluateSafety({ tool: "file.write", actionType: "file_write", filePath: "~/Desktop/agenthost-demo/test.txt" }, demo, { homeDir });
-    const outside = evaluateSafety({ tool: "file.write", actionType: "file_write", filePath: "~/Documents/private.txt" }, demo, { homeDir });
-    const normalApp = evaluateSafety({ tool: "app.open", actionType: "app_launch", appName: "GIMP" }, demo, { homeDir });
-    const financial = evaluateSafety({ tool: "desktop.click", actionType: "gui_click", appName: "My Bank" }, demo, { homeDir });
-    expect(write.allowed).toBe(true);
-    expect(outside.allowed).toBe(false);
-    expect(normalApp.allowed).toBe(true);
-    expect(financial.blocked).toBe(true);
+  it("requires exact confirmation for external sends and uploads without blocking them", () => {
+    const send = evaluateSafety({ tool: "email.send", actionType: "communication_send", appName: "Gmail", externalEffect: true, communicative: true }, getDefaultPolicy(), { homeDir });
+    const upload = evaluateSafety({ tool: "file.upload", actionType: "upload", externalEffect: true }, getDefaultPolicy(), { homeDir });
+    expect(send.riskLevel).toBe("high");
+    expect(send.blocked).toBe(false);
+    expect(send.allowed).toBe(false);
+    expect(send.approval.status).toBe("required");
+    expect(send.grantDecision.requiresConfirmationToken).toBe(true);
+    expect(upload.riskLevel).toBe("high");
+    expect(upload.allowed).toBe(false);
+    expect(upload.approval.status).toBe("required");
   });
 
-  it("demo profile allows communication reads but blocks sends", () => {
-    const demo = getPolicyProfile("demo-unlocked-local");
-    const read = evaluateSafety({ tool: "accessibility.inspect_element", actionType: "inspect", appName: "Gmail", dataSensitivity: "sensitive" }, demo, { homeDir });
-    const send = evaluateSafety({ tool: "email.send", actionType: "communication_send", appName: "Gmail", communicative: true, externalEffect: true }, demo, { homeDir });
-    expect(read.allowed).toBe(true);
-    expect(read.grantDecision.allowedByGrantIds).toContain("demo-unlocked-local.communication-read");
-    expect(send.blocked).toBe(true);
-  });
-
-  it("classifies communication sending and uploads by effect while requiring scoped grants", () => {
-    const sendResult = evaluateSafety(
-      {
-        tool: "email.send",
-        actionType: "communication_send",
-        appName: "Gmail",
-        externalEffect: true,
-        communicative: true
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
-    const uploadResult = evaluateSafety(
-      {
-        tool: "file.upload",
-        actionType: "upload",
-        externalEffect: true
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
-
-    expect(sendResult.riskLevel).toBe("high");
-    expect(sendResult.blocked).toBe(true);
-    expect(sendResult.matchedRules).toContain("effect.exact_grant_required");
-    expect(uploadResult.riskLevel).toBe("high");
-    expect(uploadResult.blocked).toBe(true);
-  });
-
-  it("allows one exact external effect when scoped grant and confirmation policy match", () => {
+  it("allows a high-risk external effect after an exact confirmation is accepted", () => {
     const result = evaluateSafety(
-      {
-        tool: "browser.click_element",
-        actionType: "browser_action",
-        appName: "Gmail",
-        externalEffect: true,
-        communicative: true,
-        effect: {
-          operationFamily: "browser_element",
-          operation: "communication_send",
-          bindings: { target: "element_hash" }
-        }
-      },
-      {
-        ...getPolicyProfile("dev"),
-        grants: [{
-          id: "grant-exact-send",
-          scope: "session",
-          effect: "allow",
-          match: {
-            tools: ["browser.click_element"],
-            actionTypes: ["browser_action"],
-            operationFamilies: ["browser_element"],
-            operations: ["communication_send"],
-            targetFingerprints: ["element_hash"]
-          },
-          requirements: { requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget: true }
-        }]
-      },
-      { homeDir, ownerSessionId: "session_test" }
+      { tool: "email.send", actionType: "communication_send", appName: "Gmail", communicative: true, externalEffect: true },
+      getDefaultPolicy(),
+      { homeDir, confirmationSatisfied: true }
     );
     expect(result.blocked).toBe(false);
     expect(result.allowed).toBe(true);
-    expect(result.grantDecision.allowedByGrantIds).toEqual(["grant-exact-send"]);
+    expect(result.approval.status).toBe("approved");
+  });
+
+  it("requires confirmation for destructive local actions", () => {
+    const result = evaluateSafety({ tool: "file.delete", actionType: "file_delete", filePath: "/tmp/old.txt", destructive: true }, getDefaultPolicy(), { homeDir });
     expect(result.riskLevel).toBe("high");
-  });
-
-  it("allows a bounded reversible communication UI effect with an exact grant", () => {
-    const result = evaluateSafety(
-      {
-        tool: "browser.click_element",
-        actionType: "browser_action",
-        appName: "Demo Mail",
-        effect: {
-          operationFamily: "browser_element",
-          operation: "safe_toggle",
-          bindings: { target: "element_hash" }
-        }
-      },
-      {
-        ...getPolicyProfile("dev"),
-        grants: [{
-          id: "grant-communication-toggle",
-          scope: "session",
-          effect: "allow",
-          match: {
-            tools: ["browser.click_element"],
-            appSensitivities: ["communication"],
-            operationFamilies: ["browser_element"],
-            operations: ["safe_toggle"],
-            targetFingerprints: ["element_hash"]
-          },
-          requirements: { requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget: true }
-        }]
-      },
-      { homeDir, ownerSessionId: "session_test" }
-    );
-    expect(result.blocked).toBe(false);
-    expect(result.allowed).toBe(true);
-    expect(result.riskLevel).toBe("high");
-  });
-
-  it("governs financial actions while retaining credential/security hard blocks", () => {
-    const financialResult = evaluateSafety(
-      {
-        tool: "browser.fill_form",
-        actionType: "browser_action",
-        url: "https://bank.example.test/transfer"
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
-    const credentialResult = evaluateSafety(
-      {
-        tool: "desktop.type_text",
-        actionType: "gui_type",
-        appName: "Bitwarden"
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
-
-    expect(financialResult.riskLevel).toBe("high");
-    expect(financialResult.blocked).toBe(true);
-    expect(financialResult.appSensitivity).toBe("financial");
-    expect(credentialResult.riskLevel).toBe("blocked");
-    expect(credentialResult.appSensitivity).toBe("credential_or_security");
-  });
-
-  it("classifies generic GUI click and type by effect when policy lacks a grant", () => {
-    const clickResult = evaluateSafety(
-      {
-        tool: "desktop.click",
-        actionType: "gui_click"
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
-    const typeResult = evaluateSafety(
-      {
-        tool: "desktop.type_text",
-        actionType: "gui_type"
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
-
-    expect(clickResult.riskLevel).toBe("medium");
-    expect(clickResult.blocked).toBe(true);
-    expect(typeResult.riskLevel).toBe("medium");
-    expect(typeResult.blocked).toBe(true);
-  });
-
-  it("keeps read-only accessibility inspection low risk", () => {
-    const result = evaluateSafety(
-      {
-        tool: "accessibility.inspect_element",
-        actionType: "inspect",
-        appName: "Notes"
-      },
-      getPolicyProfile("strict"),
-      { homeDir }
-    );
-
-    expect(result.riskLevel).toBe("low");
-    expect(result.allowed).toBe(true);
-  });
-
-  it("requires approval for medium-risk accessibility actions in strict profile", () => {
-    const result = evaluateSafety(
-      {
-        tool: "accessibility.focus_element",
-        actionType: "accessibility_focus",
-        appName: "GIMP"
-      },
-      getPolicyProfile("strict"),
-      { homeDir }
-    );
-
-    expect(result.riskLevel).toBe("medium");
     expect(result.allowed).toBe(false);
     expect(result.approval.status).toBe("required");
+    expect(result.grantDecision.requiresConfirmationToken).toBe(true);
   });
 
-  it("treats communication accessibility actions as high-risk", () => {
-    const result = evaluateSafety(
-      {
-        tool: "accessibility.invoke_action",
-        actionType: "accessibility_action",
-        appName: "Gmail"
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
+  it("keeps credential and security apps hard-blocked", () => {
+    const result = evaluateSafety({ tool: "desktop.type_text", actionType: "gui_type", appName: "Bitwarden" }, getDefaultPolicy(), { homeDir });
+    expect(result.riskLevel).toBe("blocked");
+    expect(result.blocked).toBe(true);
+    expect(result.appSensitivity).toBe("credential_or_security");
+  });
 
+  it("gates financial state changes with exact confirmation instead of a dead grant wall", () => {
+    const result = evaluateSafety({ tool: "browser.fill_form", actionType: "browser_action", url: "https://bank.example.test/transfer" }, getDefaultPolicy(), { homeDir });
     expect(result.riskLevel).toBe("high");
-    expect(result.matchedRules).toContain("app.communication.high_risk");
+    expect(result.blocked).toBe(false);
+    expect(result.approval.status).toBe("required");
+    expect(result.appSensitivity).toBe("financial");
   });
 
-  it("blocks secret accessibility values by default", () => {
-    const result = evaluateSafety(
-      {
-        tool: "accessibility.set_value",
-        actionType: "accessibility_set_value",
-        appName: "GIMP",
-        dataSensitivity: "secret"
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
+  it("requires approval for sensitive private data and accepts an exact confirmation", () => {
+    const pending = evaluateSafety({ tool: "accessibility.inspect_element", actionType: "inspect", appName: "Gmail", dataSensitivity: "sensitive" }, getDefaultPolicy(), { homeDir });
+    const confirmed = evaluateSafety({ tool: "accessibility.inspect_element", actionType: "inspect", appName: "Gmail", dataSensitivity: "sensitive" }, getDefaultPolicy(), { homeDir, confirmationSatisfied: true });
+    expect(pending.blocked).toBe(false);
+    expect(pending.approval.status).toBe("required");
+    expect(pending.grantDecision.requiresConfirmationToken).toBe(true);
+    expect(confirmed.allowed).toBe(true);
+    expect(confirmed.approval.status).toBe("approved");
+  });
 
+  it("blocks secret data unconditionally", () => {
+    const result = evaluateSafety({ tool: "accessibility.set_value", actionType: "accessibility_set_value", appName: "GIMP", dataSensitivity: "secret" }, getDefaultPolicy(), { homeDir });
     expect(result.riskLevel).toBe("blocked");
     expect(result.matchedRules).toContain("data.secret.blocked");
   });
 
-  it("treats communication clicks as high-risk when generic GUI control is enabled", () => {
-    const policy = {
-      ...getPolicyProfile("dev"),
-      allowGenericClick: true
-    };
-    const result = evaluateSafety(
-      {
-        tool: "desktop.click",
-        actionType: "gui_click",
-        appName: "Gmail"
-      },
-      policy,
-      { homeDir }
-    );
-
-    expect(result.riskLevel).toBe("high");
-    expect(result.matchedRules).toContain("app.communication.high_risk");
-  });
-
   it("blocks screenshots when the policy disables them", () => {
-    const policy = {
-      ...getPolicyProfile("dev"),
-      allowScreenshots: false
-    };
-    const result = evaluateSafety(
-      {
-        tool: "desktop.screenshot",
-        actionType: "file_write",
-        filePath: "/tmp/agenthost-shot.png"
-      },
-      policy,
-      { homeDir }
-    );
-
+    const policy = { ...getDefaultPolicy(), allowScreenshots: false };
+    const result = evaluateSafety({ tool: "desktop.screenshot", actionType: "file_write", filePath: "/tmp/agenthost-shot.png" }, policy, { homeDir });
     expect(result.riskLevel).toBe("blocked");
     expect(result.matchedRules).toContain("policy.screenshot.disabled");
   });
 
-  it("defaults unknown actions conservatively", () => {
-    const result = evaluateSafety(
-      {
-        tool: "future.unknown",
-        actionType: "unknown"
-      },
-      getPolicyProfile("strict"),
-      { homeDir }
-    );
+  it("still blocks protected system paths", () => {
+    const result = evaluateSafety({ tool: "file.write", actionType: "file_write", filePath: "/etc/passwd" }, getDefaultPolicy(), { homeDir });
+    expect(result.riskLevel).toBe("blocked");
+    expect(result.blocked).toBe(true);
+    expect(result.matchedRules).toContain("path.protected.system");
+  });
 
+  it("defaults unknown actions to approval", () => {
+    const result = evaluateSafety({ tool: "future.unknown", actionType: "unknown" }, getDefaultPolicy(), { homeDir });
     expect(result.riskLevel).toBe("medium");
     expect(result.allowed).toBe(false);
     expect(result.matchedRules).toContain("action.unknown.conservative");
   });
 
-  it("requires explicit grants for private-data reads in the private-data profile", () => {
-    const result = evaluateSafety(
-      {
-        tool: "file.read",
-        actionType: "file_read",
-        filePath: "/tmp/private.txt",
-        dataSensitivity: "sensitive"
-      },
-      getPolicyProfile("private-data"),
-      { homeDir }
-    );
-
-    expect(result.blocked).toBe(true);
-    expect(result.approval.status).toBe("denied");
-    expect(result.matchedRules).toContain("profile.default.file_read.deny");
-  });
-
-  it("lets an explicit grant allow private-data reads without weakening other safety rules", () => {
-    const result = evaluateSafety(
-      {
-        tool: "file.read",
-        actionType: "file_read",
-        filePath: "/tmp/private.txt",
-        dataSensitivity: "sensitive"
-      },
-      getPolicyProfile("private-data", {
-        grants: [
-          {
-            id: "private-data-read",
-            scope: "persistent",
-            effect: "allow",
-            match: {
-              tools: ["file.read"],
-              dataSensitivities: ["sensitive"]
-            }
-          }
-        ]
-      }),
-      { homeDir }
-    );
-
-    expect(result.blocked).toBe(false);
-    expect(result.allowed).toBe(false);
-    expect(result.approval.status).toBe("required");
-    expect(result.grantDecision.allowedByGrantIds).toEqual(["private-data-read"]);
-  });
-
-  it("requires an explicit grant before reading private data from communication apps", () => {
-    const withoutGrant = evaluateSafety(
-      {
-        tool: "accessibility.inspect_element",
-        actionType: "inspect",
-        appName: "Gmail",
-        dataSensitivity: "sensitive"
-      },
-      getPolicyProfile("dev"),
-      { homeDir }
-    );
-    const withGrant = evaluateSafety(
-      {
-        tool: "accessibility.inspect_element",
-        actionType: "inspect",
-        appName: "Gmail",
-        dataSensitivity: "sensitive"
-      },
-      getPolicyProfile("dev", {
-        grants: [
-          {
-            id: "comm-private-read",
-            scope: "persistent",
-            effect: "allow",
-            match: {
-              tools: ["accessibility.inspect_element"],
-              appSensitivities: ["communication"],
-              dataSensitivities: ["sensitive"]
-            }
-          }
-        ]
-      }),
-      { homeDir }
-    );
-
-    expect(withoutGrant.blocked).toBe(true);
-    expect(withoutGrant.matchedRules).toContain("app.communication.private_data_requires_grant");
-    expect(withGrant.blocked).toBe(false);
-    expect(withGrant.grantDecision.allowedByGrantIds).toEqual(["comm-private-read"]);
-  });
-
-  it("lets gui-dev permit generic GUI input while still requiring preview and confirmation", () => {
-    const result = evaluateSafety(
-      {
-        tool: "desktop.click",
-        actionType: "gui_click",
-        appName: "Notes"
-      },
-      getPolicyProfile("gui-dev"),
-      { homeDir }
-    );
-
-    expect(result.blocked).toBe(false);
-    expect(result.allowed).toBe(true);
-    expect(result.grantDecision.requiresDryRun).toBe(true);
-    expect(result.grantDecision.requiresConfirmationToken).toBe(true);
-  });
-
   it("ignores expired grants", () => {
     const result = evaluateSafety(
-      {
-        tool: "file.read",
-        actionType: "file_read",
-        filePath: "/tmp/private.txt",
-        dataSensitivity: "sensitive"
-      },
-      getPolicyProfile("private-data", {
-        grants: [
-          {
-            id: "expired-private-read",
-            scope: "persistent",
-            effect: "allow",
-            expiresAt: "2000-01-01T00:00:00.000Z",
-            match: {
-              tools: ["file.read"],
-              dataSensitivities: ["sensitive"]
-            }
-          }
-        ]
-      }),
+      { tool: "file.read", actionType: "file_read", filePath: "/tmp/private.txt", dataSensitivity: "sensitive" },
+      getDefaultPolicy({ grants: [{
+        id: "expired-private-read",
+        scope: "persistent",
+        effect: "allow",
+        expiresAt: "2000-01-01T00:00:00.000Z",
+        match: { tools: ["file.read"], dataSensitivities: ["sensitive"] }
+      }] }),
       { homeDir }
     );
-
-    expect(result.blocked).toBe(true);
     expect(result.grantDecision.allowedByGrantIds).toEqual([]);
+    expect(result.approval.status).toBe("required");
   });
 });
 
 describe("evaluateApprovalRequirement", () => {
-  it("denies high-risk actions when the active profile blocks high risk by default", () => {
-    const approval = evaluateApprovalRequirement("high", getPolicyProfile("dev"), ["High-risk test."]);
+  it("denies high-risk actions only when a policy explicitly blocks high risk", () => {
+    const blocked = evaluateApprovalRequirement("high", { ...getDefaultPolicy(), blockHighRiskByDefault: true }, ["High-risk test."]);
+    const allowed = evaluateApprovalRequirement("high", getDefaultPolicy(), ["High-risk test."]);
+    expect(blocked.status).toBe("denied");
+    expect(allowed.status).toBe("required");
+  });
 
-    expect(approval.status).toBe("denied");
-    expect(approval.required).toBe(false);
+  it("marks an accepted exact confirmation as approved", () => {
+    const approval = evaluateApprovalRequirement("high", getDefaultPolicy(), ["High-risk test."], false, true);
+    expect(approval).toMatchObject({ required: false, status: "approved" });
   });
 });

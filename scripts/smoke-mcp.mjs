@@ -16,7 +16,6 @@ if (!existsSync(serverPath)) {
 }
 
 process.env.AGENTHOST_HOME = smokeDir;
-process.env.AGENTHOST_PROFILE = "dev";
 
 const { context, closeResources } = await createAgentHostMcpServer();
 

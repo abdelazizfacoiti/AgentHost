@@ -1,9 +1,9 @@
 import { schedulerHash, schedulerPolicy } from "./scheduler.js";
-import type { PolicyProfile, ScheduledJobActivationPolicySnapshot, ScheduledJobActivationRequest, ScheduledJobActivationReview, ScheduledJobFutureExecutionControls, ScheduledJobReadiness, ScheduledJobSpec } from "./types.js";
+import type { RuntimePolicy, ScheduledJobActivationPolicySnapshot, ScheduledJobActivationRequest, ScheduledJobActivationReview, ScheduledJobFutureExecutionControls, ScheduledJobReadiness, ScheduledJobSpec } from "./types.js";
 
 export const FUTURE_EXECUTION_CONTROLS: ScheduledJobFutureExecutionControls = { visibleLifecycleRequired: true, cancellationRequired: true, pauseDisableRequired: true, runReceiptsRequired: true, auditLogsRequired: true, freshGrantsRequired: true, dryRunBeforeRunRequired: true, confirmationForStateChangingRequired: true, checkpointVerificationRequired: true, stopOnFailureRequired: true, noRetryByDefault: true, noHiddenBackgroundWork: true };
 
-export function activationPolicySnapshot(policy: PolicyProfile): ScheduledJobActivationPolicySnapshot {
+export function activationPolicySnapshot(policy: RuntimePolicy): ScheduledJobActivationPolicySnapshot {
   const value = schedulerPolicy(policy);
   return { allowSchedulerSpecs: value.allowSchedulerSpecs, allowJobActivation: value.allowJobActivation, allowScheduledExecution: value.allowScheduledExecution, allowBackgroundWorkers: value.allowBackgroundWorkers, allowExternalDelivery: value.allowExternalDelivery, allowNotifications: value.allowNotifications, requireReviewForActivation: value.requireReviewForActivation, requireApprovalForJobActivation: value.requireApprovalForJobActivation, requireExplicitUserActivation: value.requireExplicitUserActivation };
 }
@@ -12,7 +12,7 @@ export function activationReadinessSummary(readiness: ScheduledJobReadiness): Sc
   return { jobStatus: readiness.jobStatus, scheduleValid: readiness.scheduleValid, taskValid: readiness.taskValid, deliveryValid: readiness.deliveryValid, grantsSatisfied: readiness.grantsSatisfied, requiredGrants: [...readiness.requiredGrants], missingGrants: [...readiness.missingGrants], blockers: readiness.blockers.map((item) => ({ code: item.code, message: item.message })), warnings: [...readiness.warnings] };
 }
 
-export function activationReadinessSnapshotHash(job: ScheduledJobSpec, readiness: ScheduledJobReadiness, policy: PolicyProfile): string {
+export function activationReadinessSnapshotHash(job: ScheduledJobSpec, readiness: ScheduledJobReadiness, policy: RuntimePolicy): string {
   return schedulerHash({ jobId: job.jobId, jobVersion: job.version, jobHash: job.jobHash, readiness: activationReadinessSummary(readiness), policy: activationPolicySnapshot(policy), futureExecutionControls: FUTURE_EXECUTION_CONTROLS });
 }
 

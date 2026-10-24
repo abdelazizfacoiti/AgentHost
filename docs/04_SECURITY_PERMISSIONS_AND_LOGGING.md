@@ -23,31 +23,33 @@ automation service.
 ## Risk and confirmation model
 
 The current risk levels are `observe`, `low`, `medium`, `high`, and `blocked`.
-Read-only tools run under policy. Every state-changing tool, regardless of
-risk tier, requires the exact preview and single-use token contract; an active
-task approval may cover low/medium effects. Blocked effects remain denied even
-with a token.
+There is one autonomous runtime policy; routine local actions run directly.
+Consequential effects — external sends/uploads, destructive actions,
+private-data reads, financial effects, or high risk — require an exact preview
+and single-use token; an active task approval may cover low/medium effects.
+Blocked effects remain denied even with a token.
 
-Every state-changing tool accepts:
+Confirmation-bearing tools accept:
 
 - `dryRun: true` — resolve the actual target, risk, policy decision, and
   blocked reasons; execute nothing; return a single-use token when allowed.
 - `confirmationToken` — the token ID approved for that exact preview.
 
+Routine local actions do not need either field.
+
 Tokens are stored under `~/.agenthost/run/confirmations/` with mode `0600`,
 expire after 15 minutes, and are bound to:
 
 - tool name;
-- policy profile;
 - canonical tool arguments (excluding `dryRun` and `confirmationToken`);
 - target fingerprint.
 
 Tokens are single use. The runner atomically claims and consumes a token before
-calling the handler. Changed arguments, profile, tool, or target return a
-mismatch error and leave the token available for the correct call. Rejected,
-expired, or already-used tokens fail closed. Tokens are intentionally not
-session-bound in minimal-v2 because MCP clients may start a fresh server process
-per call; the fingerprint and target binding provide the exact-preview proof.
+calling the handler. Changed arguments, tool, or target return a mismatch error
+and leave the token available for the correct call. Rejected, expired, or
+already-used tokens fail closed. Tokens are intentionally not session-bound in
+minimal-v2 because MCP clients may start a fresh server process per call; the
+fingerprint and target binding provide the exact-preview proof.
 
 Dangerous or blocked effects are denied even with a token. Confirmation proves
 operator intent; it does not bypass policy, grants, path checks, or handler
@@ -85,12 +87,15 @@ Every call to a registered tool passes through one runner:
 2. Stop/takeover gate for state-changing tools.
 3. Effect preview resolution (actual target, target fingerprint, risk,
    approval, blocked reason). Previews never execute.
-4. Dry-run returns the preview plus a pending token.
-5. Non-dry execution requires an accepted token. An active task approval may
-   auto-chain only low/medium effects for an active task; the runner creates
-   and consumes the exact token server-side.
+4. Dry-run returns the preview plus a pending token when confirmation is
+   required. Routine actions return no token.
+5. Non-dry execution runs directly unless confirmation is required. A
+   consequential call without a token returns `confirmation_required`. An
+   active task approval may auto-chain only low/medium effects for an active
+   task; the runner creates and consumes the exact token server-side.
 6. The runner consumes the token exactly once.
-7. The handler reruns path/shell/target safety checks and executes.
+7. The handler reruns path/shell/target safety checks with
+   `confirmationSatisfied` set only for an accepted confirmation, then executes.
 8. One redacted audit entry is written.
 
 The handler does not create or consume confirmation tokens. It revalidates
@@ -119,16 +124,18 @@ blocked or high risk.
 `shell.run` rejects attempts to override `PATH`, `HOME`, `LD_PRELOAD`,
 `LD_LIBRARY_PATH`, `NODE_OPTIONS`, `PYTHONPATH`, `BASH_ENV`, or `ENV`.
 
-## Profiles and grants
+## Policy and grants
 
-The default profile is `general`. It permits shell, files, GUI input,
-screenshots, and optional adapter discovery. Communication, private-data,
-external, and destructive effects are gated as `approval_required`.
-`strict` is available for conservative setups. No profile bypasses schema
-validation, preview, token, stop/takeover, or audit requirements.
+AgentHost has one autonomous runtime policy. It permits routine local shell,
+file, GUI input, screenshot, and optional adapter discovery directly.
+Communication, private-data, external, destructive, and financial effects are
+gated as `approval_required`; credential/security apps, secret data, protected
+system paths, and the AgentHost control plane stay blocked. No policy bypasses
+schema validation, preview, token, stop/takeover, or audit requirements.
 
 Persistent grants are validated and scoped by capability. A grant does not
-replace a confirmation token for a high-risk action.
+replace a confirmation token for a high-risk, external, destructive, or
+private-data effect.
 
 ## Task approval
 
@@ -136,7 +143,8 @@ replace a confirmation token for a high-risk action.
 approval for an **active** task. It is operator-only. The runner may auto-chain
 low/medium effects covered by that approval, but:
 
-- high and blocked effects still require `agenthost confirm <tokenId>`;
+- high, external, destructive, private-data, and blocked effects still require
+  `agenthost confirm <tokenId>`;
 - paused, completed, cancelled, missing, or expired tasks do not get
   auto-chain;
 - creating a new task clears active approval;
@@ -149,7 +157,7 @@ low/medium effects covered by that approval, but:
 Every governed tool call is logged as JSONL under `~/.agenthost/logs/` with
 `0700` directory and `0600` file permissions. Each entry includes:
 
-- timestamp, session ID, profile, tool, risk level, and strategy;
+- timestamp, session ID, tool, risk level, and strategy;
 - server version and server entry path;
 - preview and confirmation status;
 - input summary, approval status, ok/failure, duration, and error code;

@@ -99,15 +99,6 @@ export type GrantEffect = (typeof GRANT_EFFECTS)[number];
 export const GRANT_SCOPES = ["session", "persistent"] as const;
 export type GrantScope = (typeof GRANT_SCOPES)[number];
 
-export type PolicyProfileName =
-  | "general"
-  | "strict"
-  | "dev"
-  | "gui-dev"
-  | "demo-unlocked-local"
-  | "private-data"
-  | "autopilot-future-disabled-by-default";
-
 export interface ApprovalInfo {
   required: boolean;
   status: ApprovalStatus;
@@ -594,8 +585,7 @@ export interface CapabilityGrant {
   requirements?: CapabilityGrantRequirements;
 }
 
-export interface PolicyProfile {
-  name: PolicyProfileName;
+export interface RuntimePolicy {
   description: string;
   enabled: boolean;
   allowScreenshots: boolean;
@@ -678,7 +668,6 @@ export interface AgentHostConfig {
   agentHostDir: string;
   configPath: string;
   logFile: string;
-  profile: PolicyProfileName;
   execution?: ExecutionConfig;
   /** Undefined only for older in-memory callers; loader always supplies `auto` by default. */
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
@@ -686,7 +675,7 @@ export interface AgentHostConfig {
   overlay?: import("./overlay.js").OverlayPublicConfig;
   speech?: SpeechConfig;
   optionalAdapters?: Record<string, { enabled: boolean }>;
-  policy: PolicyProfile;
+  policy: RuntimePolicy;
 }
 
 export interface SpeechConfig {
@@ -779,7 +768,7 @@ export type ForgeRuntimeSandboxMode = "auto" | "none" | "bubblewrap" | "firejail
 export interface ToolContext {
   sessionId: string;
   config: AgentHostConfig;
-  policy: PolicyProfile;
+  policy: RuntimePolicy;
   registry: CapabilityRegistrySnapshot;
 }
 
@@ -1002,6 +991,8 @@ export interface SafetyEvaluationContext {
   agentHostDir?: string;
   protectedPaths?: string[];
   grants?: CapabilityGrant[];
+  /** Set only after the runner accepted an exact single-use confirmation. */
+  confirmationSatisfied?: boolean;
 }
 
 export type DependencyKind = "command" | "desktop_app" | "any";
@@ -1457,7 +1448,6 @@ export interface SystemInfo {
   arch: string;
   nodeVersion: string;
   agentHostDir: string;
-  profile: PolicyProfileName;
   strategies: AutomationStrategy[];
   tools: string[];
   serverVersion?: string;
@@ -1471,16 +1461,6 @@ export interface CapabilityList {
   appCapabilities: AppCapability[];
 }
 
-export interface PolicyProfileSummary {
-  name: PolicyProfileName;
-  description: string;
-  enabled: boolean;
-  defaults: PermissionDefaults;
-  requireDryRunForStateChanging: boolean;
-  requireConfirmationForStateChanging: boolean;
-  requireExactTargetForStateChanging: boolean;
-}
-
 export interface GrantSummary {
   id: string;
   scope: GrantScope;
@@ -1491,25 +1471,6 @@ export interface GrantSummary {
   active: boolean;
   match: CapabilityGrantMatch;
   requirements?: CapabilityGrantRequirements;
-}
-
-export interface PolicyGetProfileResult {
-  activeProfile: PolicyProfileSummary;
-}
-
-export interface PolicyListProfilesResult {
-  profiles: PolicyProfileSummary[];
-}
-
-export interface PolicyListGrantsResult {
-  profile: PolicyProfileName;
-  grants: GrantSummary[];
-}
-
-export interface PolicyExplainDecisionResult {
-  profile: PolicyProfileName;
-  input: SafetyInput;
-  decision: SafetyDecision;
 }
 
 export interface ToolForgeRequirements {
@@ -1722,7 +1683,6 @@ export interface ToolForgeReviewRecord {
   manifestVersion: string;
   manifestHash: string;
   timestamp: string;
-  profile: PolicyProfileName;
   riskLevel: RiskLevel;
   dataSensitivity: DataSensitivity;
   dangerousPermissions: string[];
@@ -1754,7 +1714,6 @@ export interface ToolForgeReviewSummary {
   manifestVersion: string;
   manifestHash: string;
   timestamp: string;
-  profile: PolicyProfileName;
   riskLevel: RiskLevel;
   decisionStatus: ToolForgeReviewDecisionStatus;
 }
@@ -2181,7 +2140,6 @@ export interface ToolForgeApplySessionGrantsResult {
 export interface AuditLogEntry {
   timestamp: string;
   sessionId: string;
-  profile: PolicyProfileName;
   tool: string;
   riskLevel: RiskLevel;
   serverVersion?: string;

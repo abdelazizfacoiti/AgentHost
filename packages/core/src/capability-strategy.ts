@@ -1,4 +1,4 @@
-import type { AppSensitivity, PolicyProfileName, RiskLevel, ToolExecutionClass } from "./types.js";
+import type { AppSensitivity, RiskLevel, ToolExecutionClass } from "./types.js";
 
 export const CAPABILITY_STRATEGY_SCHEMA_VERSION = 1 as const;
 export const CAPABILITY_STRATEGY_STATUSES = ["proposed", "reviewed", "active", "degraded", "disabled", "archived"] as const;
@@ -60,7 +60,6 @@ export interface CapabilityStrategyDefinition {
   supportedOperatingSystems: string[];
   supportedApplications: string[];
   supportedAdapters: string[];
-  compatibleProfiles: PolicyProfileName[];
   compatibleAgentHostRange: string;
   compatibleBrowserExtensionRange?: string;
   compatibleAdapterRanges: Record<string, string>;
@@ -161,7 +160,7 @@ const SAFE_TEXT = /^[^\u0000-\u001f\u007f]+$/;
 const PROHIBITED_TEXT = /password|passwd|api[ _-]?key|access[ _-]?token|pairing\s*(token|secret)|confirmation\s*(token|secret)|cookie|private key|bearer|javascript:|data:|file:|curl\s+[^ ]+\||wget\s+[^ ]+\||message body|meeting transcript|screenshot bytes|ocr text|page text|\/home\/|\/tmp\//i;
 const SAFE_ID = /^[a-z0-9][a-z0-9._-]{1,100}$/;
 const TRUSTED_TOOL_NAMES = new Set(["browser.detect", "browser.get_active_tab", "browser.open_url", "browser.wait_for_state", "browser.current_url", "browser.get_page_context", "browser.find_element", "browser.fill_text", "browser.get_form_state", "browser.diagnose_bridge", "vision.find_target", "overlay.assistance_step_show", "guide.explain_strategy", "guide.create_steps", "speech.list_providers", "speech.list_voices", "speech.synthesize", "speech.routing_diagnose", "speech.transmission_prepare", "speech.transmission_execute"]);
-const STRATEGY_KEYS = new Set(["strategyId", "schemaVersion", "name", "description", "goalCategory", "goalVariants", "supportedOperatingSystems", "supportedApplications", "supportedAdapters", "compatibleProfiles", "compatibleAgentHostRange", "compatibleBrowserExtensionRange", "compatibleAdapterRanges", "requiredCapabilities", "prerequisiteChecks", "preferredSteps", "fallbackStrategyIds", "verificationCheckpoints", "expectedSafety", "expectedConfirmationBoundary", "knownFailureCodes", "successCount", "failureCount", "consecutiveFailureCount", "confidence", "source", "createdAt", "updatedAt", "lastUsedAt", "lastVerifiedAt", "invalidationConditions", "status", "reviewId", "lastFailureCode"]);
+const STRATEGY_KEYS = new Set(["strategyId", "schemaVersion", "name", "description", "goalCategory", "goalVariants", "supportedOperatingSystems", "supportedApplications", "supportedAdapters", "compatibleAgentHostRange", "compatibleBrowserExtensionRange", "compatibleAdapterRanges", "requiredCapabilities", "prerequisiteChecks", "preferredSteps", "fallbackStrategyIds", "verificationCheckpoints", "expectedSafety", "expectedConfirmationBoundary", "knownFailureCodes", "successCount", "failureCount", "consecutiveFailureCount", "confidence", "source", "createdAt", "updatedAt", "lastUsedAt", "lastVerifiedAt", "invalidationConditions", "status", "reviewId", "lastFailureCode"]);
 const STEP_KEYS = new Set(["stepId", "operation", "capabilityFamily", "trustedTool", "prerequisite", "inputBinding", "expectedResult", "verification", "timeoutMs", "retryLimit", "fallbackCode", "expectedExecutionClass", "expectedRiskLevel", "requiresDryRun", "requiresConfirmation"]);
 const SAFETY_KEYS = new Set(["executionClasses", "maxRiskLevel", "requiresDryRun", "requiresConfirmation", "exactTarget"]);
 

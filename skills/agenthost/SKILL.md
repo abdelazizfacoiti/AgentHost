@@ -38,14 +38,18 @@ coding tools directly.
 2. **Preferred order:** app-specific adapter → official API/plugin → CLI/script →
    browser automation → accessibility tree → GUI screenshot/click/type → guide
    mode. GUI clicking is the fallback, not the default.
-3. **Respect confirmation.** Every state-changing action, including
-   `desktop.screenshot`, needs an exact preview. Call the tool with
-   `dryRun: true`; the result includes a token ID. Ask the operator to run
-   `agenthost confirm <tokenId>` (or `deny <tokenId>`), then retry the exact
-   same call with `confirmationToken: "<tokenId>"`. Never bypass a blocked
+3. **Respect confirmation only at consequential boundaries.** Routine local
+   actions — opening apps, focusing windows, screenshots, clicks, typing,
+   hotkeys, shell, and file reads/writes — execute directly. Do not pause for
+   per-step confirmation. External sends/uploads, destructive delete,
+   private-data reads, financial effects, and high-risk actions need an exact
+   preview: call with `dryRun: true`, surface the returned token command, wait
+   for the operator to run `agenthost confirm <tokenId>` (or `deny`), then
+   retry the exact same call with `confirmationToken: "<tokenId>"`. If a tool
+   returns `confirmation_required`, do the same. Never bypass a blocked
    action. For repeated low/medium work, the operator can run
    `agenthost task approve <activeTaskId> [--max-risk low|medium]`; that does
-   not cover high-risk effects.
+   not cover high-risk or consequential effects.
 4. **Respect stop.** If output contains `emergency_stop_requested` or
    `human_takeover_active`, halt state-changing work immediately. `agent.stop`
    and `agent.takeover_begin` request those gates; only the operator can clear
@@ -66,7 +70,7 @@ coding tools directly.
 | Need | Tool |
 |---|---|
 | Observe desktop state | `computer.observe_state` |
-| Capture screenshot (state-changing) | `desktop.screenshot` |
+| Capture screenshot | `desktop.screenshot` |
 | Wait for a condition | `computer.wait_for` |
 | Click / move pointer | `desktop.click`, `desktop.pointer` |
 | Type text / shortcuts | `desktop.type_text`, `desktop.hotkey` |
@@ -76,10 +80,46 @@ coding tools directly.
 | Vision / OCR | `vision.find_text`, `vision.find_target`, `vision.analyze_image` |
 | Tasks / progress | `task.create`, `task.status`, `task.update`, `task.add_event`, `task.list` |
 | Apps / adapters | `adapter.list`, `adapter.get` |
-| Safety / system | `policy.get_profile`, `policy.list_profiles`, `system.get_info`, `system.list_capabilities`, `system.check_dependency` |
+| Safety / system | `system.get_info`, `system.list_capabilities`, `system.check_dependency` |
 
 MCP clients may prefix tool names (for example `mcp__agenthost__desktop_click` or
 `agenthost_desktop_click`). Match on the suffix (`desktop.click` → `desktop_click`).
+
+## Fast-path recipes
+
+There is one autonomous policy. Do the task; do not ask for routine clicks.
+
+**Open an app and perform a GUI task**
+
+1. `computer.observe_state` or `window.list` to see the current desktop.
+2. Open/focus the app, then `desktop.screenshot` to verify.
+3. Loop directly: screenshot → click/type/hotkey → screenshot. No dry-run or
+   token is needed for routine local actions.
+4. Stop when the visible result matches the request; restore prior focus.
+
+**Read an app or web page, then act**
+
+1. `desktop.screenshot` plus `vision.find_text`/`vision.find_target` for
+   coordinates; never click blind.
+2. If the app is private-data (mail, messages, documents), a read may return
+   `confirmation_required`. Show the token command and wait.
+3. After confirmation, retry the same read with the token, then continue with
+   routine clicks/types directly.
+
+**Edit files or run local commands**
+
+- `file.read`, `file.list`, `file.write`, `file.copy`, `file.move`,
+  `file.ensure_dir`, and `shell.run` run directly inside allowed roots.
+- `file.delete`, destructive shell commands, and protected/control-plane paths
+  stay gated or blocked. Use the preview/confirm flow for a permitted delete.
+
+**Send, upload, submit, purchase, or delete**
+
+1. Call the exact action with `dryRun: true`.
+2. Show the summary and `agenthost confirm <tokenId>` command to the operator.
+3. Wait; on approval, retry the identical call with
+   `confirmationToken: "<tokenId>"`. On denial, stop.
+4. Never type credentials or payment secrets; ask the operator.
 
 ## Operator controls
 

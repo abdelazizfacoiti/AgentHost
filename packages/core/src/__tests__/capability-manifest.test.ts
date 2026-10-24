@@ -2,12 +2,12 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createBaseCapabilityRegistry, getPolicyProfile } from "../index.js";
+import { createBaseCapabilityRegistry, getDefaultPolicy } from "../index.js";
 import { buildCapabilitiesJson, buildCapabilityMarkdown } from "../capability-manifest.js";
 
 describe("capability manifest", () => {
   it("briefs agent clients with families, loop, and execution model", () => {
-    const markdown = buildCapabilityMarkdown({ version: "0.1.0", profile: "general" });
+    const markdown = buildCapabilityMarkdown({ version: "0.1.0" });
     expect(markdown).toContain("computer");
     expect(markdown).toContain("browser");
     expect(markdown).toContain("skills");
@@ -18,9 +18,9 @@ describe("capability manifest", () => {
   });
 
   it("emits live counts when provided", () => {
-    const markdown = buildCapabilityMarkdown({ version: "0.1.0", profile: "general", toolCount: 250, byExecutionClass: { read_only: 60 } });
+    const markdown = buildCapabilityMarkdown({ version: "0.1.0", toolCount: 250, byExecutionClass: { read_only: 60 } });
     expect(markdown).toContain("250 tools");
-    const json = buildCapabilitiesJson({ version: "0.1.0", profile: "general", toolCount: 250, byExecutionClass: {} });
+    const json = buildCapabilitiesJson({ version: "0.1.0", toolCount: 250, byExecutionClass: {} });
     expect(json).toMatchObject({ product: "agenthost", toolCount: 250 });
   });
 
@@ -29,6 +29,6 @@ describe("capability manifest", () => {
     void homeDir;
     const registry = createBaseCapabilityRegistry();
     expect(registry.listTools().length).toBeGreaterThan(200);
-    expect(getPolicyProfile("general").name).toBe("general");
+    expect(getDefaultPolicy().enabled).toBe(true);
   });
 });

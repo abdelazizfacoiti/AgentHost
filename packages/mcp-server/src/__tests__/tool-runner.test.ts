@@ -6,7 +6,7 @@ import { z } from "zod";
 import {
   acceptConfirmation,
   createTask,
-  getPolicyProfile,
+  getDefaultPolicy,
   requestStop,
   toolSuccess,
   type AuditLogEntry,
@@ -62,7 +62,7 @@ function makeContext(home: string, logs: AuditLogEntry[]): AgentHostMcpContext {
   return {
     sessionId: "test-session",
     config: { agentHostDir: home, configPath: path.join(home, "config.json"), logFile: path.join(home, "logs", "audit.jsonl") },
-    policy: getPolicyProfile("general"),
+    policy: getDefaultPolicy(),
     grants: { listActiveGrants: () => [] },
     logger: { log: async (entry: AuditLogEntry) => { logs.push(entry); } },
     runtime: { version: "9.9.9-test", entryPath: "/opt/agenthost/mcp-server/dist/index.js", startedAt: "2026-01-01T00:00:00.000Z" }
@@ -173,7 +173,7 @@ describe("governed tool runner", () => {
     expect(readResult.ok).toBe(true);
   });
 
-  it("governs real file writes and blocks control-plane targets", async () => {
+  it("writes routine files directly and blocks control-plane targets", async () => {
     const home = await tempHome();
     const context = makeContext(home, []);
     const write = applyProductionExecutionMetadata(createFileTools()).find((tool) => tool.name === "file.write")!;
@@ -182,9 +182,8 @@ describe("governed tool runner", () => {
     const preview = await runTool(write, { path: target, content: "hello", dryRun: true }, context);
     expect(preview.ok).toBe(true);
     expect(preview.preview).toBe(true);
-    const tokenId = preview.confirmation?.tokenId;
-    await acceptConfirmation(home, tokenId!);
-    const executed = await runTool(write, { path: target, content: "hello", confirmationToken: tokenId }, context);
+    expect(preview.confirmation).toBeUndefined();
+    const executed = await runTool(write, { path: target, content: "hello" }, context);
     expect(executed.ok).toBe(true);
     expect(await (await import("node:fs/promises")).readFile(target, "utf8")).toBe("hello");
 
@@ -251,7 +250,7 @@ describe("governed tool runner", () => {
     await context.actionOverlay.close();
   });
 
-  it("lets a screenshot preview mint a usable exact-path token", async () => {
+  it("captures routine screenshots directly with suppression", async () => {
     const home = await tempHome();
     const context = makeContext(home, []);
     let suppressed = false;
@@ -275,12 +274,47 @@ describe("governed tool runner", () => {
     const preview = await runTool(tool, { outputDir, dryRun: true }, context);
     expect(preview.ok).toBe(true);
     expect(preview.data).toMatchObject({ summary: `Capture screenshot to ${target}` });
-    const tokenId = preview.confirmation?.tokenId;
-    expect(tokenId).toMatch(/^conf_/);
-    await acceptConfirmation(home, tokenId!);
-    const executed = await runTool(tool, { outputDir, confirmationToken: tokenId }, context);
+    expect(preview.confirmation).toBeUndefined();
+    const executed = await runTool(tool, { outputDir }, context);
     expect(executed.ok).toBe(true);
     expect(screenshot).toHaveBeenCalledWith(expect.objectContaining({ path: target }));
+  });
+
+  it("confirms private read-only effects without exposing execution fields to the schema", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const handler = vi.fn(async (_input: { path: string }, toolContext: AgentHostMcpContext) => {
+      expect(toolContext.confirmationSatisfied).toBe(true);
+      return toolSuccess({ tool: "test.private_read", riskLevel: "medium", data: { read: true } });
+    });
+    const read: AgentHostToolDefinition<{ path: string; dryRun?: boolean; confirmationToken?: string }, unknown> = {
+      name: "test.private_read",
+      description: "Test private read",
+      riskLevel: "low",
+      inputSchema: z.object({ path: z.string().min(1) }).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Read private data",
+      safety: {
+        actionType: "file_read",
+        getInput: (input) => ({ filePath: input.path, appName: "Gmail", dataSensitivity: "sensitive" as const })
+      },
+      execution: readOnly(),
+      handler
+    };
+
+    const pending = await runTool(read, { path: "/tmp/notes.txt" }, context);
+    expect(pending.ok).toBe(false);
+    expect(pending.error?.code).toBe("confirmation_required");
+    const tokenId = pending.confirmation?.tokenId;
+    expect(tokenId).toMatch(/^conf_/);
+    expect(pending.confirmation?.executed).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+
+    await acceptConfirmation(home, tokenId!);
+    const executed = await runTool(read, { path: "/tmp/notes.txt", confirmationToken: tokenId }, context);
+    expect(executed.ok).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(executed.confirmation?.status).toBe("tokenAccepted");
   });
 
   it("auto-chains only low/medium effects covered by an active task approval", async () => {
@@ -307,5 +341,23 @@ describe("governed tool runner", () => {
     expect(high.ok).toBe(false);
     expect(high.error?.code).toBe("confirmation_required");
     expect(handler).toHaveBeenCalledTimes(1);
+
+    const privateRead: AgentHostToolDefinition<{ path: string }, unknown> = {
+      name: "test.private_read",
+      description: "Test private read",
+      riskLevel: "low",
+      inputSchema: z.object({ path: z.string().min(1) }).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Read private data",
+      safety: {
+        actionType: "file_read",
+        getInput: (input) => ({ filePath: input.path, appName: "Gmail", dataSensitivity: "sensitive" as const })
+      },
+      execution: readOnly(),
+      handler: async () => toolSuccess({ tool: "test.private_read", riskLevel: "medium", data: { read: true } })
+    };
+    const privatePending = await runTool(privateRead, { path: "/tmp/private.txt" }, context);
+    expect(privatePending.ok).toBe(false);
+    expect(privatePending.error?.code).toBe("confirmation_required");
   });
 });

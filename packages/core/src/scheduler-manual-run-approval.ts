@@ -1,12 +1,12 @@
 import { schedulerHash } from "./scheduler.js";
-import type { PolicyProfile, ScheduledJobManualRunApprovalDependencySnapshot, ScheduledJobManualRunApprovalRecoveryAction, ScheduledJobManualRunApprovalStaleDependency, ScheduledJobManualRunApprovalValidity, ScheduledJobManualRunRequest } from "./types.js";
+import type { RuntimePolicy, ScheduledJobManualRunApprovalDependencySnapshot, ScheduledJobManualRunApprovalRecoveryAction, ScheduledJobManualRunApprovalStaleDependency, ScheduledJobManualRunApprovalValidity, ScheduledJobManualRunRequest } from "./types.js";
 import { schedulerPolicy } from "./scheduler.js";
 
 export const MANUAL_RUN_APPROVAL_TTL_SECONDS = 900;
 export const MANUAL_RUN_APPROVAL_EXPIRY_WARNING_SECONDS = 300;
 
-export function manualRunApprovalPolicyHash(profile: PolicyProfile): string {
-  const policy = schedulerPolicy(profile);
+export function manualRunApprovalPolicyHash(runtimePolicy: RuntimePolicy): string {
+  const policy = schedulerPolicy(runtimePolicy);
   return schedulerHash({ manualRunApprovalTtlSeconds: policy.manualRunApprovalTtlSeconds, manualRunApprovalExpiryWarningSeconds: policy.manualRunApprovalExpiryWarningSeconds, requireFreshApprovalAtExecution: policy.requireFreshApprovalAtExecution, requireFullRevalidationAfterExpiry: policy.requireFullRevalidationAfterExpiry, allowAutomaticRefresh: policy.allowAutomaticRefresh });
 }
 

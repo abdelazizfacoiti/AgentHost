@@ -95,11 +95,13 @@ export function createSafetyEvaluationContext(context: AgentHostMcpContext): {
   agentHostDir: string;
   protectedPaths: string[];
   grants: CapabilityGrant[];
+  confirmationSatisfied?: boolean;
 } {
   return {
     ownerSessionId: context.sessionId,
     agentHostDir: context.config.agentHostDir,
     protectedPaths: [context.config.configPath, context.config.logFile],
-    grants: context.grants.listActiveGrants()
+    grants: context.grants.listActiveGrants(),
+    ...(context.confirmationSatisfied === true ? { confirmationSatisfied: true } : {})
   };
 }

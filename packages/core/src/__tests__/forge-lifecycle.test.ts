@@ -3,7 +3,7 @@ import {
   canApplySessionGrantsFromReview,
   createToolForgeArtifactRecord,
   createToolForgeReviewRecord,
-  getPolicyProfile,
+  getDefaultPolicy,
   hashToolForgeManifest,
   proposeToolForgeGrants,
   reviewToolForgeManifest,
@@ -68,7 +68,7 @@ describe("Tool Forge lifecycle helpers", () => {
   it("creates inert artifact and review records", () => {
     const validation = validateToolForgeManifest(manifest);
     expect(validation.valid).toBe(true);
-    const reviewed = reviewToolForgeManifest(manifest, { policy: getPolicyProfile("strict"), grants: [] });
+    const reviewed = reviewToolForgeManifest(manifest, { policy: getDefaultPolicy(), grants: [] });
     const proposals = proposeToolForgeGrants(manifest);
     const manifestHash = hashToolForgeManifest(manifest);
 
@@ -82,7 +82,6 @@ describe("Tool Forge lifecycle helpers", () => {
     const review = createToolForgeReviewRecord({
       manifest,
       manifestHash,
-      profile: "strict",
       review: reviewed,
       proposals,
       blockedPermissions: [],
@@ -97,12 +96,11 @@ describe("Tool Forge lifecycle helpers", () => {
   });
 
   it("rejects session grant application when blocked permissions exist", () => {
-    const reviewed = reviewToolForgeManifest(manifest, { policy: getPolicyProfile("strict"), grants: [] });
+    const reviewed = reviewToolForgeManifest(manifest, { policy: getDefaultPolicy(), grants: [] });
     const proposals = proposeToolForgeGrants(manifest);
     const review = createToolForgeReviewRecord({
       manifest,
       manifestHash: hashToolForgeManifest(manifest),
-      profile: "strict",
       review: reviewed,
       proposals,
       blockedPermissions: ["write-output"]

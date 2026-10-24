@@ -6,8 +6,7 @@ import type {
   GrantDecision,
   GrantSummary,
   PermissionDefault,
-  PolicyProfile,
-  PolicyProfileSummary,
+  RuntimePolicy,
   RiskLevel,
   SafetyEvaluationContext,
   SafetyInput
@@ -192,7 +191,7 @@ export function isStateChangingAction(actionType: SafetyInput["actionType"]): bo
   return STATE_CHANGING_ACTIONS.has(actionType);
 }
 
-export function policyDefaultForInput(policy: PolicyProfile, input: SafetyInput): PermissionDefault {
+export function policyDefaultForInput(policy: RuntimePolicy, input: SafetyInput): PermissionDefault {
   if (input.tool === "desktop.screenshot") {
     return policy.defaults.screenshots;
   }
@@ -249,7 +248,7 @@ export function policyDefaultForInput(policy: PolicyProfile, input: SafetyInput)
 
 export function evaluateGrantDecision(
   input: SafetyInput,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   grants: CapabilityGrant[],
   appSensitivity: AppSensitivity,
   context: SafetyEvaluationContext = {}
@@ -274,16 +273,16 @@ export function evaluateGrantDecision(
   const defaultPermission = policyDefaultForInput(policy, input);
   if (defaultPermission === "deny") {
     blockedByDefault = true;
-    reasons.push(`Profile ${policy.name} denies this capability by default.`);
-    matchedRules.push(`profile.default.${input.actionType}.deny`);
+    reasons.push("Policy denies this capability by default.");
+    matchedRules.push(`policy.default.${input.actionType}.deny`);
   } else if (defaultPermission === "guide_only") {
     guideOnlyByDefault = true;
-    reasons.push(`Profile ${policy.name} routes this capability to guide mode by default.`);
-    matchedRules.push(`profile.default.${input.actionType}.guide_only`);
+    reasons.push("Policy routes this capability to guide mode by default.");
+    matchedRules.push(`policy.default.${input.actionType}.guide_only`);
   } else if (defaultPermission === "approval_required") {
     requiresApproval = true;
-    reasons.push(`Profile ${policy.name} requires approval for this capability by default.`);
-    matchedRules.push(`profile.default.${input.actionType}.approval_required`);
+    reasons.push("Policy requires approval for this capability by default.");
+    matchedRules.push(`policy.default.${input.actionType}.approval_required`);
   }
 
   for (const grant of matchedGrants) {
@@ -321,18 +320,18 @@ export function evaluateGrantDecision(
     guideOnlyByDefault = false;
   }
 
-  // External/destructive effects require an exact scoped allow grant. This is
-  // effect-based, not category-based: read-only and bounded local effects keep
-  // their normal profile defaults.
-  if ((input.externalEffect === true || input.destructive === true) && allowedByGrantIds.length === 0) {
-    blockedByDefault = true;
-    reasons.push("Exact external or destructive effects require a matching scoped grant.");
-    matchedRules.push("effect.exact_grant_required");
+  // Consequential effects are never silently executed: they require an exact
+  // single-use confirmation bound to the current input and target.
+  if (input.externalEffect === true || input.destructive === true || appSensitivity === "financial") {
+    requiresConfirmationToken = true;
+    requiresExactTarget = true;
+    reasons.push("External, destructive, or financial effects require exact single-use confirmation.");
+    matchedRules.push("effect.exact_confirmation_required");
   }
-  if (appSensitivity === "financial" && isStateChangingAction(input.actionType) && allowedByGrantIds.length === 0) {
-    blockedByDefault = true;
-    reasons.push("Financial state changes require a dedicated governed grant.");
-    matchedRules.push("app.financial.exact_grant_required");
+  if (input.dataSensitivity === "sensitive" || input.dataSensitivity === "secret") {
+    requiresConfirmationToken = true;
+    reasons.push("Private-data access requires exact single-use confirmation.");
+    matchedRules.push("data.private_confirmation_required");
   }
 
   const blocked = blockedByDefault || blockedByGrant;
@@ -353,18 +352,6 @@ export function evaluateGrantDecision(
     guideOnly,
     reasons,
     matchedRules
-  };
-}
-
-export function summarizePolicyProfile(profile: PolicyProfile): PolicyProfileSummary {
-  return {
-    name: profile.name,
-    description: profile.description,
-    enabled: profile.enabled,
-    defaults: { ...profile.defaults },
-    requireDryRunForStateChanging: profile.requireDryRunForStateChanging,
-    requireConfirmationForStateChanging: profile.requireConfirmationForStateChanging,
-    requireExactTargetForStateChanging: profile.requireExactTargetForStateChanging
   };
 }
 

@@ -64,18 +64,18 @@ packages/
 
 **Build is project-wide**: `tsc -b` reads `tsconfig.json` references. Build individual packages with `npx tsc -b packages/core`.
 
-## Default profile
+## Default policy
 
-The default policy profile is **`general`** (not `strict`). It allows shell, files, GUI input, screenshots, and optional adapters. The current minimal-v2 tree does not register browser DOM tools. Gates communication/private-data/external/destructive as `approval_required`.
+AgentHost has one autonomous runtime policy. There are no named profiles and no profile selector. Routine local actions — app launch, GUI click/type/hotkey, window focus, screenshots, shell, and file reads/writes — execute directly. Communication/private-data, external sends/uploads, destructive actions, and financial effects are `approval_required` and require an exact single-use confirmation. Credential/security apps, secret data, protected system paths, and the AgentHost control plane stay blocked. The current minimal-v2 tree does not register browser DOM tools.
 
 ## Safety model
 
 Every tool passes through: schema validation → stop/takeover gate → effect preview → dry-run token or explicit confirmation → execution → redacted audit logging.
 
 - Risk tiers: `observe` / `low` / `medium` / `high` / `blocked`
-- State-changing tools declare dry-run and confirmation-token requirements; metadata-only task/agent control is exempt.
-- Dry-run mints a 15-minute single-use token bound to tool, profile, canonical arguments, and target. `agenthost confirm <tokenId>` approves one exact preview; `deny` rejects it.
-- `agenthost task approve <id> [--max-risk low|medium]` creates a 30-min approval for an **active** task; the runner auto-chains only low/medium effects. High effects still need per-action tokens.
+- Routine state-changing tools execute directly. Consequential actions — external/destructive effects, private-data reads, or high risk — require a dry-run preview and exact confirmation; metadata-only task/agent control is exempt.
+- Dry-run for a consequential action mints a 15-minute single-use token bound to tool, canonical arguments, and target. `agenthost confirm <tokenId>` approves one exact preview; `deny` rejects it. Accepted confirmation sets `confirmationSatisfied` for the handler safety recheck.
+- `agenthost task approve <id> [--max-risk low|medium]` creates a 30-min approval for an **active** task; the runner auto-chains only low/medium effects. High and consequential effects still need per-action tokens.
 - Stop enforcement via `run/stop.requested` and `run/takeover.active`; `emergency_stop_requested`/`human_takeover_active` gate only state-changing calls.
 - AgentHost control-plane paths (`run/`, `logs/`, `setup/`, `tasks/approvals/`, config) are read-medium and write/delete-blocked.
 

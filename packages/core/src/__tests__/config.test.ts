@@ -11,8 +11,9 @@ describe("loadAgentHostConfig", () => {
 
     expect(config.agentHostDir).toBe(path.join(homeDir, ".agenthost"));
     expect(config.schemaVersion).toBe(1);
-    expect(config.profile).toBe("general");
-    expect(config.policy.name).toBe("general");
+    expect((config as unknown as Record<string, unknown>).profile).toBeUndefined();
+    expect(config.policy.enabled).toBe(true);
+    expect(config.policy.requireConfirmationForStateChanging).toBe(false);
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
     expect(config.overlayRendererMode).toBe("auto");
     expect(config.overlay).toEqual(expect.objectContaining({ persistent: true, autoHideMs: 0, preferredPosition: "top_right", reducedMotion: false }));
@@ -49,7 +50,7 @@ describe("loadAgentHostConfig", () => {
     expect(config.schemaVersion).toBe(1);
   });
 
-  it("loads profile and paths from a config file", async () => {
+  it("ignores the legacy profile field and loads paths from a config file", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-file-"));
     const agentHostDir = path.join(homeDir, ".agenthost");
     await mkdir(agentHostDir, { recursive: true });
@@ -66,7 +67,7 @@ describe("loadAgentHostConfig", () => {
 
     const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
 
-    expect(config.profile).toBe("dev");
+    expect((config as unknown as Record<string, unknown>).profile).toBeUndefined();
     expect(config.forgeRuntimeSandboxMode).toBe("none");
     expect(config.logFile).toBe(path.join(homeDir, "agenthost-test-log.jsonl"));
   });
@@ -83,7 +84,7 @@ describe("loadAgentHostConfig", () => {
     await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
   });
 
-  it("loads persistent grants from config and applies richer profile names", async () => {
+  it("loads persistent grants on the default policy", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-grants-"));
     const agentHostDir = path.join(homeDir, ".agenthost");
     await mkdir(agentHostDir, { recursive: true });
@@ -113,10 +114,8 @@ describe("loadAgentHostConfig", () => {
 
     const config = await loadAgentHostConfig({ env: {}, homeDir, configPath });
 
-    expect(config.profile).toBe("gui-dev");
-    expect(config.policy.name).toBe("gui-dev");
-    expect(config.policy.grants).toHaveLength(1);
-    expect(config.policy.grants[0]).toMatchObject({
+    expect((config as unknown as Record<string, unknown>).profile).toBeUndefined();
+    expect(config.policy.grants.find((grant) => grant.id === "allow-output-write")).toMatchObject({
       id: "allow-output-write",
       scope: "persistent",
       effect: "allow",
@@ -213,12 +212,11 @@ describe("loadAgentHostConfig", () => {
     await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
   });
 
-  it("loads local demo profile", async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-demo-"));
+  it("ignores the legacy AGENTHOST_PROFILE environment variable", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-legacy-profile-"));
     const config = await loadAgentHostConfig({ env: { AGENTHOST_PROFILE: "demo-unlocked-local" }, homeDir });
-    expect(config.policy.name).toBe("demo-unlocked-local");
-    expect(config.policy.allowFileWriteRoots).toContain("~/Desktop/agenthost-demo");
-    expect(config.policy.grants.some((grant) => grant.id === "demo-unlocked-local.runtime-supported")).toBe(true);
+    expect(config.policy.allowFileWriteRoots).toContain("~");
+    expect(config.policy.grants.some((grant) => grant.id === "default.communication-read")).toBe(true);
   });
 
   it("allows environment to override Forge sandbox mode", async () => {

@@ -1,4 +1,4 @@
-import type { PolicyProfile, RiskLevel, SafetyDecision, SafetyEvaluationContext } from "../types.js";
+import type { RuntimePolicy, RiskLevel, SafetyDecision, SafetyEvaluationContext } from "../types.js";
 import { evaluateApprovalRequirement, isApprovalSatisfied } from "./approval.js";
 import { classifyAppSensitivity } from "./app-sensitivity.js";
 import { classifyPath, isAgentHostControlPath } from "./path-policy.js";
@@ -112,7 +112,6 @@ const SHELL_RULES: ShellRule[] = [
 const PATH_FRAGMENT_PATTERN = /(?:~\/[^\s'"|;&]+|\/[A-Za-z0-9._~+/@:-]+)/g;
 
 const RISK_ORDER: RiskLevel[] = ["observe", "low", "medium", "high", "blocked"];
-const DEMO_COMMANDS = new Set(["node", "npm", "npx", "git", "ls", "cat", "pwd", "mkdir", "cp", "mv", "touch", "echo", "sed", "awk", "grep", "find", "python", "python3"]);
 
 function maxRiskLevel(a: RiskLevel, b: RiskLevel): RiskLevel {
   return RISK_ORDER.indexOf(a) >= RISK_ORDER.indexOf(b) ? a : b;
@@ -120,7 +119,7 @@ function maxRiskLevel(a: RiskLevel, b: RiskLevel): RiskLevel {
 
 export function classifyShellCommand(
   command: string,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   context: SafetyEvaluationContext = {}
 ): SafetyDecision {
   let riskLevel: RiskLevel = "medium";
@@ -128,18 +127,9 @@ export function classifyShellCommand(
   const matchedRules = ["shell.command"];
 
   if (!policy.allowShell) {
-    riskLevel = maxRiskLevel(riskLevel, "high");
-    reasons.push("Shell is disabled by this policy profile.");
+    riskLevel = "blocked";
+    reasons.push("Shell is disabled by policy.");
     matchedRules.push("policy.shell.disabled");
-  }
-
-  if (policy.name === "demo-unlocked-local") {
-    const executable = command.trim().split(/\s+/)[0] ?? "";
-    if (!DEMO_COMMANDS.has(executable)) {
-      riskLevel = maxRiskLevel(riskLevel, "high");
-      reasons.push("Demo profile treats non-allowlisted commands as high-risk and approval-gated.");
-      matchedRules.push("demo.shell.command_not_allowlisted");
-    }
   }
 
   for (const rule of SHELL_RULES) {
@@ -174,7 +164,7 @@ export function classifyShellCommand(
     }
   }
 
-  const approval = evaluateApprovalRequirement(riskLevel, policy, reasons);
+  const approval = evaluateApprovalRequirement(riskLevel, policy, reasons, false, context.confirmationSatisfied === true);
   const blocked = riskLevel === "blocked" || approval.status === "denied";
 
   return {

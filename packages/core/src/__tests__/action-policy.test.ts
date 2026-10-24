@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createGovernedActionEffect, decideGovernedAction, fingerprintActionBinding, getPolicyProfile, validateGovernedActionEffect } from "../index.js";
+import { createGovernedActionEffect, decideGovernedAction, fingerprintActionBinding, getDefaultPolicy, validateGovernedActionEffect } from "../index.js";
 
 describe("universal governed-action policy", () => {
-  it("returns precise grant recovery for an external effect without a scoped grant", () => {
+  it("returns precise confirmation recovery for an external effect without a scoped grant", () => {
     const effect = createGovernedActionEffect({
       ownerSessionId: "session-policy-test",
       operationFamily: "communication",
@@ -15,11 +15,11 @@ describe("universal governed-action policy", () => {
     });
     const decision = decideGovernedAction({
       effect,
-      safety: { allowed: false, blocked: true, guideOnly: false, riskLevel: "high", appSensitivity: "communication" },
+      safety: { allowed: false, blocked: false, guideOnly: false, riskLevel: "high", appSensitivity: "communication" },
       grantDecision: { matchedGrantIds: [], allowedByGrantIds: [], deniedByGrantIds: [], guideOnlyByGrantIds: [], requiresDryRun: true, requiresConfirmationToken: true, requiresApproval: false, requiresExactTarget: true },
-      policy: getPolicyProfile("dev")
+      policy: getDefaultPolicy()
     });
-    expect(decision.code).toBe("action_grant_missing");
+    expect(decision.code).toBe("action_confirmation_missing");
     expect(decision.recovery).toBe("confirm");
   });
 
@@ -38,7 +38,7 @@ describe("universal governed-action policy", () => {
       effect,
       safety: { allowed: true, blocked: false, guideOnly: false, riskLevel: "high", appSensitivity: "financial" },
       grantDecision: { matchedGrantIds: ["exact-financial"], allowedByGrantIds: ["exact-financial"], deniedByGrantIds: [], guideOnlyByGrantIds: [], requiresDryRun: true, requiresConfirmationToken: true, requiresApproval: false, requiresExactTarget: true },
-      policy: getPolicyProfile("dev")
+      policy: getDefaultPolicy()
     });
     expect(decision.decision).toBe("unsupported");
     expect(decision.code).toBe("action_route_unavailable");

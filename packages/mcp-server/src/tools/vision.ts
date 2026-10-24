@@ -12,6 +12,16 @@ const findInput = z.object({ ...base, query: z.string().trim().min(1).max(500), 
 const targetInput = z.object({ ...base, query: z.string().trim().min(1).max(500), targetType: z.enum(["text", "button", "input", "region"]).optional(), limit: z.number().int().min(1).max(20).optional() }).strict();
 type Base = z.infer<typeof analyzeInput>;
 
+function visionSafetyInput(input: Base): { filePath: string; appName?: string; dataSensitivity?: "sensitive" } {
+  const appName = input.activeWindow?.appName;
+  const sensitivity = classifyAppSensitivity(appName === undefined ? {} : { appName });
+  return {
+    filePath: input.imagePath,
+    ...(appName === undefined ? {} : { appName }),
+    ...(sensitivity === "communication" ? { dataSensitivity: "sensitive" as const } : {})
+  };
+}
+
 function inside(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -110,7 +120,7 @@ export function createVisionTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     inputSummary: "Analyze approved local image",
     auditInputSummary: () => "Analyze local image; path omitted.",
     auditOutputSummary: (result) => result.ok ? `Vision OCR returned ${result.data?.textItems.length ?? 0} redacted items.` : result.error?.code ?? "Vision failed.",
-    safety: { actionType: "file_read", getInput: (input) => ({ filePath: input.imagePath, ...(input.activeWindow?.appName === undefined ? {} : { appName: input.activeWindow.appName }) }) },
+    safety: { actionType: "file_read", getInput: visionSafetyInput },
     async handler(input, context) {
       const started = Date.now();
       const data = await analyze(input, context);
@@ -135,7 +145,7 @@ export function createVisionTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     inputSummary: "Find OCR text",
     auditInputSummary: () => "Find OCR text; query and path omitted.",
     auditOutputSummary: (result) => result.ok ? "Vision text matches returned without logging OCR text." : result.error?.code ?? "Vision failed.",
-    safety: { actionType: "file_read", getInput: (input) => ({ filePath: input.imagePath }) },
+    safety: { actionType: "file_read", getInput: visionSafetyInput },
     async handler(input, context) {
       const started = Date.now();
       const data = await analyze({ ...input, maxItems: 1000 }, context);
@@ -161,7 +171,7 @@ export function createVisionTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     inputSummary: "Find OCR target",
     auditInputSummary: () => "Find OCR target; query and path omitted.",
     auditOutputSummary: (result) => result.ok ? "Vision candidates returned without logging OCR labels." : result.error?.code ?? "Vision failed.",
-    safety: { actionType: "file_read", getInput: (input) => ({ filePath: input.imagePath }) },
+    safety: { actionType: "file_read", getInput: visionSafetyInput },
     async handler(input, context) {
       const started = Date.now();
       const data = await analyze({ ...input, maxItems: 1000 }, context, "target_search");

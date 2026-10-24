@@ -2,17 +2,16 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { getPolicyProfile, type AgentHostConfig, type ToolContext } from "@agenthost/core";
+import { getDefaultPolicy, type AgentHostConfig, type ToolContext } from "@agenthost/core";
 import { createBlenderAdapter, runBlenderPython } from "../index.js";
 
 function createConfig(agentHostDir: string): AgentHostConfig {
-  const policy = getPolicyProfile("dev");
+  const policy = getDefaultPolicy();
 
   return {
     agentHostDir,
     configPath: path.join(agentHostDir, "config.json"),
     logFile: path.join(agentHostDir, "logs", "agenthost.jsonl"),
-    profile: "dev",
     policy
   };
 }

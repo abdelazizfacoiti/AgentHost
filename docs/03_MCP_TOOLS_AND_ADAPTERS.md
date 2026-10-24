@@ -1,7 +1,7 @@
 # AgentHost MCP Tools and Adapter Specification
 
 All callable tools return `ToolResult`. MCP transport is stdio. The current
-minimal-v2 server exposes 37 base tools. This number is generated from the
+minimal-v2 server exposes 35 base tools. This number is generated from the
 loaded set at startup; treat `system.list_capabilities` and
 `agenthost://capabilities` as authoritative instead of hard-coding counts.
 
@@ -19,8 +19,6 @@ the same loaded set.
 | `system.get_info` | observe | read_only |
 | `system.list_capabilities` | observe | read_only |
 | `system.check_dependency` | low | diagnostic |
-| `policy.get_profile` | observe | read_only |
-| `policy.list_profiles` | observe | read_only |
 | `adapter.list` | observe | read_only |
 | `adapter.get` | observe | read_only |
 | `computer.observe_state` | observe | read_only |
@@ -37,18 +35,18 @@ the same loaded set.
 
 | Tool | Risk | Execution |
 |---|---|---|
-| `desktop.screenshot` | medium | state_changing |
-| `desktop.click` | medium | state_changing |
-| `desktop.pointer` | medium | state_changing |
-| `desktop.hotkey` | medium | state_changing |
-| `desktop.type_text` | medium | state_changing |
-| `window.focus` | medium | state_changing |
-| `file.write` | medium | state_changing |
-| `file.ensure_dir` | medium | state_changing |
-| `file.copy` | medium | state_changing |
-| `file.move` | medium | state_changing |
-| `file.delete` | high | state_changing |
-| `shell.run` | high (classifier may lower) | state_changing |
+| `desktop.screenshot` | medium | state_changing (routine) |
+| `desktop.click` | medium | state_changing (routine) |
+| `desktop.pointer` | medium | state_changing (routine) |
+| `desktop.hotkey` | medium | state_changing (routine) |
+| `desktop.type_text` | medium | state_changing (routine) |
+| `window.focus` | medium | state_changing (routine) |
+| `file.write` | medium | state_changing (routine) |
+| `file.ensure_dir` | medium | state_changing (routine) |
+| `file.copy` | medium | state_changing (routine) |
+| `file.move` | medium | state_changing (routine) |
+| `file.delete` | high | state_changing + exact confirmation |
+| `shell.run` | high (classifier may lower) | state_changing; high effects confirm |
 
 ### Agent control and tasks
 
@@ -84,21 +82,23 @@ For every tool call the central runner performs, in order:
    `human_takeover_active`. Read-only observation remains available.
 3. Effect preview resolution: actual target path, target fingerprint, risk,
    policy approval, and blocked reason. Previews never execute the action.
-4. `dryRun: true` returns the preview and, for state-changing tools, mints a
-   single-use confirmation token. No action is executed.
-5. A non-dry state-changing call without a token returns
-   `confirmation_required` plus the CLI command to approve it. An active task
-   approval can auto-chain only low/medium effects for an active task; it
-   creates and consumes the exact token server-side. High effects still
-   require explicit per-action confirmation; blocked effects are denied.
-6. The token is consumed atomically. It is bound to tool, policy profile,
-   canonical arguments, and target fingerprint. Tokens are single-use,
-   expire after 15 minutes, and are rejected if the tool, profile, arguments,
-   or target changed.
-7. The handler runs. Handlers revalidate safety and return a `ToolResult`.
-8. The runner writes one redacted JSONL audit entry with tool, risk, profile,
-   approval status, preview/confirmation status, duration, error code, and
-   server version/entry path provenance. Audit write failure does not turn a
+4. `dryRun: true` returns the preview. If the effect needs confirmation, it
+   also mints a single-use token. Routine local actions return no token.
+   No action is executed.
+5. A non-dry call executes directly when no confirmation is required.
+   Consequential calls without a token return `confirmation_required` plus the
+   CLI command to approve them. An active task approval can auto-chain only
+   low/medium effects for an active task; it creates and consumes the exact
+   token server-side. High, external, destructive, private-data, and blocked
+   effects still require explicit per-action confirmation.
+6. The token is consumed atomically. It is bound to tool, canonical arguments,
+   and target fingerprint. Tokens are single-use, expire after 15 minutes, and
+   are rejected if the tool, arguments, or target changed.
+7. The handler runs with `confirmationSatisfied` set only for an accepted exact
+   confirmation. Handlers revalidate safety and return a `ToolResult`.
+8. The runner writes one redacted JSONL audit entry with tool, risk, approval
+   status, preview/confirmation status, duration, error code, and server
+   version/entry path provenance. Audit write failure does not turn a
    completed action into a second action.
 
 Operator commands:
@@ -123,10 +123,10 @@ by the client.
 
 ## Files and shell
 
-Read-only: `file.read`, `file.list`, `file.exists`. State-changing with
-dry-run/token: `file.write`, `file.ensure_dir`, `file.copy`, `file.move`,
-`file.delete`. `file.delete` is file-only; recursive directory deletion is not
-exposed over MCP and a directory target returns
+Read-only: `file.read`, `file.list`, `file.exists`. Routine state-changing:
+`file.write`, `file.ensure_dir`, `file.copy`, `file.move`. `file.delete`
+requires an exact confirmation. `file.delete` is file-only; recursive
+directory deletion is not exposed over MCP and a directory target returns
 `directory_delete_unsupported`.
 
 `shell.run` executes argv without an implicit shell. It never calls
@@ -154,7 +154,7 @@ through `xdotool type` and other text through clipboard paste; install
 Tesseract when available and return bounded, redacted suggestions. They never
 click or type. `desktop.screenshot` writes under
 `~/.agenthost/screenshots/` unless `outputDir` is supplied, so it follows the
-same exact-preview and single-use token flow as other file-writing actions.
+routine direct-execution path; high-risk or consequential effects still use exact confirmation.
 
 ## MCP resources
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { activeTaskApprovalPath, readActiveTaskApproval, requestStop, type CapabilityRegistrySnapshot, type PolicyProfile, type ToolCapability } from "@agenthost/core";
+import { activeTaskApprovalPath, readActiveTaskApproval, requestStop, type CapabilityRegistrySnapshot, type ToolCapability } from "@agenthost/core";
 import { listResourceEntries, readResource } from "../resources.js";
 import { applyProductionExecutionMetadata, materializeToolDefinitions } from "../tool-metadata.js";
 import { createFileTools } from "../tools/file.js";
@@ -49,7 +49,6 @@ function context(home: string) {
   return {
     registry,
     adapters: {} as never,
-    policy: { name: "general" } as PolicyProfile,
     config: { agentHostDir: home } as never
   };
 }
@@ -72,7 +71,7 @@ describe("MCP resources", () => {
 
     const markdown = (await readResource(context(home), "agenthost://capabilities.md")).text;
     expect(markdown).not.toContain("agenthost://skills");
-    expect(markdown).toContain("exact dry-run preview plus a single-use");
+    expect(markdown).toContain("routine local actions");
     await expect(readResource(context(home), "agenthost://unknown")).rejects.toThrow(/Unknown resource/);
   });
 

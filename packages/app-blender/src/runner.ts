@@ -6,7 +6,7 @@ import {
   toolFailure,
   toolSuccess,
   type AgentHostConfig,
-  type PolicyProfile,
+  type RuntimePolicy,
   type ToolResult
 } from "@agenthost/core";
 import { ensureLinuxDir, findCommandPath, runSafeLinuxCommand, writeLinuxFile } from "@agenthost/os-linux";
@@ -71,7 +71,7 @@ function resolveOutputDir(input: BlenderRunPythonInput, config: AgentHostConfig,
   return normalizePathForPolicy(requested, { agentHostDir: config.agentHostDir });
 }
 
-function validateOutputDir(outputDir: string, policy: PolicyProfile, config: AgentHostConfig): string | undefined {
+function validateOutputDir(outputDir: string, policy: RuntimePolicy, config: AgentHostConfig): string | undefined {
   const decision = classifyPath(outputDir, policy, { agentHostDir: config.agentHostDir, access: "write" });
 
   if (!decision.isAllowedWriteRoot || decision.riskLevel === "blocked" || decision.riskLevel === "high") {
@@ -81,7 +81,7 @@ function validateOutputDir(outputDir: string, policy: PolicyProfile, config: Age
   return undefined;
 }
 
-function validateOutputFiles(outputDir: string, names: string[], policy: PolicyProfile, config: AgentHostConfig): string | undefined {
+function validateOutputFiles(outputDir: string, names: string[], policy: RuntimePolicy, config: AgentHostConfig): string | undefined {
   for (const name of names) {
     const outputPath = normalizePathForPolicy(path.join(outputDir, name), { agentHostDir: config.agentHostDir });
     const decision = classifyPath(outputPath, policy, { agentHostDir: config.agentHostDir, access: "write" });
@@ -144,7 +144,7 @@ async function defaultStatFile(filePath: string): Promise<{ exists: boolean; byt
 export async function runBlenderPython(
   input: BlenderRunPythonInput,
   config: AgentHostConfig,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   dependencies: BlenderRunnerDependencies = {}
 ): Promise<ToolResult<BlenderRunPythonOutput>> {
   const now = dependencies.now?.() ?? Date.now();

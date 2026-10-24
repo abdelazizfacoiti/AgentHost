@@ -12,7 +12,6 @@ export type ConfirmationRecordStatus = "pending" | "accepted" | "rejected" | "us
 export interface ConfirmationRecord {
   tokenId: string;
   tool: string;
-  profile: string;
   inputFingerprint: string;
   targetFingerprint?: string;
   riskLevel: RiskLevel;
@@ -34,7 +33,6 @@ export type ConfirmationErrorCode =
   | "confirmation_token_used"
   | "confirmation_not_approved"
   | "confirmation_tool_mismatch"
-  | "confirmation_profile_mismatch"
   | "confirmation_input_mismatch"
   | "confirmation_target_mismatch"
   | "confirmation_store_failed";
@@ -135,7 +133,6 @@ async function removeExpired(agentHostDir: string, now: number): Promise<void> {
 export async function prepareConfirmation(input: {
   agentHostDir: string;
   tool: string;
-  profile: string;
   riskLevel: RiskLevel;
   args: unknown;
   summary: string;
@@ -157,7 +154,6 @@ export async function prepareConfirmation(input: {
   const record: ConfirmationRecord = {
     tokenId: `conf_${randomUUID()}`,
     tool: input.tool,
-    profile: input.profile,
     inputFingerprint: fingerprintToolInput(input.tool, input.args),
     riskLevel: input.riskLevel,
     summary: input.summary.slice(0, 500),
@@ -258,7 +254,6 @@ export async function consumeConfirmation(input: {
   agentHostDir: string;
   tokenId: string;
   tool: string;
-  profile: string;
   args: unknown;
   targetFingerprint?: string;
   allowPending: boolean;
@@ -292,7 +287,6 @@ export async function consumeConfirmation(input: {
     return await fail("confirmation_not_approved", `Confirmation token is pending operator approval. Run: agenthost confirm ${record.tokenId}`, true);
   }
   if (record.tool !== input.tool) return await fail("confirmation_tool_mismatch", "Confirmation token belongs to a different tool.", true);
-  if (record.profile !== input.profile) return await fail("confirmation_profile_mismatch", "Confirmation token was issued for a different policy profile.", true);
   if (record.inputFingerprint !== fingerprintToolInput(input.tool, input.args)) {
     return await fail("confirmation_input_mismatch", "Confirmation token does not match the attempted arguments.", true);
   }

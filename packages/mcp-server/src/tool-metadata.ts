@@ -4,7 +4,8 @@ import type { AnyAgentHostToolDefinition } from "./tool-runner.js";
 const readOnly = (source: "base" | "optional_adapter" = "base"): ToolExecutionMetadata => ({ executionClass: "read_only", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source, availability: "available", operationFamily: "observe", operation: "inspect", reversibility: "reversible", sensitivity: "normal", requiredBindings: [], confirmationLevel: "none", verificationKind: "none", cleanupKind: "none" });
 const diagnostic = (): ToolExecutionMetadata => ({ ...readOnly(), executionClass: "diagnostic" });
 const metadataOnly = (): ToolExecutionMetadata => ({ ...readOnly(), executionClass: "metadata_only" });
-const stateChanging = (requiresExactTarget = false, source: "base" | "optional_adapter" = "base"): ToolExecutionMetadata => ({ executionClass: "state_changing", externalEffect: false, requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget, source, availability: "available", operationFamily: "state_change", operation: "governed_action", reversibility: "persistent", sensitivity: "normal", requiredBindings: requiresExactTarget ? ["target"] : [], confirmationLevel: "standard", verificationKind: "tool_result", cleanupKind: "none" });
+const directStateChanging = (source: "base" | "optional_adapter" = "base"): ToolExecutionMetadata => ({ executionClass: "state_changing", externalEffect: false, requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false, source, availability: "available", operationFamily: "state_change", operation: "governed_action", reversibility: "persistent", sensitivity: "normal", requiredBindings: [], confirmationLevel: "none", verificationKind: "tool_result", cleanupKind: "none" });
+const confirmedStateChanging = (source: "base" | "optional_adapter" = "base"): ToolExecutionMetadata => ({ ...directStateChanging(source), requiresDryRun: true, requiresConfirmationToken: true, requiresExactTarget: true, requiredBindings: ["target"], confirmationLevel: "standard" });
 
 /*
  * Explicit production declarations. This is an allowlist, not name inference:
@@ -14,17 +15,18 @@ const TOOL_EXECUTION_DECLARATIONS: Record<string, ToolExecutionMetadata> = {};
 const declare = (names: string[], metadata: ToolExecutionMetadata): void => { for (const name of names) TOOL_EXECUTION_DECLARATIONS[name] = metadata; };
 
 declare([
-  "adapter.list", "adapter.get", "computer.observe_state", "computer.wait_for", "file.exists", "file.list", "file.read", "policy.get_profile", "policy.list_profiles", "system.get_info", "system.list_capabilities", "vision.analyze_image", "vision.find_target", "vision.find_text", "window.list"
+  "adapter.list", "adapter.get", "computer.observe_state", "computer.wait_for", "file.exists", "file.list", "file.read", "system.get_info", "system.list_capabilities", "vision.analyze_image", "vision.find_target", "vision.find_text", "window.list"
 ], readOnly());
 declare(["system.check_dependency"], diagnostic());
 declare(["agent.status"], readOnly());
 declare(["agent.stop", "agent.takeover_begin"], metadataOnly());
 declare(["task.create", "task.status", "task.update", "task.update_status", "task.add_event", "task.list"], metadataOnly());
 declare([
-  "desktop.click", "desktop.hotkey", "desktop.pointer", "desktop.screenshot", "desktop.type_text", "file.copy", "file.delete", "file.ensure_dir", "file.move", "file.write", "shell.run", "window.focus"
-], stateChanging(true));
-declare(["blender.run_python"], stateChanging(true, "optional_adapter"));
-declare(["ssh.run_command"], stateChanging(true, "optional_adapter"));
+  "desktop.click", "desktop.hotkey", "desktop.pointer", "desktop.screenshot", "desktop.type_text", "file.copy", "file.ensure_dir", "file.move", "file.write", "shell.run", "window.focus"
+], directStateChanging());
+declare(["file.delete"], confirmedStateChanging());
+declare(["blender.run_python"], confirmedStateChanging("optional_adapter"));
+declare(["ssh.run_command"], confirmedStateChanging("optional_adapter"));
 
 export function applyProductionExecutionMetadata(tools: AnyAgentHostToolDefinition[]): AnyAgentHostToolDefinition[] {
   return tools.map((definition) => {
@@ -50,11 +52,8 @@ export function validateToolExecutionMetadata(metadata: ToolExecutionMetadata, t
   if (inertClass && (metadata.externalEffect || metadata.requiresDryRun || metadata.requiresConfirmationToken || metadata.requiresExactTarget)) {
     throw new Error(`Contradictory execution metadata for ${toolName}`);
   }
-  if (metadata.executionClass === "state_changing" && !metadata.requiresDryRun) {
-    throw new Error(`State-changing tool must declare requiresDryRun for ${toolName}`);
-  }
-  if (metadata.executionClass === "state_changing" && !metadata.requiresConfirmationToken) {
-    throw new Error(`State-changing tool must declare confirmation requirements for ${toolName}`);
+  if (metadata.executionClass === "state_changing" && metadata.requiresExactTarget && !metadata.requiresConfirmationToken) {
+    throw new Error(`Exact-target state-changing tool must require confirmation for ${toolName}`);
   }
   if (metadata.operationFamily !== undefined && (typeof metadata.operationFamily !== "string" || metadata.operationFamily.length === 0 || metadata.operationFamily.length > 100)) throw new Error(`Invalid operation family metadata for ${toolName}`);
   if (metadata.operation !== undefined && (typeof metadata.operation !== "string" || metadata.operation.length === 0 || metadata.operation.length > 160)) throw new Error(`Invalid operation metadata for ${toolName}`);

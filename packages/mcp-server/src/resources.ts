@@ -7,14 +7,13 @@ import {
   type AgentHostConfig,
   type AdapterRegistrySnapshot,
   type CapabilityRegistrySnapshot,
-  type PolicyProfile,
   type ToolCapability
 } from "@agenthost/core";
 
 const CAPABILITY_MIME = "application/json";
 const MARKDOWN_MIME = "text/markdown";
 
-function capabilityInput(registry: CapabilityRegistrySnapshot, policy: PolicyProfile) {
+function capabilityInput(registry: CapabilityRegistrySnapshot) {
   const tools = registry.listTools();
   const byExecutionClass = tools.reduce<Record<string, number>>((counts, tool) => {
     const name = tool.execution?.executionClass ?? "unclassified";
@@ -23,7 +22,6 @@ function capabilityInput(registry: CapabilityRegistrySnapshot, policy: PolicyPro
   }, {});
   return {
     version: AGENTHOST_VERSION,
-    profile: policy.name,
     toolCount: tools.length,
     byExecutionClass
   };
@@ -38,10 +36,10 @@ export function listResourceEntries(): Array<{ uri: string; name: string; mimeTy
 }
 
 export async function readResource(
-  context: { registry: CapabilityRegistrySnapshot; adapters: AdapterRegistrySnapshot; policy: PolicyProfile; config: AgentHostConfig },
+  context: { registry: CapabilityRegistrySnapshot; adapters: AdapterRegistrySnapshot; config: AgentHostConfig },
   uri: string
 ): Promise<{ mimeType: string; text: string }> {
-  const input = capabilityInput(context.registry, context.policy);
+  const input = capabilityInput(context.registry);
   if (uri === "agenthost://capabilities") {
     return { mimeType: CAPABILITY_MIME, text: JSON.stringify(buildCapabilitiesJson(input), null, 2) };
   }
@@ -57,7 +55,6 @@ export async function readResource(
       mimeType: CAPABILITY_MIME,
       text: JSON.stringify({
         version: AGENTHOST_VERSION,
-        profile: context.policy.name,
         runState,
         activeTaskApproval: approval ?? null
       }, null, 2)

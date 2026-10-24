@@ -14,7 +14,7 @@ import {
   runSafeLinuxCommand,
   writeLinuxFile
 } from "../index.js";
-import { getPolicyProfile } from "@agenthost/core";
+import { getDefaultPolicy } from "@agenthost/core";
 
 describe("Linux helpers", () => {
   it("caches PATH lookups for repeated input actions", async () => {
@@ -45,7 +45,7 @@ describe("Linux helpers", () => {
 
   it("detects unknown apps as guide-only", async () => {
     await expect(
-      detectLinuxApp({ appName: "definitely-not-installed-agenthost-test" }, getPolicyProfile("dev"), {
+      detectLinuxApp({ appName: "definitely-not-installed-agenthost-test" }, getDefaultPolicy(), {
         env: { PATH: "" },
         homeDir: path.join(os.tmpdir(), "agenthost-empty-home")
       })
@@ -64,7 +64,7 @@ describe("Linux helpers", () => {
 
   it("prefers guide suggestions for sensitive apps", async () => {
     await expect(
-      detectLinuxApp({ appName: "Gmail" }, getPolicyProfile("dev"), {
+      detectLinuxApp({ appName: "Gmail" }, getDefaultPolicy(), {
         env: { PATH: "" },
         homeDir: path.join(os.tmpdir(), "agenthost-empty-home")
       })

@@ -185,13 +185,15 @@ function initialGuiSafety(
   tool: string,
   context: AgentHostMcpContext,
   actionType: "gui_click" | "gui_type",
-  activeWindow: DesktopWindowContext
+  activeWindow: DesktopWindowContext,
+  dataSensitivity?: "none" | "low" | "sensitive" | "secret"
 ) {
   return evaluateSafety(
     {
       tool,
       actionType,
       strategy: "gui_control",
+      ...(dataSensitivity === undefined ? {} : { dataSensitivity }),
       ...(activeWindow.appName === undefined ? {} : { appName: activeWindow.appName })
     },
     context.policy,
@@ -239,7 +241,8 @@ async function desktopPreview(
   context: AgentHostMcpContext,
   summary: (window: string) => string,
   target: (window: string) => string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  dataSensitivity?: "none" | "low" | "sensitive" | "secret"
 ) {
   const activeWindow = toActiveWindowContext(input.activeWindow);
   const validation = await validateActiveWindow(context, activeWindow);
@@ -255,7 +258,7 @@ async function desktopPreview(
       data: { activeWindow: validation.activeWindow ?? null, requestedWindow: activeWindow, ...data }
     };
   }
-  const safety = initialGuiSafety(tool, context, actionType, validation.activeWindow!);
+  const safety = initialGuiSafety(tool, context, actionType, validation.activeWindow!, dataSensitivity);
   return {
     summary: summary(windowLabel),
     targetFingerprint: target(windowLabel),
@@ -263,6 +266,10 @@ async function desktopPreview(
     approval: safety.approval,
     blocked: safety.blocked,
     reasons: safety.reasons,
+    requiresConfirmation: safety.grantDecision.requiresConfirmationToken
+      || safety.riskLevel === "high"
+      || safety.appSensitivity === "communication"
+      || safety.appSensitivity === "financial",
     data: { activeWindow: validation.activeWindow, ...data }
   };
 }
@@ -437,7 +444,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     auditInputSummary: (i) => `Type ${i.text.length} characters into ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
     preview: {
       isDryRun: (i) => i.dryRun === true,
-      resolveEffect: (i, context) => desktopPreview("desktop.type_text", "gui_type", i, context, (window) => `Type ${i.text.length} characters into ${window}.`, (window) => `type:${window}:${i.text.length}`, { textLength: i.text.length, dataSensitivity: i.dataSensitivity ?? "none" })
+      resolveEffect: (i, context) => desktopPreview("desktop.type_text", "gui_type", i, context, (window) => `Type ${i.text.length} characters into ${window}.`, (window) => `type:${window}:${i.text.length}`, { textLength: i.text.length, dataSensitivity: i.dataSensitivity ?? "none" }, i.dataSensitivity)
     },
     safety: {
       actionType: "inspect",

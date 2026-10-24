@@ -21,7 +21,7 @@ import {
 } from "../index.js";
 import { createTask, loadTask, transitionTask, updateTask } from "../tasks.js";
 import { classifyShellCommand } from "../safety/shell-classifier.js";
-import { getPolicyProfile } from "../policies.js";
+import { getDefaultPolicy } from "../policies.js";
 
 const roots: string[] = [];
 async function tempHome(): Promise<string> {
@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 describe("confirmation tokens", () => {
-  it("binds tool, profile, arguments, and target while ignoring dryRun/token fields", () => {
+  it("binds tool, arguments, and target while ignoring dryRun/token fields", () => {
     const base = { path: "/tmp/a", text: "hello" };
     const withExecutionFields = { ...base, dryRun: true, confirmationToken: "conf_12345678" };
     expect(fingerprintToolInput("file.write", base)).toBe(fingerprintToolInput("file.write", withExecutionFields));
@@ -47,7 +47,6 @@ describe("confirmation tokens", () => {
     const token = await prepareConfirmation({
       agentHostDir: home,
       tool: "file.write",
-      profile: "general",
       riskLevel: "medium",
       args: { path: "/tmp/a", text: "hello" },
       summary: "Write /tmp/a",
@@ -58,7 +57,6 @@ describe("confirmation tokens", () => {
       agentHostDir: home,
       tokenId: token.tokenId,
       tool: "file.write",
-      profile: "general",
       args: { path: "/tmp/a", text: "hello" },
       targetFingerprint: "target-a",
       allowPending: false
@@ -69,7 +67,6 @@ describe("confirmation tokens", () => {
       agentHostDir: home,
       tokenId: token.tokenId,
       tool: "file.write",
-      profile: "general",
       args: { path: "/tmp/a", text: "different" },
       targetFingerprint: "target-a",
       allowPending: false
@@ -82,7 +79,6 @@ describe("confirmation tokens", () => {
       agentHostDir: home,
       tokenId: token.tokenId,
       tool: "file.write",
-      profile: "general",
       args: { path: "/tmp/a", text: "hello" },
       targetFingerprint: "target-a",
       allowPending: false
@@ -91,7 +87,6 @@ describe("confirmation tokens", () => {
       agentHostDir: home,
       tokenId: token.tokenId,
       tool: "file.write",
-      profile: "general",
       args: { path: "/tmp/a", text: "hello" },
       targetFingerprint: "target-a",
       allowPending: false
@@ -103,7 +98,6 @@ describe("confirmation tokens", () => {
     const token = await prepareConfirmation({
       agentHostDir: home,
       tool: "shell.run",
-      profile: "general",
       riskLevel: "high",
       args: { command: "echo", args: ["hi"] },
       summary: "Run echo"
@@ -114,7 +108,6 @@ describe("confirmation tokens", () => {
       agentHostDir: home,
       tokenId: token.tokenId,
       tool: "shell.run",
-      profile: "general",
       args: { command: "echo", args: ["hi"] },
       allowPending: true
     })).rejects.toMatchObject({ code: "confirmation_token_rejected" });
@@ -186,7 +179,7 @@ describe("task lifecycle", () => {
 
 describe("shell control-plane protection", () => {
   it("blocks operator commands and control-plane paths but allows safe inspection", () => {
-    const policy = getPolicyProfile("general");
+    const policy = getDefaultPolicy();
     const home = "/home/operator";
     const context = { agentHostDir: path.join(home, ".agenthost") };
 

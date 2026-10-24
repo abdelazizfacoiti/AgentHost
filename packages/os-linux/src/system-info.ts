@@ -9,7 +9,6 @@ export function getLinuxSystemInfo(
     arch: process.arch,
     nodeVersion: process.version,
     agentHostDir: config.agentHostDir,
-    profile: config.profile,
     strategies: registry.listStrategies(),
     tools: registry.listTools().map((tool) => tool.name)
   };

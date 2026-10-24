@@ -31,7 +31,7 @@ import type {
   FileReadResult,
   FileWriteResult,
   InstalledAppSummary,
-  PolicyProfile,
+  RuntimePolicy,
   ShellRunResult,
   SystemInfo,
   SandboxSupportProbeResult
@@ -146,7 +146,9 @@ export interface AgentHostMcpContext {
   sessionId: string;
   runtime?: AgentHostRuntimeInfo;
   config: AgentHostConfig;
-  policy: PolicyProfile;
+  policy: RuntimePolicy;
+  /** True only while the runner executes an exact confirmed effect. */
+  confirmationSatisfied?: boolean;
   registry: CapabilityRegistrySnapshot;
   adapters: AdapterRegistrySnapshot;
   logger: AuditLogger;

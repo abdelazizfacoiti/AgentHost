@@ -13,7 +13,7 @@ Release support is documented in `SUPPORT.md`; security reports belong in
   written to audit logs.
 - OCR returns bounded redacted text boxes and never uploads images. Screenshots
   and page content are excluded from audit logs and overlays.
-- Audit logs contain tool name, risk, policy profile, approval state,
+- Audit logs contain tool name, risk, approval state,
   duration, error code, and provenance — never raw arguments, secrets, or
   private file content.
 - Task records contain the goal, status, and bounded event summaries; exported

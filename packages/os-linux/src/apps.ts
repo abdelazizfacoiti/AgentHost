@@ -14,7 +14,7 @@ import {
   type GuideCreateStepsInput,
   type GuideWorkflowKind,
   type InstalledAppSummary,
-  type PolicyProfile
+  type RuntimePolicy
 } from "@agenthost/core";
 import {
   findCommandPath,
@@ -37,7 +37,7 @@ function slugify(value: string): string {
 
 function strategiesFor(
   found: boolean,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   capabilities?: DesktopCapabilitiesResult
 ): AutomationStrategy[] {
   if (!found) {
@@ -107,7 +107,7 @@ function guideSuggestionForDetection(input: {
 function detectionFromDesktopEntry(
   appName: string,
   entry: DesktopEntry,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   executablePath?: string,
   capabilities?: DesktopCapabilitiesResult
 ): AppDetectionResult {
@@ -162,7 +162,7 @@ async function findDesktopEntry(appName: string, context: LinuxLookupContext): P
 
 export async function detectLinuxApp(
   input: { appName: string },
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   context: LinuxLookupContext = {}
 ): Promise<AppDetectionResult> {
   const capabilities = await getLinuxDesktopCapabilities(context);
@@ -320,7 +320,7 @@ export async function listInstalledLinuxApps(
 
 export async function getLinuxAppStrategy(
   input: { appName: string; taskType?: AppStrategyTaskType },
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   context: LinuxLookupContext = {}
 ): Promise<AppStrategyResult> {
   const detection = await detectLinuxApp({ appName: input.appName }, policy, context);
@@ -378,7 +378,7 @@ export function routeLinuxAppStrategy(
 
 export async function openLinuxApp(
   input: { appName: string },
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   context: LinuxLookupContext = {}
 ): Promise<AppOpenResult> {
   const detection = await detectLinuxApp({ appName: input.appName }, policy, context);

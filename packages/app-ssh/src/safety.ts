@@ -1,4 +1,4 @@
-import { classifyShellCommand, type PolicyProfile, type SafetyEvaluationContext } from "@agenthost/core";
+import { classifyShellCommand, type RuntimePolicy, type SafetyEvaluationContext } from "@agenthost/core";
 
 export interface SshTarget {
   host: string;
@@ -34,7 +34,7 @@ export function validateSshTarget(input: { host?: string; user?: string; port?: 
  */
 export function validateRemoteCommand(
   command: string,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   context: SafetyEvaluationContext = {}
 ): { ok: true } | { ok: false; error: string } {
   if (command.length === 0 || command.length > SSH_MAX_COMMAND_CHARS) {

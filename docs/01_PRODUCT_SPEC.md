@@ -1,6 +1,6 @@
 # AgentHost Product Specification
 
-> **Current minimal-v2 status:** only the 37 tools documented in
+> **Current minimal-v2 status:** only the 35 tools documented in
 > `docs/03_MCP_TOOLS_AND_ADAPTERS.md` are registered. Browser Bridge,
 > accessibility, speech, Forge, workflow/scheduler, checkpoints/receipts,
 > Control Room, and `task.execute_plan` are not live surfaces in this tree.
@@ -59,7 +59,7 @@ The default loaded registry currently contains 247 tools with validated explicit
 
 Missing or contradictory execution metadata fails registration; tool names never infer execution class.
 
-R2 adds persistent installation-level capability strategies. `strategy.select` ranks only compatible active records after live capability, profile, grant, adapter, and Browser Bridge health checks. It returns bounded advisory steps and fallbacks; it never executes an underlying tool. Built-in strategies are trusted structural metadata. Local proposals require review plus two independently verified signed-receipt outcomes before activation. Strategy records persist no task content, secrets, screenshots, OCR, transient IDs, shell, code, or dynamic tool names.
+R2 adds persistent installation-level capability strategies. `strategy.select` ranks only compatible active records after live capability, policy, grant, adapter, and Browser Bridge health checks. It returns bounded advisory steps and fallbacks; it never executes an underlying tool. Built-in strategies are trusted structural metadata. Local proposals require review plus two independently verified signed-receipt outcomes before activation. Strategy records persist no task content, secrets, screenshots, OCR, transient IDs, shell, code, or dynamic tool names.
 
 The Goal-Oriented Adaptive Planner adds bounded structural `AgentGoal`, `ExecutionPlan`, `PlanStep`, `ActionRoute`, `VerificationCheckpoint`, and `GoalOutcome` contracts. `strategy.goal_plan_preview` returns a redacted bounded ordered plan with route/checkpoint projection, candidate-plan comparison, decision level 0–3, and the smallest useful visual surface; it performs no action. `strategy.capability_graph` exposes a TTL-bounded relevant capability subgraph; `strategy.failure_memory` exposes only verified, fingerprinted route evidence. Plans remain mutable and advisory; actual actions still use the original governed tools.
 

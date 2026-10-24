@@ -7,7 +7,7 @@ import type {
   AppSensitivity,
   GovernedActionEffect,
   GrantDecision,
-  PolicyProfile,
+  RuntimePolicy,
   RiskLevel,
   SafetyInput,
   ToolExecutionClass
@@ -231,7 +231,7 @@ export function decideGovernedAction(input: {
   effect?: GovernedActionEffect;
   safety?: { allowed: boolean; blocked: boolean; guideOnly: boolean; riskLevel: RiskLevel; appSensitivity: AppSensitivity };
   grantDecision?: GrantDecision;
-  policy: PolicyProfile;
+  policy: RuntimePolicy;
 }): ActionEffectDecisionSummary {
   const effect = input.effect;
   if (effect === undefined) return failure("require_clarification", "prepare", "action_effect_unresolved", "Exact operation and bindings are not resolved.");

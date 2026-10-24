@@ -40,7 +40,7 @@ Core is app-agnostic. Linux and application implementations stay outside `packag
 
 ### `packages/core`
 
-Shared contracts and validators: policy profiles, grants, risk and sensitivity, redaction, logging shapes, execution metadata, optional-adapter policy, Forge manifest/runtime types, vision/evidence types, workflow/replay/checkpoint types, scheduler governance types, and capability registry.
+Shared contracts and validators: runtime policy, grants, risk and sensitivity, redaction, logging shapes, execution metadata, optional-adapter policy, Forge manifest/runtime types, vision/evidence types, workflow/replay/checkpoint types, scheduler governance types, and capability registry.
 
 ### `packages/mcp-server`
 
@@ -86,15 +86,15 @@ There is no `task.execute_plan` tool in minimal-v2. Every call to a registered
 tool passes through one central runner:
 
 ```text
-schema validation -> stop/takeover gate -> effect preview -> dry-run token or
-explicit confirmation -> single-use token consume -> handler -> redacted audit
+schema validation -> stop/takeover gate -> effect preview -> direct execution
+or dry-run token + exact confirmation consume -> handler -> redacted audit
 ```
 
-Previews resolve the actual target without executing. Dry-run returns the
-preview and mints a 15-minute single-use token. Non-dry execution without a
-token returns `confirmation_required`; an operator approves with
-`agenthost confirm <tokenId>`. Active task approval can auto-chain low/medium
-effects for an active task only. Stop and takeover are checked before every
+Previews resolve the actual target without executing. Routine local actions
+execute directly. Consequential effects require a 15-minute single-use token;
+a non-dry call without one returns `confirmation_required`, and an operator
+approves with `agenthost confirm <tokenId>`. Active task approval can
+auto-chain low/medium effects for an active task only. Stop and takeover are checked before every
 state-changing call; read-only observation remains available. The audit entry
 includes server version and entry path so clients can verify which runtime
 served the call. See `docs/03_MCP_TOOLS_AND_ADAPTERS.md` for the current tool

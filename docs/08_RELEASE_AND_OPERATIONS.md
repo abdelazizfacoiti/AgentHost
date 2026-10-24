@@ -10,7 +10,7 @@ is provider-agnostic and uses MCP over stdio.
 - Node.js 20+; Python 3 and GTK3/PyGObject are needed for the visible overlay.
 - X11 is the verified visible-overlay path. Wayland reports limited or
   unavailable global-overlay features.
-- The live MCP surface is the 37 tools and 3 resources documented in
+- The live MCP surface is the 35 tools and 3 resources documented in
   `docs/03_MCP_TOOLS_AND_ADAPTERS.md`.
 - Optional adapters are not registered unless explicitly enabled; this tree
   registers no browser bridge, speech, scheduler, Forge, or Control Room
@@ -91,8 +91,8 @@ availability, X11, GTK/PyGObject import support, OCR availability, storage, and
 stale process state. JSON output uses stable status fields and redacted path
 labels.
 
-Supported environment overrides are `AGENTHOST_HOME`, `AGENTHOST_CONFIG`,
-`AGENTHOST_PROFILE`, `AGENTHOST_LOG_FILE`, and `AGENTHOST_OVERLAY_MODE`.
+Supported environment overrides are `AGENTHOST_HOME`, `AGENTHOST_CONFIG`, `AGENTHOST_LOG_FILE`, and
+`AGENTHOST_OVERLAY_MODE`. The legacy `AGENTHOST_PROFILE` variable is ignored.
 Values are schema-validated; environment overrides do not bypass grants,
 confirmation, redaction, or stop/takeover gates.
 
@@ -131,9 +131,10 @@ contents. `release:verify` validates manifest fingerprints.
 Packaging does not alter AgentHost safety boundaries: no public bridge, no
 secret extraction, no CAPTCHA/MFA/login/payment bypass, no silent
 send/submit/upload/delete/pay/buy, no sudo, no arbitrary generated code, and no
-autonomous background operation. Every state-changing MCP tool passes through
-schema validation, stop/takeover gating, exact preview, a single-use
-confirmation token, execution, and redacted audit logging. `agenthost agent
+autonomous background operation. Every MCP tool passes through schema
+validation, stop/takeover gating, preview, execution, and redacted audit
+logging. Routine local actions execute directly; consequential effects add an
+exact preview and single-use confirmation token. `agenthost agent
 stop` writes the runtime flag so state-changing calls halt even if the model
 does not cooperate. Human takeover pauses agent action until the operator
 resumes control.

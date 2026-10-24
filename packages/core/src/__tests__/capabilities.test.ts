@@ -195,8 +195,6 @@ describe("CapabilityRegistry", () => {
       "system.get_info",
       "system.list_capabilities",
       "system.check_dependency",
-      "policy.get_profile",
-      "policy.list_profiles",
       "policy.list_grants",
       "policy.explain_decision",
       "forge.validate_manifest",

@@ -1,59 +1,6 @@
-import type { CapabilityGrant, PermissionDefaults, PolicyProfile, PolicyProfileName } from "./types.js";
+import type { CapabilityGrant, PermissionDefaults, RuntimePolicy } from "./types.js";
 
-const STRICT_DEFAULTS: PermissionDefaults = {
-  shell: "deny",
-  fileRead: "allow",
-  fileWrite: "approval_required",
-  appOpen: "approval_required",
-  screenshots: "approval_required",
-  windowFocus: "deny",
-  accessibilityRead: "allow",
-  accessibilityActions: "approval_required",
-  guiClick: "deny",
-  guiType: "deny",
-  guiHotkey: "deny",
-  browserAutomation: "deny",
-  communicationActions: "deny",
-  privateDataReads: "deny",
-  externalSendsUploads: "deny",
-  destructiveActions: "deny",
-  generatedTools: "deny"
-};
-
-const DEV_DEFAULTS: PermissionDefaults = {
-  shell: "allow",
-  fileRead: "allow",
-  fileWrite: "allow",
-  appOpen: "allow",
-  screenshots: "allow",
-  windowFocus: "allow",
-  accessibilityRead: "allow",
-  accessibilityActions: "allow",
-  guiClick: "deny",
-  guiType: "deny",
-  guiHotkey: "deny",
-  browserAutomation: "deny",
-  communicationActions: "deny",
-  privateDataReads: "deny",
-  externalSendsUploads: "deny",
-  destructiveActions: "deny",
-  generatedTools: "deny"
-};
-
-const GUI_DEV_DEFAULTS: PermissionDefaults = {
-  ...DEV_DEFAULTS,
-  windowFocus: "allow",
-  accessibilityActions: "allow",
-  guiClick: "allow",
-  guiType: "allow",
-  guiHotkey: "allow"
-};
-
-// General-purpose default: the user can perform any task they request and
-// approve. Routine capabilities execute under dry-run/confirmation; external,
-// communicative, private-data, and destructive effects additionally require an
-// explicit grant (approval). Nothing task-worthy is denied by default.
-const GENERAL_DEFAULTS: PermissionDefaults = {
+const DEFAULT_PERMISSIONS: PermissionDefaults = {
   shell: "allow",
   fileRead: "allow",
   fileWrite: "allow",
@@ -73,225 +20,28 @@ const GENERAL_DEFAULTS: PermissionDefaults = {
   generatedTools: "deny"
 };
 
-// Local demo only. Hard safety classifiers and confirmation tokens still apply.
-const DEMO_UNLOCKED_LOCAL_DEFAULTS: PermissionDefaults = {
-  ...GUI_DEV_DEFAULTS,
-  browserAutomation: "allow",
-  privateDataReads: "allow",
-  generatedTools: "allow"
-};
-
-const PRIVATE_DATA_DEFAULTS: PermissionDefaults = {
-  ...STRICT_DEFAULTS,
-  fileRead: "approval_required",
-  accessibilityRead: "approval_required",
-  privateDataReads: "deny"
-};
-
-const AUTOPILOT_DEFAULTS: PermissionDefaults = {
-  shell: "deny",
-  fileRead: "deny",
-  fileWrite: "deny",
-  appOpen: "deny",
-  screenshots: "deny",
-  windowFocus: "deny",
-  accessibilityRead: "deny",
-  accessibilityActions: "deny",
-  guiClick: "deny",
-  guiType: "deny",
-  guiHotkey: "deny",
-  browserAutomation: "deny",
-  communicationActions: "deny",
-  privateDataReads: "deny",
-  externalSendsUploads: "deny",
-  destructiveActions: "deny",
-  generatedTools: "deny"
-};
-
-function cloneDefaults(defaults: PermissionDefaults): PermissionDefaults {
-  return { ...defaults };
-}
-
-function cloneGrants(grants: CapabilityGrant[]): CapabilityGrant[] {
-  return grants.map((grant) => ({
-    ...grant,
-    match: {
-      ...grant.match,
-      ...(grant.match.tools === undefined ? {} : { tools: [...grant.match.tools] }),
-      ...(grant.match.strategies === undefined ? {} : { strategies: [...grant.match.strategies] }),
-      ...(grant.match.actionTypes === undefined ? {} : { actionTypes: [...grant.match.actionTypes] }),
-      ...(grant.match.appNames === undefined ? {} : { appNames: [...grant.match.appNames] }),
-      ...(grant.match.appIds === undefined ? {} : { appIds: [...grant.match.appIds] }),
-      ...(grant.match.appSensitivities === undefined ? {} : { appSensitivities: [...grant.match.appSensitivities] }),
-      ...(grant.match.dataSensitivities === undefined ? {} : { dataSensitivities: [...grant.match.dataSensitivities] }),
-      ...(grant.match.fileRoots === undefined ? {} : { fileRoots: [...grant.match.fileRoots] }),
-      ...(grant.match.commandAllowlist === undefined
-        ? {}
-        : { commandAllowlist: [...grant.match.commandAllowlist] }),
-      ...(grant.match.networkDomains === undefined ? {} : { networkDomains: [...grant.match.networkDomains] }),
-      ...(grant.match.oauthScopes === undefined ? {} : { oauthScopes: [...grant.match.oauthScopes] }),
-      ...(grant.match.generatedToolIds === undefined
-        ? {}
-        : { generatedToolIds: [...grant.match.generatedToolIds] }),
-      ...(grant.match.registrationIds === undefined ? {} : { registrationIds: [...grant.match.registrationIds] }),
-      ...(grant.match.runtimeToolNames === undefined ? {} : { runtimeToolNames: [...grant.match.runtimeToolNames] }),
-      ...(grant.match.runtimeCapabilities === undefined ? {} : { runtimeCapabilities: [...grant.match.runtimeCapabilities] }),
-      ...(grant.match.operationFamilies === undefined ? {} : { operationFamilies: [...grant.match.operationFamilies] }),
-      ...(grant.match.operations === undefined ? {} : { operations: [...grant.match.operations] }),
-      ...(grant.match.targetFingerprints === undefined ? {} : { targetFingerprints: [...grant.match.targetFingerprints] }),
-      ...(grant.match.recipientFingerprints === undefined ? {} : { recipientFingerprints: [...grant.match.recipientFingerprints] }),
-      ...(grant.match.contentFingerprints === undefined ? {} : { contentFingerprints: [...grant.match.contentFingerprints] }),
-      ...(grant.match.artifactFingerprints === undefined ? {} : { artifactFingerprints: [...grant.match.artifactFingerprints] }),
-      ...(grant.match.channels === undefined ? {} : { channels: [...grant.match.channels] }),
-      ...(grant.match.routes === undefined ? {} : { routes: [...grant.match.routes] }),
-      ...(grant.match.ownerSessionIds === undefined ? {} : { ownerSessionIds: [...grant.match.ownerSessionIds] })
-    },
-    ...(grant.requirements === undefined
-      ? {}
-      : {
-          requirements: {
-            ...grant.requirements,
-            ...(grant.requirements.allowedRoots === undefined
-              ? {}
-              : { allowedRoots: [...grant.requirements.allowedRoots] })
-          }
-        })
-  }));
-}
-
-export const STRICT_POLICY_PROFILE: PolicyProfile = {
-  name: "strict",
-  description: "Conservative local profile for normal users.",
-  enabled: true,
-  allowScreenshots: true,
-  allowAppLaunch: true,
-  allowShell: false,
-  allowFileWriteRoots: ["~/.agenthost"],
-  allowGenericClick: false,
-  allowGenericType: false,
-  allowEmailSend: false,
-  allowUploads: false,
-  requireApprovalForMediumRisk: true,
-  blockHighRiskByDefault: true,
-  requireDryRunForStateChanging: true,
-  requireConfirmationForStateChanging: true,
-  requireExactTargetForStateChanging: true,
-  defaults: STRICT_DEFAULTS,
-  grants: []
-};
-
-export const DEV_POLICY_PROFILE: PolicyProfile = {
-  name: "dev",
-  description: "Development profile for safe local experimentation.",
+export const DEFAULT_POLICY: RuntimePolicy = {
+  description: "Autonomous local policy. Routine local actions execute directly; external, destructive, and private-data effects require exact confirmation.",
   enabled: true,
   allowScreenshots: true,
   allowAppLaunch: true,
   allowShell: true,
-  allowFileWriteRoots: ["~/.agenthost", "~/Desktop/agenthost-output"],
-  allowGenericClick: false,
-  allowGenericType: false,
-  allowEmailSend: false,
-  allowUploads: false,
-  requireApprovalForMediumRisk: false,
-  blockHighRiskByDefault: true,
-  requireDryRunForStateChanging: true,
-  requireConfirmationForStateChanging: true,
-  requireExactTargetForStateChanging: true,
-  defaults: DEV_DEFAULTS,
-  grants: []
-};
-
-export const GUI_DEV_POLICY_PROFILE: PolicyProfile = {
-  name: "gui-dev",
-  description: "Development profile for GUI testing with dry-run and confirmation safeguards.",
-  enabled: true,
-  allowScreenshots: true,
-  allowAppLaunch: true,
-  allowShell: true,
-  allowFileWriteRoots: ["~/.agenthost", "~/Desktop/agenthost-output"],
+  allowFileWriteRoots: ["~", "/tmp"],
   allowGenericClick: true,
   allowGenericType: true,
-  allowEmailSend: false,
-  allowUploads: false,
-  requireApprovalForMediumRisk: false,
-  blockHighRiskByDefault: true,
-  requireDryRunForStateChanging: true,
-  requireConfirmationForStateChanging: true,
-  requireExactTargetForStateChanging: true,
-  defaults: GUI_DEV_DEFAULTS,
-  grants: []
-};
-
-export const DEMO_UNLOCKED_LOCAL_POLICY_PROFILE: PolicyProfile = {
-  name: "demo-unlocked-local",
-  description: "Local demo/testing profile. Broad local access; destructive, private, external, credential, and system actions stay blocked.",
-  enabled: true,
-  allowScreenshots: true,
-  allowAppLaunch: true,
-  allowShell: true,
-  allowFileWriteRoots: ["~/.agenthost", "~/.agenthost/outputs", "~/.agenthost/forge", "~/Desktop/agenthost-demo"],
-  allowGenericClick: true,
-  allowGenericType: true,
-  allowEmailSend: false,
-  allowUploads: false,
-  requireApprovalForMediumRisk: false,
-  blockHighRiskByDefault: true,
-  requireDryRunForStateChanging: true,
-  requireConfirmationForStateChanging: true,
-  requireExactTargetForStateChanging: true,
-  defaults: DEMO_UNLOCKED_LOCAL_DEFAULTS,
-  grants: [{
-    id: "demo-unlocked-local.communication-read",
-    scope: "persistent",
-    effect: "allow",
-    description: "Local demo-only read/inspect grant for communication apps. Does not permit sends or external effects.",
-    match: {
-      actionTypes: ["observe", "inspect", "file_read"],
-      appSensitivities: ["communication"]
-    },
-    requirements: { maxRiskLevel: "medium" }
-  }, {
-    id: "demo-unlocked-local.runtime-supported",
-    scope: "persistent",
-    effect: "allow",
-    description: "Local demo-only allow grant for bounded generated runtime capabilities.",
-    match: {
-      runtimeCapabilities: ["pure_compute", "read_runtime_input", "write_runtime_output", "use_manifest_metadata", "use_registration_metadata"]
-    },
-    requirements: {
-      requiresDryRun: true,
-      requiresConfirmationToken: true,
-      maxInputBytes: 64 * 1024,
-      maxOutputBytes: 64 * 1024,
-      maxRuntimeMs: 5_000,
-      allowedOperations: ["const", "input", "object", "array", "concat", "length"]
-    }
-  }]
-};
-
-export const GENERAL_POLICY_PROFILE: PolicyProfile = {
-  name: "general",
-  description: "General-purpose default. Any user-requested task is executable; consequential effects require grants plus confirmation.",
-  enabled: true,
-  allowScreenshots: true,
-  allowAppLaunch: true,
-  allowShell: true,
-  allowFileWriteRoots: ["~/.agenthost", "~/Desktop/agenthost-output"],
-  allowGenericClick: true,
-  allowGenericType: true,
-  allowEmailSend: false,
-  allowUploads: false,
+  allowEmailSend: true,
+  allowUploads: true,
   requireApprovalForMediumRisk: false,
   blockHighRiskByDefault: false,
-  requireDryRunForStateChanging: true,
-  requireConfirmationForStateChanging: true,
-  requireExactTargetForStateChanging: true,
-  defaults: GENERAL_DEFAULTS,
+  requireDryRunForStateChanging: false,
+  requireConfirmationForStateChanging: false,
+  requireExactTargetForStateChanging: false,
+  defaults: DEFAULT_PERMISSIONS,
   grants: [{
-    id: "general.communication-read",
+    id: "default.communication-read",
     scope: "persistent",
     effect: "allow",
-    description: "Default read/inspect grant for communication apps. Sends and external effects still need approval plus confirmation.",
+    description: "Read/inspect communication apps. Sends and external effects still require exact confirmation.",
     match: {
       actionTypes: ["observe", "inspect", "file_read"],
       appSensitivities: ["communication"]
@@ -300,86 +50,15 @@ export const GENERAL_POLICY_PROFILE: PolicyProfile = {
   }]
 };
 
-export const PRIVATE_DATA_POLICY_PROFILE: PolicyProfile = {
-  name: "private-data",
-  description: "Restricted profile for private-data inspection with explicit grants.",
-  enabled: true,
-  allowScreenshots: true,
-  allowAppLaunch: true,
-  allowShell: false,
-  allowFileWriteRoots: ["~/.agenthost"],
-  allowGenericClick: false,
-  allowGenericType: false,
-  allowEmailSend: false,
-  allowUploads: false,
-  requireApprovalForMediumRisk: true,
-  blockHighRiskByDefault: true,
-  requireDryRunForStateChanging: true,
-  requireConfirmationForStateChanging: true,
-  requireExactTargetForStateChanging: true,
-  defaults: PRIVATE_DATA_DEFAULTS,
-  grants: []
-};
+function cloneGrants(grants: CapabilityGrant[]): CapabilityGrant[] {
+  return structuredClone(grants);
+}
 
-export const AUTOPILOT_FUTURE_DISABLED_POLICY_PROFILE: PolicyProfile = {
-  name: "autopilot-future-disabled-by-default",
-  description: "Reserved future profile. Listed for planning, but disabled for real execution.",
-  enabled: false,
-  allowScreenshots: false,
-  allowAppLaunch: false,
-  allowShell: false,
-  allowFileWriteRoots: ["~/.agenthost"],
-  allowGenericClick: false,
-  allowGenericType: false,
-  allowEmailSend: false,
-  allowUploads: false,
-  requireApprovalForMediumRisk: true,
-  blockHighRiskByDefault: true,
-  requireDryRunForStateChanging: true,
-  requireConfirmationForStateChanging: true,
-  requireExactTargetForStateChanging: true,
-  defaults: AUTOPILOT_DEFAULTS,
-  grants: []
-};
-
-function clonePolicyProfile(profile: PolicyProfile, grants: CapabilityGrant[] = []): PolicyProfile {
+export function getDefaultPolicy(options: { grants?: CapabilityGrant[] } = {}): RuntimePolicy {
   return {
-    ...profile,
-    allowFileWriteRoots: [...profile.allowFileWriteRoots],
-    defaults: cloneDefaults(profile.defaults),
-    grants: cloneGrants([...profile.grants, ...grants])
+    ...DEFAULT_POLICY,
+    allowFileWriteRoots: [...DEFAULT_POLICY.allowFileWriteRoots],
+    defaults: { ...DEFAULT_POLICY.defaults },
+    grants: cloneGrants([...DEFAULT_POLICY.grants, ...(options.grants ?? [])])
   };
-}
-
-export function getPolicyProfile(name: PolicyProfileName, options: { grants?: CapabilityGrant[] } = {}): PolicyProfile {
-  const grants = options.grants ?? [];
-
-  switch (name) {
-    case "general":
-      return clonePolicyProfile(GENERAL_POLICY_PROFILE, grants);
-    case "strict":
-      return clonePolicyProfile(STRICT_POLICY_PROFILE, grants);
-    case "dev":
-      return clonePolicyProfile(DEV_POLICY_PROFILE, grants);
-    case "gui-dev":
-      return clonePolicyProfile(GUI_DEV_POLICY_PROFILE, grants);
-    case "demo-unlocked-local":
-      return clonePolicyProfile(DEMO_UNLOCKED_LOCAL_POLICY_PROFILE, grants);
-    case "private-data":
-      return clonePolicyProfile(PRIVATE_DATA_POLICY_PROFILE, grants);
-    case "autopilot-future-disabled-by-default":
-      return clonePolicyProfile(AUTOPILOT_FUTURE_DISABLED_POLICY_PROFILE, grants);
-  }
-}
-
-export function listPolicyProfiles(): PolicyProfile[] {
-  return [
-    getPolicyProfile("general"),
-    getPolicyProfile("strict"),
-    getPolicyProfile("dev"),
-    getPolicyProfile("gui-dev"),
-    getPolicyProfile("demo-unlocked-local"),
-    getPolicyProfile("private-data"),
-    getPolicyProfile("autopilot-future-disabled-by-default")
-  ];
 }

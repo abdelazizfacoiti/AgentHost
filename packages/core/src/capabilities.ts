@@ -63,8 +63,8 @@ export function validateToolExecutionMetadata(metadata: ToolExecutionMetadata, t
   if (inert && (metadata.externalEffect || metadata.requiresDryRun || metadata.requiresConfirmationToken || metadata.requiresExactTarget)) {
     throw new Error(`Contradictory execution metadata for ${toolName}`);
   }
-  if (metadata.executionClass === "state_changing" && !metadata.requiresDryRun) {
-    throw new Error(`State-changing execution metadata is incomplete for ${toolName}`);
+  if (metadata.executionClass === "state_changing" && metadata.requiresExactTarget && !metadata.requiresConfirmationToken) {
+    throw new Error(`Exact-target execution metadata is incomplete for ${toolName}`);
   }
   if (metadata.operationFamily !== undefined && (typeof metadata.operationFamily !== "string" || metadata.operationFamily.length === 0 || metadata.operationFamily.length > 100)) throw new Error(`Invalid operation family metadata for ${toolName}`);
   if (metadata.operation !== undefined && (typeof metadata.operation !== "string" || metadata.operation.length === 0 || metadata.operation.length > 160)) throw new Error(`Invalid operation metadata for ${toolName}`);
@@ -396,16 +396,6 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
       description: "Checks whether a command or desktop app appears to be available."
     },
     {
-      name: "policy.get_profile",
-      riskLevel: "observe" as const,
-      description: "Returns the active AgentHost permission profile and default grant requirements."
-    },
-    {
-      name: "policy.list_profiles",
-      riskLevel: "observe" as const,
-      description: "Lists built-in AgentHost permission profiles and their default behavior."
-    },
-    {
       name: "policy.list_grants",
       riskLevel: "observe" as const,
       description: "Lists active persistent and session grants as safe summaries."
@@ -413,7 +403,7 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     {
       name: "policy.explain_decision",
       riskLevel: "low" as const,
-      description: "Explains how the active profile and grants classify a potential action."
+      description: "Explains how the active policy and grants classify a potential action."
     },
     {
       name: "forge.validate_manifest",
@@ -423,7 +413,7 @@ export function createBaseCapabilityRegistry(): CapabilityRegistry {
     {
       name: "forge.review_manifest",
       riskLevel: "low" as const,
-      description: "Reviews a Tool Forge manifest against the active profile and grants without applying anything."
+      description: "Reviews a Tool Forge manifest against the active policy and grants without applying anything."
     },
     {
       name: "forge.propose_grants",

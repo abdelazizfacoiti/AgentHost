@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Replaced named policy profiles with one autonomous runtime policy. Routine
+  local actions execute directly; external, destructive, private-data, and
+  financial effects require exact confirmation. Removed
+  `policy.get_profile` and `policy.list_profiles`, leaving 35 live tools.
 - Added one automatic, public, click-through action card for every
   state-changing MCP tool, including waiting-for-approval, preview, done,
   halted, and error states.
@@ -14,7 +18,7 @@
 
 ## 0.1.0
 
-- Minimal-v2 runtime: 37 MCP tools in computer, filesystem, shell, desktop,
+- Minimal-v2 runtime: 37 MCP tools at release time in computer, filesystem, shell, desktop,
   vision/OCR, window, task, and agent-control families.
 - Persistent task lifecycle with watch, export, pause/resume, and scoped
   approval commands.

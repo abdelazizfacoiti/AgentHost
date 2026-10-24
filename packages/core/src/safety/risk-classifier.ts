@@ -1,7 +1,7 @@
 import type {
   AppSensitivity,
   PathAccessMode,
-  PolicyProfile,
+  RuntimePolicy,
   RiskLevel,
   SafetyDecision,
   SafetyEvaluationContext,
@@ -119,7 +119,7 @@ function applyAppSensitivityRisk(
 
 export function classifyRisk(
   input: SafetyInput,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   context: SafetyEvaluationContext = {}
 ): SafetyDecision {
   let riskLevel = baseRiskForAction(input.actionType);
@@ -182,13 +182,13 @@ export function classifyRisk(
 
   if (input.actionType === "shell_command" && !policy.allowShell) {
     riskLevel = maxRiskLevel(riskLevel, "high");
-    reasons.push("Shell is disabled by this policy profile.");
+    reasons.push("Shell is disabled by policy.");
     matchedRules.push("policy.shell.disabled");
   }
 
   if (input.tool === "desktop.screenshot" && !policy.allowScreenshots) {
     riskLevel = "blocked";
-    reasons.push("Screenshots are disabled by this policy profile.");
+    reasons.push("Screenshots are disabled by policy.");
     matchedRules.push("policy.screenshot.disabled");
   }
 
@@ -200,25 +200,13 @@ export function classifyRisk(
 
   if (!policy.enabled && isStateChangingAction(input.actionType)) {
     riskLevel = "blocked";
-    reasons.push(`Profile ${policy.name} is disabled for state-changing execution.`);
-    matchedRules.push(`policy.profile.${policy.name}.disabled`);
+    reasons.push("State-changing execution is disabled by policy.");
+    matchedRules.push("policy.disabled");
   }
 
   const grantEvaluation = evaluateGrantDecision(input, policy, context.grants ?? policy.grants, appSensitivity, context);
   reasons.push(...grantEvaluation.reasons);
   matchedRules.push(...grantEvaluation.matchedRules);
-
-  if (
-    appSensitivity === "communication" &&
-    (input.actionType === "observe" || input.actionType === "inspect" || input.actionType === "file_read") &&
-    input.dataSensitivity !== undefined &&
-    input.dataSensitivity !== "none" &&
-    grantEvaluation.decision.allowedByGrantIds.length === 0
-  ) {
-    riskLevel = "blocked";
-    reasons.push("Communication app private-data reads require an explicit grant.");
-    matchedRules.push("app.communication.private_data_requires_grant");
-  }
 
   // A matching scoped allow grant can make this exact effect eligible even
   // when its category is normally high-risk. It never removes the tool's
@@ -226,10 +214,11 @@ export function classifyRisk(
   const exactGovernedGrant = riskLevel === "high"
     && grantEvaluation.decision.allowedByGrantIds.length > 0
     && (appSensitivity !== "financial" || input.effect?.bindings?.route !== undefined);
-  let approval = evaluateApprovalRequirement(riskLevel, policy, reasons, exactGovernedGrant);
+  let approval = evaluateApprovalRequirement(riskLevel, policy, reasons, exactGovernedGrant, context.confirmationSatisfied === true);
 
   if (
     grantEvaluation.decision.requiresApproval &&
+    context.confirmationSatisfied !== true &&
     approval.status !== "denied" &&
     approval.status !== "required"
   ) {

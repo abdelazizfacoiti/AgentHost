@@ -3,6 +3,7 @@ import {
   ConfirmationError,
   activeApprovalCoversRisk,
   consumeConfirmation,
+  evaluateSafety,
   loadTask,
   prepareConfirmation,
   readActiveTaskApproval,
@@ -19,6 +20,7 @@ import {
 } from "@agenthost/core";
 import type { AgentHostMcpContext } from "./context.js";
 import type { ToolActionHandle } from "./action-overlay.js";
+import { createSafetyEvaluationContext } from "./grants.js";
 
 export interface ToolPreviewEffect {
   summary?: string;
@@ -27,6 +29,7 @@ export interface ToolPreviewEffect {
   approval?: ApprovalInfo;
   blocked?: boolean;
   reasons?: string[];
+  requiresConfirmation?: boolean;
   data?: unknown;
 }
 
@@ -122,13 +125,44 @@ function targetFingerprint(value: string | undefined): string | undefined {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function safetyEffect(
+  tool: AnyAgentHostToolDefinition,
+  input: unknown,
+  context: AgentHostMcpContext
+): ToolPreviewEffect {
+  const summary = inputSummaryForAudit(tool, input);
+  if (tool.safety.getInput === undefined) return { summary };
+  try {
+    const safetyInput = tool.safety.getInput(input) ?? {};
+    const safety = evaluateSafety(
+      { ...safetyInput, tool: tool.name, actionType: tool.safety.actionType },
+      context.policy,
+      createSafetyEvaluationContext(context)
+    );
+    return {
+      summary,
+      ...(typeof safetyInput.filePath === "string" ? { targetFingerprint: safetyInput.filePath } : {}),
+      riskLevel: safety.riskLevel,
+      approval: safety.approval,
+      blocked: safety.blocked,
+      reasons: safety.reasons,
+      requiresConfirmation: safety.grantDecision.requiresConfirmationToken
+        || safety.riskLevel === "high"
+        || safety.appSensitivity === "communication"
+        || safety.appSensitivity === "financial"
+    };
+  } catch {
+    return { summary };
+  }
+}
+
 async function previewEffect(
   tool: AnyAgentHostToolDefinition,
   input: unknown,
   context: AgentHostMcpContext
 ): Promise<ToolPreviewEffect> {
   if (tool.preview?.resolveEffect === undefined) {
-    return { summary: inputSummaryForAudit(tool, input) };
+    return safetyEffect(tool, input, context);
   }
   try {
     return await tool.preview.resolveEffect(input, context);
@@ -148,7 +182,6 @@ async function prepareForTool(input: {
   const record = await prepareConfirmation({
     agentHostDir: input.context.config.agentHostDir,
     tool: input.tool.name,
-    profile: input.context.policy.name,
     riskLevel: input.riskLevel,
     args: input.parsedInput,
     summary: input.effect.summary ?? inputSummaryForAudit(input.tool, input.parsedInput),
@@ -165,10 +198,21 @@ async function executeGoverned(
   audit: AuditMeta
 ): Promise<ToolResult> {
   const stateChanging = tool.execution?.executionClass === "state_changing";
+  const rawObject = rawInput !== null && typeof rawInput === "object" && !Array.isArray(rawInput)
+    ? rawInput as Record<string, unknown>
+    : undefined;
+  const dryRun = tool.preview?.isDryRun?.(rawInput as never)
+    ?? rawObject?.dryRun === true;
+  const providedToken = typeof rawObject?.confirmationToken === "string" ? rawObject.confirmationToken : undefined;
+  const parseInput = rawObject === undefined
+    ? rawInput
+    : Object.fromEntries(Object.entries(rawObject).filter(([key, value]) =>
+        !(key === "dryRun" && typeof value === "boolean") &&
+        !(key === "confirmationToken" && typeof value === "string")));
 
-  let parsedInput = rawInput;
+  let parsedInput = parseInput;
   if (tool.inputSchema !== undefined && typeof tool.inputSchema.safeParse === "function") {
-    const parsed = tool.inputSchema.safeParse(rawInput);
+    const parsed = tool.inputSchema.safeParse(parseInput);
     if (parsed.success !== true) {
       audit.inputSummary = "Invalid tool input";
       return toolFailure({
@@ -197,9 +241,7 @@ async function executeGoverned(
       });
     }
   }
-  const dryRun = tool.preview?.isDryRun?.(parsedInput)
-    ?? (parsedInput !== null && typeof parsedInput === "object" && (parsedInput as { dryRun?: unknown }).dryRun === true);
-  const needsEffect = stateChanging || tool.preview?.resolveEffect !== undefined;
+  const needsEffect = stateChanging || tool.preview?.resolveEffect !== undefined || tool.safety.getInput !== undefined;
   let effect: ToolPreviewEffect;
   try {
     effect = needsEffect
@@ -218,6 +260,12 @@ async function executeGoverned(
   }
   const riskLevel = resolveRisk(effect, tool.riskLevel);
   const approval = resolveApproval(effect);
+  const requiresConfirmation = (
+    tool.execution?.requiresConfirmationToken === true ||
+    effect.requiresConfirmation === true ||
+    approval.required ||
+    riskLevel === "high"
+  );
 
   audit.preview = dryRun === true;
   if (effect.blocked === true || approval.status === "denied") {
@@ -236,7 +284,7 @@ async function executeGoverned(
 
   if (dryRun === true) {
     let confirmation: ToolConfirmationInfo | undefined;
-    if (stateChanging && tool.execution?.requiresConfirmationToken) {
+    if (requiresConfirmation) {
       const pending = await prepareForTool({ tool, parsedInput, context, riskLevel, effect });
       confirmation = confirmationInfo("previewGenerated", {
         tokenId: pending.tokenId,
@@ -264,14 +312,15 @@ async function executeGoverned(
     });
   }
 
-  if (stateChanging && tool.execution?.requiresConfirmationToken) {
-    const providedToken = parsedInput !== null && typeof parsedInput === "object"
-      ? (parsedInput as { confirmationToken?: unknown }).confirmationToken
-      : undefined;
-    const tokenId = typeof providedToken === "string" ? providedToken : undefined;
+  let confirmationAccepted = false;
+  if (requiresConfirmation) {
+    const tokenId = providedToken;
     const activeApproval = await readActiveTaskApproval(context.config.agentHostDir);
     const activeTask = activeApproval === undefined ? undefined : await loadTask(context.config.agentHostDir, activeApproval.taskId);
-    const allowPending = activeApprovalCoversRisk(activeApproval, riskLevel) && activeTask?.status === "active";
+    const exactConfirmationRequired = effect.requiresConfirmation === true || riskLevel === "high";
+    const allowPending = !exactConfirmationRequired
+      && activeApprovalCoversRisk(activeApproval, riskLevel)
+      && activeTask?.status === "active";
 
     if (tokenId === undefined) {
       if (!allowPending) {
@@ -314,7 +363,6 @@ async function executeGoverned(
         agentHostDir: context.config.agentHostDir,
         tokenId: prepared.tokenId,
         tool: tool.name,
-        profile: context.policy.name,
         args: parsedInput,
         ...(effectTarget === undefined ? {} : { targetFingerprint: effectTarget }),
         allowPending: true
@@ -333,7 +381,6 @@ async function executeGoverned(
         agentHostDir: context.config.agentHostDir,
         tokenId,
         tool: tool.name,
-        profile: context.policy.name,
         args: parsedInput,
         ...(effectTarget === undefined ? {} : { targetFingerprint: effectTarget }),
         allowPending
@@ -346,9 +393,13 @@ async function executeGoverned(
         executed: false
       });
     }
+    confirmationAccepted = true;
   }
 
-  const result = await tool.handler(parsedInput, context, tool.execution);
+  const handlerContext = confirmationAccepted && context.confirmationSatisfied !== true
+    ? { ...context, confirmationSatisfied: true }
+    : context;
+  const result = await tool.handler(parsedInput, handlerContext, tool.execution);
   if (audit.confirmation !== undefined) audit.confirmation.executed = result.ok;
   if (result.confirmation === undefined && audit.confirmation !== undefined) {
     result.confirmation = audit.confirmation;
@@ -417,7 +468,6 @@ export async function runTool<Input>(
     await context.logger.log({
       timestamp: new Date().toISOString(),
       sessionId: context.sessionId,
-      profile: context.policy.name,
       tool: tool.name,
       riskLevel: result.riskLevel,
       ...(runtime === undefined ? {} : { serverVersion: runtime.version, serverPath: runtime.entryPath }),

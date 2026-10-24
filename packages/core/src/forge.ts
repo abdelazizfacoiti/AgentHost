@@ -2,11 +2,11 @@ import { z } from "zod";
 import { evaluateSafety } from "./safety/risk-classifier.js";
 import { classifyPath, normalizePathForPolicy } from "./safety/path-policy.js";
 import { classifyShellCommand } from "./safety/shell-classifier.js";
-import { getPolicyProfile } from "./policies.js";
+import { getDefaultPolicy } from "./policies.js";
 import type {
   CapabilityGrant,
   DataSensitivity,
-  PolicyProfile,
+  RuntimePolicy,
   RiskLevel,
   SafetyInput,
   ToolForgeGrantProposal,
@@ -25,8 +25,8 @@ import type {
 const MANIFEST_ID_PATTERN = /^[a-z][a-z0-9._-]{2,127}$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 const FORGE_ROOTS = ["~/.agenthost", "~/.agenthost/outputs", "~/Desktop/agenthost-output"] as const;
-const FORGE_REVIEW_POLICY: PolicyProfile = {
-  ...getPolicyProfile("dev"),
+const FORGE_REVIEW_POLICY: RuntimePolicy = {
+  ...getDefaultPolicy(),
   allowFileWriteRoots: [...FORGE_ROOTS]
 };
 const RISK_ORDER: RiskLevel[] = ["observe", "low", "medium", "high", "blocked"];
@@ -648,7 +648,7 @@ function sampleSafetyInput(manifest: ToolForgeManifest, permission: ToolForgePer
 function reviewPermission(
   manifest: ToolForgeManifest,
   permission: ToolForgePermissionRequest,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   grants: CapabilityGrant[],
   scope: "session" | "persistent",
   expiresAt?: string
@@ -685,7 +685,7 @@ function reviewPermission(
 export function reviewToolForgeManifest(
   input: unknown,
   options: {
-    policy: PolicyProfile;
+    policy: RuntimePolicy;
     grants?: CapabilityGrant[];
     scope?: "session" | "persistent";
     expiresAt?: string;

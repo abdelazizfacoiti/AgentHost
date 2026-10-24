@@ -83,7 +83,7 @@ async function configObject(): Promise<Json> {
   return (await readJson(candidate)) ?? {};
 }
 async function configValidate(): Promise<Output> {
-  try { const config = await loadAgentHostConfig({ env: { ...process.env, AGENTHOST_CONFIG: existsSync(publicConfig) ? publicConfig : legacyConfigPath(home) } }); return { ok: true, command: "config validate", data: { valid: true, schemaVersion: config.schemaVersion ?? 1, configPath: "[config]", profile: config.profile } }; } catch (error) { return fail("config validate", error instanceof Error ? error.message : "config_invalid"); }
+  try { const config = await loadAgentHostConfig({ env: { ...process.env, AGENTHOST_CONFIG: existsSync(publicConfig) ? publicConfig : legacyConfigPath(home) } }); return { ok: true, command: "config validate", data: { valid: true, schemaVersion: config.schemaVersion ?? 1, configPath: "[config]" } }; } catch (error) { return fail("config validate", error instanceof Error ? error.message : "config_invalid"); }
 }
 async function configShow(): Promise<Output> { return { ok: true, command: "config show", data: redact(await configObject()) }; }
 async function setup(flags: ReturnType<typeof parseFlags>): Promise<Output> {
@@ -97,7 +97,7 @@ async function setup(flags: ReturnType<typeof parseFlags>): Promise<Output> {
         await safeWrite(`${legacy}.migration.bak`, await readFile(legacy, "utf8"));
         await safeWrite(publicConfig, JSON.stringify(migrated, null, 2) + "\n");
       } else {
-        await safeWrite(publicConfig, JSON.stringify({ schemaVersion: AGENTHOST_CONFIG_SCHEMA_VERSION, profile: "general" }, null, 2) + "\n");
+        await safeWrite(publicConfig, JSON.stringify({ schemaVersion: AGENTHOST_CONFIG_SCHEMA_VERSION }, null, 2) + "\n");
       }
     }
     const stateFile = path.join(agentHome, "setup", "state.json"); const state = (await readJson(stateFile)) ?? { schemaVersion: 1, completed: [] };
@@ -338,7 +338,6 @@ async function confirmationsCommand(args: ReturnType<typeof parseFlags>): Promis
     return { ok: true, command: "confirmations", data: { pending: records.map((record) => ({
       tokenId: record.tokenId,
       tool: record.tool,
-      profile: record.profile,
       riskLevel: record.riskLevel,
       summary: redact(record.summary),
       status: record.status,
@@ -392,7 +391,7 @@ async function capabilitiesCommand(args?: ReturnType<typeof parseFlags>): Promis
     return {
       ok: true,
       command: "capabilities",
-      data: buildCapabilityMarkdown({ version: AGENTHOST_VERSION, profile: "general" })
+      data: buildCapabilityMarkdown({ version: AGENTHOST_VERSION })
         + "\nLive counts: call system.list_capabilities over MCP, or read agenthost://capabilities.\n"
     };
   }

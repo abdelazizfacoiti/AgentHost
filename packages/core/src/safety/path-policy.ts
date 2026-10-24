@@ -3,7 +3,7 @@ import path from "node:path";
 import type {
   PathAccessMode,
   PathSafetyResult,
-  PolicyProfile,
+  RuntimePolicy,
   RiskLevel,
   SafetyEvaluationContext
 } from "../types.js";
@@ -54,7 +54,7 @@ function unique(values: string[]): string[] {
 }
 
 export function resolveAllowedWriteRoots(
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   context: SafetyEvaluationContext = {}
 ): string[] {
   const roots = policy.allowFileWriteRoots.map((root) => normalizePathForPolicy(root, context));
@@ -142,7 +142,7 @@ function pathRisk(
   }
 
   if (access === "delete") {
-    return protectionKind === "none" ? "high" : "blocked";
+    return (protectionKind === "none" || protectionKind === "home") && isAllowedWriteRoot ? "high" : "blocked";
   }
 
   if (access === "write") {
@@ -158,7 +158,7 @@ function pathRisk(
 
 export function classifyPath(
   inputPath: string,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   context: SafetyEvaluationContext & { access?: PathAccessMode } = {}
 ): PathSafetyResult {
   const homeDir = context.homeDir ?? os.homedir();

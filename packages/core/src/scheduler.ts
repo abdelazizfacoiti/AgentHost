@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PolicyProfile, SchedulerPolicy, ScheduledJobDeliveryPolicy, ScheduledJobSchedule, ScheduledJobTask } from "./types.js";
+import type { RuntimePolicy, SchedulerPolicy, ScheduledJobDeliveryPolicy, ScheduledJobSchedule, ScheduledJobTask } from "./types.js";
 
 export const DEFAULT_SCHEDULER_POLICY: SchedulerPolicy = {
   allowSchedulerSpecs: true,
@@ -25,8 +25,8 @@ export const DEFAULT_SCHEDULER_POLICY: SchedulerPolicy = {
   allowAutomaticRefresh: false
 };
 
-export function schedulerPolicy(profile: PolicyProfile): SchedulerPolicy {
-  return profile.scheduler === undefined ? DEFAULT_SCHEDULER_POLICY : { ...DEFAULT_SCHEDULER_POLICY, ...profile.scheduler };
+export function schedulerPolicy(policy: RuntimePolicy): SchedulerPolicy {
+  return policy.scheduler === undefined ? DEFAULT_SCHEDULER_POLICY : { ...DEFAULT_SCHEDULER_POLICY, ...policy.scheduler };
 }
 
 export function schedulerHash(value: unknown): string {

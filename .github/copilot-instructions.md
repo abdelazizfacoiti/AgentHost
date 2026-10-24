@@ -1,0 +1,144 @@
+<!-- agenthost-skill:start (managed by scripts/install-agenthost-skill.mjs) -->
+# AgentHost — permissioned laptop control
+
+AgentHost is a local MCP server exposing computer-use tools. When a task needs the
+real machine, use AgentHost tools — never raw `pyautogui`/`xdotool` scripts, never
+silent GUI actions.
+
+## When this applies
+
+Use AgentHost when the request needs any of:
+
+- operate a GUI app, click, type, drag, press keys, scroll
+- take or inspect screenshots, find a visual target
+- open/focus/enumerate windows
+- automate a website or an app that has no API
+- run shell commands or touch files outside the current workspace
+- any multi-app workflow the user wants performed "on my laptop"
+
+Do **not** use it for normal code edits or commands inside this project — use the
+coding tools directly.
+
+## Hard rules
+
+1. **Inspect before acting.** Start with `computer.observe_state`, `window.list`,
+   or `desktop.screenshot`; never click blind.
+2. **Preferred order:** app-specific adapter → official API/plugin → CLI/script →
+   browser automation → accessibility tree → GUI screenshot/click/type → guide
+   mode. GUI clicking is the fallback, not the default.
+3. **Respect confirmation only at consequential boundaries.** Routine local
+   actions — opening apps, focusing windows, screenshots, clicks, typing,
+   hotkeys, shell, and file reads/writes — execute directly. Do not pause for
+   per-step confirmation. External sends/uploads, destructive delete,
+   private-data reads, financial effects, and high-risk actions need an exact
+   preview: call with `dryRun: true`, surface the returned token command, wait
+   for the operator to run `agenthost confirm <tokenId>` (or `deny`), then
+   retry the exact same call with `confirmationToken: "<tokenId>"`. If a tool
+   returns `confirmation_required`, do the same. Never bypass a blocked
+   action. For repeated low/medium work, the operator can run
+   `agenthost task approve <activeTaskId> [--max-risk low|medium]`; that does
+   not cover high-risk or consequential effects.
+4. **Respect stop.** If output contains `emergency_stop_requested` or
+   `human_takeover_active`, halt state-changing work immediately. `agent.stop`
+   and `agent.takeover_begin` request those gates; only the operator can clear
+   them with `agenthost agent resume --stop` or `--takeover`.
+5. **No secrets through the GUI.** Never type passwords, API keys, tokens, or
+   payment data. Ask the operator to enter them.
+6. **Track work.** For multi-step jobs use `task.create`, `task.update`, and
+   `task.add_event` so progress survives failures and the operator can watch it.
+   Use `task.update_status` to pause, resume, complete, or cancel. Do not start
+   a new task until the current one is finished unless the user asks.
+7. **Prefer bulk text entry.** Use `desktop.type_text` for text, not per-character
+   key presses; use `desktop.hotkey` for shortcuts.
+8. **Leave the machine as found.** Restore focus/state when the task ends; report
+   what changed.
+
+## Tool map
+
+| Need | Tool |
+|---|---|
+| Observe desktop state | `computer.observe_state` |
+| Capture screenshot | `desktop.screenshot` |
+| Wait for a condition | `computer.wait_for` |
+| Click / move pointer | `desktop.click`, `desktop.pointer` |
+| Type text / shortcuts | `desktop.type_text`, `desktop.hotkey` |
+| Windows | `window.list`, `window.focus` |
+| Files | `file.read`, `file.write`, `file.list`, `file.copy`, `file.move`, `file.delete`, `file.exists`, `file.ensure_dir` |
+| Shell | `shell.run` |
+| Vision / OCR | `vision.find_text`, `vision.find_target`, `vision.analyze_image` |
+| Tasks / progress | `task.create`, `task.status`, `task.update`, `task.add_event`, `task.list` |
+| Apps / adapters | `adapter.list`, `adapter.get` |
+| Safety / system | `system.get_info`, `system.list_capabilities`, `system.check_dependency` |
+
+MCP clients may prefix tool names (for example `mcp__agenthost__desktop_click` or
+`agenthost_desktop_click`). Match on the suffix (`desktop.click` → `desktop_click`).
+
+## Fast-path recipes
+
+There is one autonomous policy. Do the task; do not ask for routine clicks.
+
+**Open an app and perform a GUI task**
+
+1. `computer.observe_state` or `window.list` to see the current desktop.
+2. Open/focus the app, then `desktop.screenshot` to verify.
+3. Loop directly: screenshot → click/type/hotkey → screenshot. No dry-run or
+   token is needed for routine local actions.
+4. Stop when the visible result matches the request; restore prior focus.
+
+**Read an app or web page, then act**
+
+1. `desktop.screenshot` plus `vision.find_text`/`vision.find_target` for
+   coordinates; never click blind.
+2. If the app is private-data (mail, messages, documents), a read may return
+   `confirmation_required`. Show the token command and wait.
+3. After confirmation, retry the same read with the token, then continue with
+   routine clicks/types directly.
+
+**Edit files or run local commands**
+
+- `file.read`, `file.list`, `file.write`, `file.copy`, `file.move`,
+  `file.ensure_dir`, and `shell.run` run directly inside allowed roots.
+- `file.delete`, destructive shell commands, and protected/control-plane paths
+  stay gated or blocked. Use the preview/confirm flow for a permitted delete.
+
+**Send, upload, submit, purchase, or delete**
+
+1. Call the exact action with `dryRun: true`.
+2. Show the summary and `agenthost confirm <tokenId>` command to the operator.
+3. Wait; on approval, retry the identical call with
+   `confirmationToken: "<tokenId>"`. On denial, stop.
+4. Never type credentials or payment secrets; ask the operator.
+
+## Operator controls
+
+The human can always intervene outside the chat:
+
+- `agenthost status` — server and run-flag summary
+- `agenthost confirmations` — list pending exact-preview tokens
+- `agenthost confirm <tokenId>` / `deny <tokenId>` — resolve one preview
+- `agenthost task approve <taskId> [--max-risk low|medium]` — 30-minute
+  approval for an active task's low/medium effects
+- `agenthost task pause <taskId>` / `task resume <taskId>` — task lifecycle
+- `agenthost task watch <taskId> --overlay [--follow]` — live progress card
+- Every state-changing tool automatically shows a small action card; it never
+  replaces confirmation or stop controls
+- `agenthost overlay hide` — hide persistent cards immediately
+- `agenthost overlay status` — renderer and hide-marker state
+- `agenthost agent stop` — runtime stop when the client owns the MCP process
+- `agenthost agent resume --stop|--takeover` — operator-only gate clear
+
+Progress cards persist until explicitly dismissed, so a finished task remains
+visible until the operator closes it.
+
+## If AgentHost is not available
+
+Resources: pull `agenthost://capabilities.md` for the compact tool brief and
+`agenthost://status` for live stop/takeover/approval state. There is no
+`agenthost://skills` MCP resource.
+
+If no AgentHost MCP tools are exposed: say so, and ask the operator to run
+`agenthost start` (or register the server with their client, e.g.
+`agenthost integrations codex add --apply`). Do not silently substitute another
+automation library; that bypasses approvals and audit logging.
+<!-- agenthost-skill:end -->
+

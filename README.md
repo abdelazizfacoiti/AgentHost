@@ -58,7 +58,7 @@ The skill file lives at [`skills/agenthost/SKILL.md`](skills/agenthost/SKILL.md)
 
 | | AgentHost |
 |---|---|
-| **Safety model** | Risk tiers + capability grants + exact-preview, target-bound single-use tokens for state changes + short-lived active-task approval for low/medium effects + a redacted audit entry on *every* call |
+| **Safety model** | Risk tiers + capability grants + exact-preview, target-bound single-use tokens for consequential effects, with routine local actions direct + short-lived active-task approval for low/medium effects + a redacted audit entry on *every* call |
 | **Visibility** | Automatic on-screen action card for every state change, plus a task progress card with step checklist, elapsed time, and pause/resume/stop controls; pointer and highlight primitives pass clicks through |
 | **Speed** | WindowId focus skips re-listing; 2s window-list cache; cached PATH lookups (see numbers below) |
 | **Provider-agnostic** | Any model via MCP stdio; live capability resources keep system prompts small |

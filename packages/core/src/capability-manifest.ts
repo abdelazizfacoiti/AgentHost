@@ -16,7 +16,6 @@ export const CAPABILITY_FAMILY_SUMMARIES: Record<AgentCapability, { summary: str
 
 export interface CapabilityManifestInput {
   version: string;
-  profile: string;
   /** Omit for static briefs (CLI paste-into-config); live resources always fill it. */
   toolCount?: number;
   byExecutionClass?: Record<string, number>;
@@ -37,7 +36,7 @@ export function buildCapabilityMarkdown(input: CapabilityManifestInput): string 
   const inventory = input.toolCount === undefined
     ? "live tool inventory via MCP"
     : `${input.toolCount} tools${classes.length > 0 ? ` [${classes}]` : ""}`;
-  return `# AgentHost capabilities (v${input.version}, profile ${input.profile}, ${inventory})
+  return `# AgentHost capabilities (v${input.version}, ${inventory})
 
 AgentHost is a local general-purpose computer-use runtime. Work the loop:
 understand, plan, inspect, act, observe, verify, recover. Tool errors are
@@ -45,20 +44,22 @@ recoverable, never terminal.
 
 ${families}
 
-Execution model: read-only and observe tools run under policy. Every
-state-changing tool uses an exact dry-run preview plus a single-use
-confirmation token, unless an active task approval covers a low/medium
-effect; high and blocked actions never auto-chain. Task and agent control
-metadata are exempt. \`agent.stop\` sets the emergency stop and revokes task
-approval; only the operator CLI clears stop/takeover flags. Tasks
-(\`task.*\`) organize long work. Pull \`agenthost://status\` for live
-stop/takeover state before starting.
+Execution model: routine local actions (click, type, focus, screenshot,
+file edit, shell, app launch) execute directly under one autonomous policy.
+External sends/uploads, destructive actions, and private-data access require
+an exact single-use confirmation bound to the current input and target.
+Credential, security, and protected system paths stay blocked. An active
+task approval may cover bounded low/medium work; high and blocked effects
+never auto-chain. Task and agent control metadata are exempt. \`agent.stop\`
+sets the emergency stop and revokes task approval; only the operator CLI
+clears stop/takeover flags. Tasks (\`task.*\`) organize long work. Pull
+\`agenthost://status\` for live stop/takeover state before starting.
 
 Fast lane (fewer turns, fewer tokens): pull \`agenthost://capabilities.md\`
 first instead of \`tools/list\`; fold window observation into one
 \`computer.observe_state\` call; use \`computer.wait_for\` instead of fixed
-sleeps; ask the operator for \`agenthost task approve\` to chain routine
-low/medium effects server-side in one turn.
+sleeps; do not pause for routine local confirmations. Ask for confirmation
+only at the exact consequential boundary.
 `;
 }
 
@@ -66,7 +67,6 @@ export function buildCapabilitiesJson(input: CapabilityManifestInput): Record<st
   return {
     product: "agenthost",
     version: input.version,
-    profile: input.profile,
     ...(input.toolCount === undefined ? {} : { toolCount: input.toolCount }),
     ...(input.byExecutionClass === undefined ? {} : { byExecutionClass: input.byExecutionClass }),
     families: CAPABILITY_FAMILY_SUMMARIES,

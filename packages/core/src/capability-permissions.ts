@@ -1,7 +1,6 @@
 /**
  * Capability-based permissions for the general-purpose computer agent.
  * Capabilities describe WHAT the runtime can do; policy controls HOW.
- * This is additive: legacy task-oriented profiles remain supported.
  */
 export const AGENT_CAPABILITIES = [
   "computer",

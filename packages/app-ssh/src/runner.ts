@@ -2,7 +2,7 @@ import {
   toolFailure,
   toolSuccess,
   type AgentHostConfig,
-  type PolicyProfile,
+  type RuntimePolicy,
   type SafetyEvaluationContext,
   type ToolResult
 } from "@agenthost/core";
@@ -61,7 +61,7 @@ function failure(code: string, message: string, observations: string[] = []): To
 export async function runSshCommand(
   input: SshRunCommandInput,
   config: AgentHostConfig,
-  policy: PolicyProfile,
+  policy: RuntimePolicy,
   dependencies: SshRunnerDependencies = {},
   safetyContext: SafetyEvaluationContext = {}
 ): Promise<ToolResult<SshRunCommandOutput>> {
