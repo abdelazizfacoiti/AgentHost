@@ -14,7 +14,6 @@ export function createBlenderAdapter(dependencies: BlenderRunnerDependencies = {
         type: "object",
         properties: {
           script: { type: "string" },
-          demo: { type: "string", enum: ["coffee_cup"] },
           outputDir: { type: "string" },
           expectedOutputs: {
             type: "array",

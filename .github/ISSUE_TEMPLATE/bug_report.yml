@@ -5,7 +5,7 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: "Do not include credentials, pairing tokens, private page content, screenshots, OCR, or full logs."
+      value: "Do not include credentials, confirmation tokens, private page content, screenshots, OCR, or full logs."
   - type: input
     id: version
     attributes:

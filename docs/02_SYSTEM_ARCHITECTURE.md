@@ -194,7 +194,7 @@ GTK3/X11 supports transparent/topmost/click-through overlays and bounded widgets
 
 `overlay.assistance_target_refresh` is visual-only recovery boundary. It accepts no owner identity, validates only current step through existing target resolver, enforces TTL/bounds/sensitivity, and permits at most two explicit refreshes per step. Target-bound steps opt into required-target blocking; static unbound primitives retain existing behavior. Missing or stale required targets fail before renderer invocation. Renderer epoch changes invalidate overlay IDs; operator must explicitly re-show/retry. Recovery state derives from preview/explanation metadata.
 
-`npm run demo:overlay` shows pointer, highlight, tooltip, and widget surfaces without target-app actions. `npm run demo:task-progress` runs a live progress card with Pause/Resume/Stop controls. Visible mode requires GTK3/PyGObject on X11; renderer or geometry limitations are reported and the launcher exits safely. On X11, pointer/highlight fullscreen surfaces are made input-transparent with XShape when the PyGObject Cairo bridge is absent. `xdotool` is needed only for geometry probing.
+Visible mode requires GTK3/PyGObject on X11; renderer or geometry limitations are reported and the launcher exits safely. On X11, pointer/highlight fullscreen surfaces are made input-transparent with XShape when the PyGObject Cairo bridge is absent. `xdotool` is needed only for geometry probing.
 
 ## Forge runtime boundary
 

@@ -14,6 +14,3 @@ agenthost task export <task-id> --format html --out ./run-report.html
   assets — safe to attach anywhere.
 - Only redacted summaries are included: no secrets, page content,
   screenshots, or absolute private paths.
-
-See [`sample-hespress-run.md`](./sample-hespress-run.md) for what the
-Hespress web-research run's report looks like.

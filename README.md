@@ -16,18 +16,6 @@ what is happening**: an on-screen progress card shows the current step, elapsed
 time, and pause/resume/stop controls, and pointer primitives can highlight a
 target without intercepting clicks.
 
-## It really works — Hespress run, unedited screenshots
-
-Asked to *"check the local news on Hespress"*, the agent focused Firefox,
-searched, clicked the first result, and verified the homepage:
-
-![Google results for hespress](.github/assets/demo-search-results.png)
-
-![Hespress homepage](.github/assets/demo-hespress-home.png)
-
-Full sequence with exact tool calls: [`examples/web-research/`](examples/web-research/).
-For the live progress card, run `npm run demo:task-progress` after `npm run build`.
-
 ## 60-second start (release archive)
 
 ```bash
@@ -78,9 +66,9 @@ The skill file lives at [`skills/agenthost/SKILL.md`](skills/agenthost/SKILL.md)
 | **Verified** | Extensive Vitest suite, `build → lint → test` on every change, smoke-tested MCP handshake |
 
 Browser work uses ordinary desktop automation — focus, hotkeys, typing,
-screenshots, accessibility, and OCR/vision — with no cookies, passwords,
-storage, or arbitrary JavaScript. Sensitive pages remain policy-gated, and
-failures surface honestly instead of pretending an action succeeded.
+screenshots, and OCR/vision — with no cookies, passwords, storage, or
+arbitrary JavaScript. Sensitive pages remain policy-gated, and failures
+surface honestly instead of pretending an action succeeded.
 
 ## Honest performance numbers
 
@@ -129,8 +117,7 @@ agenthost overlay hide [--orphans] / overlay status
 `start --background` is not supported: run `agenthost start` in the foreground
 or let the MCP client spawn it. `task export` renders a run's redacted event
 log to shareable Markdown or self-contained HTML — post your agent's runs in
-issues and PRs.
-[Sample report](examples/task-reports/sample-hespress-run.md).
+issues and PRs. See [task reports](examples/task-reports/README.md).
 
 ## Source checkout
 
@@ -174,7 +161,7 @@ Details: [Security, permissions, and logging](docs/04_SECURITY_PERMISSIONS_AND_L
 ## Documentation and contribution
 
 - [Documentation index](docs/INDEX.md) · [Product spec](docs/01_PRODUCT_SPEC.md) · [Architecture](docs/02_SYSTEM_ARCHITECTURE.md) · [MCP tools](docs/03_MCP_TOOLS_AND_ADAPTERS.md) · [Security](docs/04_SECURITY_PERMISSIONS_AND_LOGGING.md) · [Release ops](docs/08_RELEASE_AND_OPERATIONS.md) · [Privacy](docs/11_PRIVACY_AND_SUPPORT.md)
-- [Examples](examples/web-research/) · [Contributing](CONTRIBUTING.md) · [Security reporting](SECURITY.md) · [Support](SUPPORT.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Task reports](examples/task-reports/README.md) · [Contributing](CONTRIBUTING.md) · [Security reporting](SECURITY.md) · [Support](SUPPORT.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 If AgentHost does something cool on your machine, star the repo and post the
 `task export` — shared runs are how this gets better.

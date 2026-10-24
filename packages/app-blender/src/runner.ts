@@ -10,12 +10,10 @@ import {
   type ToolResult
 } from "@agenthost/core";
 import { ensureLinuxDir, findCommandPath, runSafeLinuxCommand, writeLinuxFile } from "@agenthost/os-linux";
-import { COFFEE_CUP_DEMO_ID, getCoffeeCupDemoScript } from "./coffee-cup-demo.js";
 import { reviewBlenderPython } from "./python-safety.js";
 
 export interface BlenderRunPythonInput {
   script?: string;
-  demo?: typeof COFFEE_CUP_DEMO_ID;
   outputDir?: string;
   expectedOutputs?: string[];
   timeoutMs?: number;
@@ -53,7 +51,7 @@ function deniedApproval(reason: string) {
 }
 
 function resolveExpectedOutputs(input: BlenderRunPythonInput): string[] | { error: string } {
-  const expectedOutputs = input.expectedOutputs ?? [input.demo === COFFEE_CUP_DEMO_ID ? "coffee-cup.blend" : "scene.blend"];
+  const expectedOutputs = input.expectedOutputs ?? ["scene.blend"];
 
   if (expectedOutputs.length === 0) {
     return { error: "At least one expected output file is required." };
@@ -199,35 +197,20 @@ export async function runBlenderPython(
     });
   }
 
-  const hasScript = input.script !== undefined;
-  const hasDemo = input.demo !== undefined;
-
-  if (hasScript === hasDemo) {
+  if (input.script === undefined || input.script.trim().length === 0) {
     return toolFailure({
       tool: "blender.run_python",
       riskLevel: "medium",
       strategy: "app_adapter",
       error: {
         code: "invalid_blender_input",
-        message: "Exactly one of script or demo must be provided."
+        message: "A Blender Python script is required."
       },
-      observations: ["Blender execution requires either a custom script or a built-in demo."]
+      observations: ["Blender execution requires a custom script."]
     });
   }
 
-  if (input.demo !== undefined && input.demo !== COFFEE_CUP_DEMO_ID) {
-    return toolFailure({
-      tool: "blender.run_python",
-      riskLevel: "medium",
-      strategy: "app_adapter",
-      error: {
-        code: "unknown_blender_demo",
-        message: `Unknown Blender demo: ${input.demo}`
-      }
-    });
-  }
-
-  const userScript = input.demo === COFFEE_CUP_DEMO_ID ? getCoffeeCupDemoScript() : input.script ?? "";
+  const userScript = input.script;
   const review = reviewBlenderPython(userScript);
 
   if (!review.ok) {

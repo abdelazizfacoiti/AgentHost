@@ -156,7 +156,7 @@ Every governed tool call is logged as JSONL under `~/.agenthost/logs/` with
 - output summary.
 
 Audit summaries are redacted and bounded. Logs never contain passwords, API
-keys, pairing/session/confirmation token values, cookies, private keys, full
+keys, session/confirmation token values, cookies, private keys, full
 sensitive files, screenshots, raw OCR/page text, or hidden environment values.
 A local audit write failure is swallowed so a completed action is not repeated.
 

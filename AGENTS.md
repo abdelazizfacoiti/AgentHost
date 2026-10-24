@@ -2,7 +2,7 @@
 
 ## Project mission
 
-**AgentHost** is a universal local MCP server giving agents a safe, permissioned body on a real computer. It automates many apps/workflows — not one specific app. Blender is only an optional future demo adapter.
+**AgentHost** is a universal local MCP server giving agents a safe, permissioned body on a real computer. It automates many apps/workflows — not one specific app. Blender is only an optional future adapter.
 
 ```text
 Codex / agent brain
@@ -52,8 +52,6 @@ packages/
 | `npm run test` | `vitest run` — all packages |
 | `npm start:mcp` | Run MCP server |
 | `npm run smoke:mcp` | Smoke test |
-| `npm run demo:overlay` | Static pointer/highlight/tooltip/card overlay tour |
-| `npm run demo:task-progress` | Live progress card with Pause/Resume/Stop |
 | `npm run skill:install -- --target all` | Install portable `skills/agenthost` skill (opencode/Claude/Codex/Copilot/Cursor) |
 | `agenthost task watch <id> [--follow] [--notify] [--overlay]` | Tail redacted task progress; `--overlay` shows a persistent card |
 | `agenthost overlay hide [--orphans]` / `overlay status` | Cross-process hide marker + renderer diagnostics |
@@ -122,7 +120,7 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 
 Before major changes:
 1. inspect repo
-2. read `README.md`, `DEMO.md`, and `docs/INDEX.md`; treat older milestone docs as historical
+2. read `README.md` and `docs/INDEX.md`; treat older milestone docs as historical
 3. summarize current state
 4. propose exact files to create/edit
 5. implement only approved milestone
@@ -156,7 +154,7 @@ After implementation:
 - Progress cards persist after terminal states until explicit dismissal (Dismiss/Escape, `agenthost overlay hide`, emergency hide, or process exit); elapsed time freezes
 - Persistent overlays must be `sensitivity: "public"`; legacy `overlay.terminalAutoHideMs` is accepted and ignored
 - `agenthost overlay hide` writes `run/overlay.hide` (live managers poll it) and sweeps orphaned GTK renderers; `--orphans` only sweeps
-- Overlay renderer PID files and temporary demo scripts belong outside the repo; remove them after use
+- Overlay renderer PID files and temporary inspection scripts belong outside the repo; remove them after use
 
 ## Runtime
 

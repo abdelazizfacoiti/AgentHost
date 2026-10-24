@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { getPolicyProfile, type AgentHostConfig, type ToolContext } from "@agenthost/core";
-import { COFFEE_CUP_DEMO_ID, createBlenderAdapter, runBlenderPython } from "../index.js";
+import { createBlenderAdapter, runBlenderPython } from "../index.js";
 
 function createConfig(agentHostDir: string): AgentHostConfig {
   const policy = getPolicyProfile("dev");
@@ -54,7 +54,7 @@ describe("Blender adapter", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-blender-missing-"));
     const config = createConfig(dir);
     const result = await runBlenderPython(
-      { demo: COFFEE_CUP_DEMO_ID },
+      { script: "bpy.ops.mesh.primitive_cube_add()" },
       config,
       config.policy,
       { findBlenderPath: async () => undefined }
@@ -83,7 +83,7 @@ describe("Blender adapter", () => {
     const config = createConfig(dir);
     const result = await runBlenderPython(
       {
-        demo: COFFEE_CUP_DEMO_ID,
+        script: "bpy.ops.mesh.primitive_cube_add()",
         outputDir: "/etc/agenthost-blender"
       },
       config,
@@ -95,12 +95,12 @@ describe("Blender adapter", () => {
     expect(result.error?.code).toBe("blender_output_dir_blocked");
   });
 
-  it("runs the coffee cup demo with mocked Blender and validates outputs", async () => {
+  it("runs a reviewed script with mocked Blender and validates outputs", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-blender-success-"));
     const config = createConfig(dir);
     let generatedScript = "";
     const result = await runBlenderPython(
-      { demo: COFFEE_CUP_DEMO_ID, timeoutMs: 5_000 },
+      { script: "bpy.ops.mesh.primitive_cube_add()", expectedOutputs: ["cube.blend"], timeoutMs: 5_000 },
       config,
       config.policy,
       {
@@ -108,7 +108,7 @@ describe("Blender adapter", () => {
         now: () => 1234,
         runCommand: async (input) => {
           generatedScript = await readFile(String(input.args?.[1] === "--python" ? input.args[2] : ""), "utf8");
-          await writeFile(path.join(input.cwd ?? dir, "coffee-cup.blend"), "blend", "utf8");
+          await writeFile(path.join(input.cwd ?? dir, "cube.blend"), "blend", "utf8");
           return {
             exitCode: 0,
             signal: null,
@@ -132,7 +132,7 @@ describe("Blender adapter", () => {
       outputDir: path.join(config.agentHostDir, "outputs", "blender", "run-1234"),
       outputs: [
         {
-          path: path.join(config.agentHostDir, "outputs", "blender", "run-1234", "coffee-cup.blend"),
+          path: path.join(config.agentHostDir, "outputs", "blender", "run-1234", "cube.blend"),
           exists: true
         }
       ]
@@ -145,7 +145,7 @@ describe("Blender adapter", () => {
       findBlenderPath: async () => "/usr/bin/blender",
       now: () => 4321,
       runCommand: async (input) => {
-        await writeFile(path.join(input.cwd ?? dir, "coffee-cup.blend"), "blend", "utf8");
+        await writeFile(path.join(input.cwd ?? dir, "scene.blend"), "blend", "utf8");
         return {
           exitCode: 0,
           signal: null,
@@ -163,7 +163,7 @@ describe("Blender adapter", () => {
         capabilityId: "blender.run_python",
         appId: "blender",
         input: {
-          demo: COFFEE_CUP_DEMO_ID
+          script: "bpy.ops.mesh.primitive_cube_add()"
         }
       },
       createToolContext(dir)

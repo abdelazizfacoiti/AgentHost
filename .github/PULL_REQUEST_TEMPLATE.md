@@ -9,7 +9,8 @@ Describe the bounded change and affected package.
       grant, dry-run, confirmation, target-binding, verification, and cleanup checks.
 - [ ] No secrets, tokens, private content, screenshots, OCR, or raw paths enter
       logs, fixtures, metrics, or release artifacts.
-- [ ] Scheduler changes remain metadata-only and non-executable.
+- [ ] No removed or unregistered product surface is re-added without execution
+      metadata, bounded tests, and the full safety path.
 - [ ] Visual events remain non-executing.
 
 ## Verification

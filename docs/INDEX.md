@@ -1,20 +1,18 @@
 # AgentHost canonical documentation
 
-AgentHost is a Linux-first, provider-agnostic local capability runtime and visual copilot. These documents describe the product and its explicit limits. The current minimal-v2 tree does not include Control Room, Browser Bridge, or the runtime-activity service; sections that mention them are historical. See `README.md` and `DEMO.md` for current behavior and overlay demos.
+AgentHost is a Linux-first, provider-agnostic local MCP runtime and visual
+copilot. The current minimal-v2 tree exposes the tools documented in
+`docs/03_MCP_TOOLS_AND_ADAPTERS.md`; older milestone documents describe
+surfaces that are not registered in this tree.
 
 | Document | Use it for |
 | --- | --- |
-| [Product spec](01_PRODUCT_SPEC.md) | Product boundary, Visual Copilot, and safety posture |
-| [System architecture](02_SYSTEM_ARCHITECTURE.md) | Packages, stores, renderer, goal/planning, and routing |
-| [MCP tools and adapters](03_MCP_TOOLS_AND_ADAPTERS.md) | Tool inventory and adapter boundaries |
+| [Product spec](01_PRODUCT_SPEC.md) | Product boundary, visual assistance, and safety posture |
+| [System architecture](02_SYSTEM_ARCHITECTURE.md) | Packages, stores, renderer, and runtime flow |
+| [MCP tools and adapters](03_MCP_TOOLS_AND_ADAPTERS.md) | Live tool inventory and adapter boundaries |
 | [Security, permissions, and logging](04_SECURITY_PERMISSIONS_AND_LOGGING.md) | Grants, confirmations, redaction, and privacy |
-| [Roadmap and prompts](05_IMPLEMENTATION_ROADMAP_AND_CODEX_PROMPTS.md) | Milestone status, goals/plans, and future scope |
-| [Browser setup validation](06_BROWSER_SETUP_VALIDATION.md) | Historical browser bridge runbook |
-| [Browser extension release](07_BROWSER_EXTENSION_RELEASE.md) | Historical extension artifact notes |
-| [Speech setup](07_SPEECH_SETUP_AND_THIRD_PARTY_NOTICES.md) | Historical local-provider notices |
-| [Release and operations](08_RELEASE_AND_OPERATIONS.md) | Historical R5/R6 packaging and lifecycle |
-| [Release audit](09_RELEASE_AUDIT.md) | Historical release evidence and sign-off |
-| [Performance and benchmarks](10_PERFORMANCE_AND_BENCHMARKS.md) | Adaptive-routing, goal-planning, and bounded performance measurements |
-| [Privacy and support](11_PRIVACY_AND_SUPPORT.md) | Historical data-boundary notes |
+| [Release and operations](08_RELEASE_AND_OPERATIONS.md) | Packaging, install, CLI, and release checks |
+| [Privacy and support](11_PRIVACY_AND_SUPPORT.md) | Data boundary, support states, and manual checks |
 
-Provider names in examples are illustrative only. Browser, overlay, planner, and routing features never bypass the original governed tools.
+Provider names in examples are illustrative only. Safety is enforced by the
+runtime; documentation never grants permission or bypasses confirmation.
