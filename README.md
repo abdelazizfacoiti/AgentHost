@@ -12,9 +12,10 @@ to accomplish it — observing each result, verifying outcomes, and recovering
 from failures. Every action passes through schema validation → risk
 classification → policy check → preview/dry-run → confirmation → execution →
 redacted audit logging. Unlike other computer-use tools, **you can see
-what is happening**: an on-screen progress card shows the current step, elapsed
-time, and pause/resume/stop controls, and pointer primitives can highlight a
-target without intercepting clicks.
+what is happening**: an always-on current-task card shows the goal, current
+phase, step checklist, elapsed time, and pause/resume/stop controls; approval
+waits raise the card and send a desktop notification. Pointer primitives can
+highlight a target without intercepting clicks.
 
 ## 60-second start (release archive)
 
@@ -24,12 +25,22 @@ tar -xzf agenthost-v0.1.0-linux-x64.tar.gz
 cd agenthost-v0.1.0-linux-x64
 ./bin/agenthost.mjs doctor
 ./bin/agenthost.mjs setup
-./bin/agenthost.mjs integrations codex add --apply
+./bin/agenthost.mjs integrations <client> add --apply
 ./bin/agenthost.mjs start
 ```
 
 No `sudo`, no system services, no silent installs — AgentHost writes only its
-own user directories. Then point any MCP client at it:
+own user directories. Register the MCP server for the client you use:
+
+```bash
+agenthost integrations <client> add --apply   # opencode, claude, codex, copilot, copilot-cli, cursor
+```
+
+Each command previews first. `--apply` writes one entry, preserves existing
+servers, and backs up an existing config file. Reload the client so it spawns
+`agenthost start`;
+do not run `agenthost start` manually for a client session. Any other MCP
+client can use the portable form:
 
 ```json
 {
@@ -39,16 +50,18 @@ own user directories. Then point any MCP client at it:
 }
 ```
 
-Works with Codex, Claude Code, Copilot, OpenCode, and any MCP client. Agent
-clients: don't ingest every tool schema up front — pull
+Works with Codex, Claude Code, Copilot (VS Code + CLI), OpenCode, Cursor, and
+any MCP client. Agent clients: don't ingest every tool schema up front — pull
 `agenthost://capabilities.md` first, or paste `agenthost capabilities --markdown`
 into static configs. Contributors: [`git clone` path below](#source-checkout).
 
-Teach the assistant *when* to reach for AgentHost with the portable skill:
+Teach the assistant *when* to reach for AgentHost with the portable skill. The
+installer also registers the MCP server for the same clients:
 
 ```bash
-npm run skill:install -- --target all          # opencode, Claude Code, Codex, Copilot, Cursor
+npm run skill:install -- --target all          # skill + MCP config for opencode, Claude Code, Codex, Copilot (VS Code + CLI), Cursor
 npm run skill:install -- --target copilot --project /path/to/repo
+npm run skill:install -- --target all --no-mcp # skill text only
 npm run skill:install -- --print               # paste into any other tool
 ```
 
@@ -59,8 +72,8 @@ The skill file lives at [`skills/agenthost/SKILL.md`](skills/agenthost/SKILL.md)
 | | AgentHost |
 |---|---|
 | **Safety model** | Risk tiers + capability grants + exact-preview, target-bound single-use tokens for consequential effects, with routine local actions direct + short-lived active-task approval for low/medium effects + a redacted audit entry on *every* call |
-| **Visibility** | Automatic on-screen action card for every state change, plus a task progress card with step checklist, elapsed time, and pause/resume/stop controls; pointer and highlight primitives pass clicks through |
-| **Speed** | WindowId focus skips re-listing; 2s window-list cache; cached PATH lookups (see numbers below) |
+| **Visibility** | Automatic on-screen action card for every state change, plus an always-on active-task card with goal, step checklist, elapsed time, and pause/resume/stop controls; approval waits raise the card and send a desktop notification; pointer and highlight primitives pass clicks through |
+| **Speed** | Inspect-once/act/verify task guidance, duplicate-call nudges, WindowId focus, 2s window-list cache, and cached PATH lookups |
 | **Provider-agnostic** | Any model via MCP stdio; live capability resources keep system prompts small |
 | **Private by construction** | Local stdio transport, redacted logs/traces/overlays, emergency stop independent of the model |
 | **Verified** | Extensive Vitest suite, `build → lint → test` on every change, smoke-tested MCP handshake |
@@ -112,6 +125,7 @@ agenthost task export <id> [--format md|html] [--out <path>]
 agenthost task approve <id> [--max-risk low|medium]
 agenthost task pause <id> / task resume <id>
 agenthost overlay hide [--orphans] / overlay status
+agenthost integrations <client> add|status|remove [--project DIR] [--apply]
 ```
 
 `start --background` is not supported: run `agenthost start` in the foreground

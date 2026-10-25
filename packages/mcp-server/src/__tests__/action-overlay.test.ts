@@ -160,4 +160,27 @@ describe("automatic action overlay", () => {
     await overlay.close();
     vi.useRealTimers();
   });
+
+  it("does not report a halt when the stop flag could not be written", async () => {
+    vi.useFakeTimers();
+    const fake = fakeManager();
+    const events: Array<{ overlayId: string; event: string }> = [];
+    vi.mocked(fake.manager.pollEvents).mockImplementation(async () => events.splice(0, events.length) as never);
+    const overlay = new ToolActionOverlay(fake.manager, {
+      widgetId: "action-card",
+      eventPollMs: 100,
+      now: () => Date.now(),
+      onStop: async () => { throw new Error("disk full"); }
+    });
+    await overlay.begin({ tool: "file.write", summary: "Write file", riskLevel: "medium" });
+    events.push({ overlayId: "action-card", event: "emergency_stop_requested" });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(badge(fake.updated.at(-1)!)).toBe("Running");
+    expect(fake.updated.at(-1)!.components).toContainEqual({
+      type: "warning",
+      text: "Stop request failed. State-changing actions may still run."
+    });
+    await overlay.close();
+    vi.useRealTimers();
+  });
 });

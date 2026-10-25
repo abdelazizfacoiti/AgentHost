@@ -60,6 +60,7 @@ export function createTaskTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
           data: task,
           observations: [
             "Define done as observable outcomes. Complete the task only after every criterion is verified.",
+            "Fast path: inspect once, act, then verify. Avoid repeating unchanged discovery.",
             "Plan, inspect, act, observe, verify; log recovery events as you go."
           ]
         });

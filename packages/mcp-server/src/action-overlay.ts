@@ -112,6 +112,7 @@ export class ToolActionOverlay {
   #hiddenByOperator = false;
   #paused = false;
   #stopRequested = false;
+  #controlError: string | undefined;
   #polling = false;
   #disposed = false;
   #sequence = 0;
@@ -135,6 +136,7 @@ export class ToolActionOverlay {
     if (this.#disposed) return this.#noopHandle();
     this.#hiddenByOperator = false;
     this.#stopRequested = false;
+    this.#controlError = undefined;
     this.#clearAutoHide();
     if (this.#isPaused) {
       try { this.#paused = await this.#isPaused(); } catch { /* Keep the last known pause state. */ }
@@ -207,6 +209,7 @@ export class ToolActionOverlay {
     this.#last = undefined;
     this.#hiddenByOperator = false;
     this.#stopRequested = false;
+    this.#controlError = undefined;
     if (!this.#started) return;
     this.#started = false;
     try {
@@ -264,6 +267,7 @@ export class ToolActionOverlay {
     if (phase === "waiting_approval") components.push({ type: "warning", text: "Approval required. Run: agenthost confirmations" });
     if (phase === "paused") components.push({ type: "warning", text: "Paused. Resume here or run: agenthost agent resume --pause" });
     if (phase === "halted" && this.#stopRequested) components.push({ type: "warning", text: "Stop is active. Dismiss this card or run: agenthost agent resume --stop" });
+    if (this.#controlError !== undefined) components.push({ type: "warning", text: this.#controlError });
     if (this.#active.size > 1) components.push({ type: "key_value", key: "Actions", value: `${this.#active.size} running` });
     components.push({ type: "key_value", key: "Risk", value: riskLabel(risk) });
     components.push({ type: "key_value", key: "Elapsed", value: elapsedLabel(elapsed) });
@@ -331,7 +335,7 @@ export class ToolActionOverlay {
           await this.#render();
         }
       }
-      const events = await this.#manager.pollEvents();
+      const events = await this.#manager.pollEvents(this.#widgetId);
       for (const event of events) {
         if (event.overlayId !== this.#widgetId) continue;
         if (event.event === "hide" || event.event === "dismissed") {
@@ -341,21 +345,33 @@ export class ToolActionOverlay {
         if (event.event === "pause") {
           if (this.#paused) continue;
           this.#paused = true;
-          try { await this.#onPause?.(); } catch { /* Operator control is best effort. */ }
+          this.#controlError = undefined;
+          try { await this.#onPause?.(); } catch {
+            this.#paused = false;
+            this.#controlError = "Pause request failed. State-changing actions may still run.";
+          }
           await this.#render();
           return;
         }
         if (event.event === "resume") {
           if (!this.#paused) continue;
           this.#paused = false;
-          try { await this.#onResume?.(); } catch { /* Operator control is best effort. */ }
+          this.#controlError = undefined;
+          try { await this.#onResume?.(); } catch {
+            this.#paused = true;
+            this.#controlError = "Resume request failed. The pause may still be active.";
+          }
           await this.#render();
           return;
         }
         if (event.event === "emergency_stop_requested" || event.event === "cancel" || event.event === "cancelled") {
           if (this.#stopRequested) continue;
           this.#stopRequested = true;
-          try { await this.#onStop?.(); } catch { /* Operator control is best effort. */ }
+          this.#controlError = undefined;
+          try { await this.#onStop?.(); } catch {
+            this.#stopRequested = false;
+            this.#controlError = "Stop request failed. State-changing actions may still run.";
+          }
           await this.#render();
           return;
         }

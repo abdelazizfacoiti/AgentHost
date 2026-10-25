@@ -63,7 +63,7 @@ agenthost task export <id> [--format md|html] [--out <path>]
 agenthost capabilities
 agenthost permissions
 agenthost overlay hide [--orphans] / overlay status
-agenthost integrations codex add|status|remove [--preview|--apply]
+agenthost integrations <client> add|status|remove [--apply] [--project DIR]
 agenthost config validate|show
 agenthost update --archive <archive> [--sha256 <64-hex-digest>] [--apply]
 agenthost update --rollback
@@ -74,13 +74,33 @@ agenthost uninstall [--dry-run] [--remove-data]
 unit, restart loop, or hidden background execution. Output never contains
 secrets, private file content, screenshots, OCR text, or raw private paths.
 
-## Codex integration
+## MCP client integration
 
-`agenthost integrations codex add` previews one AgentHost entry. `--apply` is
-the only write path. Existing MCP servers and unrelated settings remain
-untouched; a backup is written before changes. The entry uses the installed
-`agenthost start`, never a repository path. Unsupported or ambiguous TOML is
-rejected with manual instructions.
+`agenthost integrations <client> add` previews one AgentHost entry; `--apply`
+is the only write path. Existing servers and unrelated settings remain
+untouched, and an existing file is backed up before changes. Supported clients:
+
+| Client | Config |
+|---|---|
+| `opencode` | `~/.config/opencode/opencode.json[c]` under `mcp` |
+| `claude` | `~/.claude.json` under `mcpServers` |
+| `codex` | `~/.codex/config.toml` under `[mcp_servers.agenthost]` |
+| `copilot` | `<project>/.vscode/mcp.json` under `servers` |
+| `copilot-cli` | `~/.copilot/mcp-config.json` under `mcpServers` |
+| `cursor` | `<project>/.cursor/mcp.json` under `mcpServers` |
+
+The entry uses the installed `agenthost start`, never a repository path.
+`--project DIR` selects the project for Copilot and Cursor. `XDG_CONFIG_HOME`,
+`CODEX_HOME`, and `COPILOT_HOME` override the default user config roots.
+Invalid JSON/TOML, ambiguous TOML, and unsupported layouts are rejected
+without writing.
+A JSONC write may normalize formatting and drop comments; the backup retains
+the original text. After `--apply`, reload or restart the client so it spawns
+AgentHost. Running `agenthost start` manually does not attach tools to a client
+session; it is the stdio server the client owns.
+
+`npm run skill:install -- --target all` installs the skill text and applies the
+same MCP registration for all six targets. Use `--no-mcp` for skill text only.
 
 ## Setup and doctor
 

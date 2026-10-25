@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -101,6 +101,25 @@ describe("release integrity helpers", () => {
     await expect(access(path.join(kept, "dist", "esm", "index.js"))).resolves.toBeUndefined();
     await expect(access(removed)).rejects.toThrow();
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("accepts workspace-relative symlinks and rejects escaping symlinks", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "agenthost-release-links-"));
+    await mkdir(path.join(root, "packages", "core"), { recursive: true });
+    await mkdir(path.join(root, "node_modules", "@agenthost"), { recursive: true });
+    await writeFile(path.join(root, "packages", "core", "index.js"), "export {};\n");
+    await symlink(path.join("..", "..", "packages", "core"), path.join(root, "node_modules", "@agenthost", "core"), "junction");
+    expect((await collectReleaseFiles(root)).symlinkFailures).toEqual([]);
+    await symlink("/tmp", path.join(root, "node_modules", "escape"), "junction");
+    expect((await collectReleaseFiles(root)).symlinkFailures).toContain("node_modules/escape:symlink_escape");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("preserves relative symlinks when staging and installing releases", async () => {
+    for (const script of ["scripts/build-release.mjs", "scripts/install-release.mjs"]) {
+      const source = await readFile(path.resolve(script), "utf8");
+      expect(source).toContain("verbatimSymlinks: true");
+    }
   });
 
   it("generates a release launcher that decodes file URLs in paths with spaces", async () => {

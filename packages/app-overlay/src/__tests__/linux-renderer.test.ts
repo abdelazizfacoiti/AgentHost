@@ -24,7 +24,7 @@ const supported: OverlayCapabilityReport = {
   limitations: []
 };
 
-interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; missingLiveRegistration?: boolean; rejectShow?: boolean; }
+interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; missingLiveRegistration?: boolean; rejectShow?: boolean; deferUpdateMs?: number; }
 
 function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWithoutNullStreams {
   const child = new EventEmitter() as unknown as { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; killed: boolean; kill: () => boolean; };
@@ -56,7 +56,12 @@ function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWith
           : request.command === "events"
             ? { events: [{ eventId: "event-1", overlayId: "overlay-1", event: "pause", createdAt: new Date().toISOString(), ownerSessionId: "overlay-session" }] }
             : { reason: "fake_renderer" };
-      child.stdout.write(JSON.stringify({ version: 1, id: request.id, ok: true, data }) + "\n");
+      const encoded = JSON.stringify({ version: 1, id: request.id, ok: true, data }) + "\n";
+      if (request.command === "update" && behavior.deferUpdateMs !== undefined) {
+        setTimeout(() => child.stdout.write(encoded), behavior.deferUpdateMs);
+      } else {
+        child.stdout.write(encoded);
+      }
       newline = buffer.indexOf("\n");
     }
   });
@@ -111,6 +116,22 @@ describe("GTK renderer controller", () => {
       expect((await renderer.state()).renderer.fallbackRenderer).toBe("headless");
       expect((await renderer.capabilities()).rendererStatus).toBe("degraded");
       expect((await renderer.diagnostics()).lastFailure).toBe("renderer_process_exited");
+    } finally { await renderer.close(); }
+  });
+
+  it("keeps a renderer alive when event polling overlaps an in-flight update", async () => {
+    const renderer = new LinuxOverlayRenderer({ mode: "gtk3-x11", probe: () => supported, spawnProcess: () => fakeSpawnProcess({ deferUpdateMs: 250 }), environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" } });
+    try {
+      expect((await renderer.show({ overlayId: "overlay-overlap", type: "pointer", payload: { type: "pointer", sensitivity: "public" } })).ok).toBe(true);
+      const update = renderer.update({ overlayId: "overlay-overlap", type: "pointer", payload: { type: "pointer", sensitivity: "public" } });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const events = renderer.drainEvents();
+      const [updated, drained] = await Promise.all([update, events]);
+      expect(updated.ok).toBe(true);
+      expect(drained).toHaveLength(1);
+      const diagnostics = await renderer.diagnostics();
+      expect(diagnostics.childState).toBe("running");
+      expect(diagnostics.lastFailure).toBeUndefined();
     } finally { await renderer.close(); }
   });
 

@@ -52,7 +52,8 @@ packages/
 | `npm run test` | `vitest run` — all packages |
 | `npm start:mcp` | Run MCP server |
 | `npm run smoke:mcp` | Smoke test |
-| `npm run skill:install -- --target all` | Install portable `skills/agenthost` skill (opencode/Claude/Codex/Copilot/Cursor) |
+| `agenthost integrations <client> add\|status\|remove [--apply]` | Register/preview/remove the MCP server for opencode, Claude, Codex, Copilot (VS Code + CLI), or Cursor |
+| `npm run skill:install -- --target all` | Install portable `skills/agenthost` skill and register the MCP server (opencode/Claude/Codex/Copilot VS Code + CLI/Cursor); `--no-mcp` for skill text only |
 | `agenthost task watch <id> [--follow] [--notify] [--overlay]` | Tail redacted task progress; `--overlay` shows a persistent card |
 | `agenthost overlay hide [--orphans]` / `overlay status` | Cross-process hide marker + renderer diagnostics |
 | `agenthost task export <id> [--format md\|html]` | Shareable redacted run report |
@@ -77,7 +78,7 @@ Every tool passes through: schema validation → stop/takeover gate → effect p
 - Dry-run for a consequential action mints a 15-minute single-use token bound to tool, canonical arguments, and target. `agenthost confirm <tokenId>` approves one exact preview; `deny` rejects it. Accepted confirmation sets `confirmationSatisfied` for the handler safety recheck.
 - `agenthost task approve <id> [--max-risk low|medium]` creates a 30-min approval for an **active** task; the runner auto-chains only low/medium effects. High and consequential effects still need per-action tokens.
 - Stop/pause enforcement via `run/stop.requested`, `run/takeover.active`, and `run/pause.requested`; `emergency_stop_requested`/`human_takeover_active`/`pause_requested` gate only state-changing calls.
-- The automatic action card exposes Pause/Resume/Stop and a close button; approval waits stay visible, raise above other windows, and the close button still works after the MCP server exits.
+- The automatic action card exposes Pause/Resume/Stop and a close button; approval waits stay visible, raise above other windows, send a best-effort desktop notification, and the close button still works after the MCP server exits.
 - AgentHost control-plane paths (`run/`, `logs/`, `setup/`, `tasks/approvals/`, config) are read-medium and write/delete-blocked.
 
 ## Logging
@@ -101,8 +102,13 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 - **Focus-safe desktop**: `window.focus` returns `previousWindow` (best effort) so agents can restore user focus; focus changes are reported, never silent.
 - **Strategy learning**: core strategy/episode helpers exist, but `strategy.*` tools are not registered in the minimal-v2 MCP server. Never store raw task content or secrets in lessons.
 - **Optional adapters**: `packages/app-ssh` and `packages/app-blender` can be enabled in the adapter registry, but this tree registers no MCP tool factory for `ssh.run_command` or `blender.run_python`; they do not appear in `tools/list`.
-- **Automatic action card**: every state-changing MCP tool opens or updates one public, click-through action card (`packages/mcp-server/src/action-overlay.ts`) before preview/handler work. It shows running/waiting/preview/done/failed/halted state in place and honors `overlay.persistent` / `overlay.autoHideMs`. Never block tool execution on overlay failures.
-- **Task progress card**: `TaskProgressOverlay` (in `packages/app-overlay/src/task-progress.ts`) renders status, checklist, `Step n/m`, elapsed time, approval command, and Pause/Resume/Stop. Pause is cooperative at a step boundary; Stop never kills an in-flight tool call. Call `pollEvents()` to drain button events. Construct the renderer and manager with the **same sessionId**.
+- **Automatic action card**: every state-changing MCP tool opens or updates one public, click-through action card (`packages/mcp-server/src/action-overlay.ts`) before preview/handler work. It shows running/waiting/preview/done/failed/halted state in place and honors `overlay.persistent` / `overlay.autoHideMs`. A failed Pause/Resume/Stop write is shown as a control warning instead of a false state. Never block tool execution on overlay failures.
+- **Automatic current-task card**: `TaskActivityOverlay` (`packages/mcp-server/src/task-overlay.ts`) keeps one persistent public card visible for the active task, mirrors task goal/phase/current action, definition-of-done checklist, running-task count, and Pause/Resume/Stop, and updates from `task.*` results. It restores the most recent active/paused task on server start (24h freshness), keeps terminal cards until dismissed, honors an explicit close, and fails best-effort. `agenthost task watch <id> --overlay` remains an optional standalone card.
+- **Task progress card**: `TaskProgressOverlay` (in `packages/app-overlay/src/task-progress.ts`) renders status, checklist, `Step n/m`, elapsed time, approval command, and Pause/Resume/Stop. Pause requests the scoped global pause and shows Paused with Resume immediately; Stop never kills an in-flight tool call. Construct the renderer and manager with the **same sessionId**.
+- **Overlay event routing**: multiple cards share one `OverlayManager`; call `pollEvents(overlayId)` so each card consumes only its own events. The manager buffers unmatched events for other cards. Pause reasons are scoped: action-card resume clears only `agent_action_card_pause`; task-card resume clears only `agent_task_overlay_pause:<taskId>`.
+- **Renderer concurrency**: `LinuxOverlayRenderer` must treat a child with a passed handshake as started even while `runtimeState === "rendering"`. Event polling can overlap an in-flight update; restarting or killing the renderer in that window makes task cards disappear.
+- **Approval signaling**: a new `confirmation_required` result raises the action card via warning styling and sends one best-effort `notify-send` per 5s window. The notification names `agenthost confirmations`, never a token value.
+- **Fast decisions**: `task.create` guidance tells the agent to inspect once, act, then verify; the runner nudges on the 3rd and 6th identical call.
 - **Screenshot suppression**: `desktop.screenshot` captures through `overlayScreenshotSuppression`; screenshot content must never include AgentHost cards. Direct `showWidget`/`updateWidget` calls are rejected while suppression is active, then surfaces are restored.
 - **Overlay click-through**: the automatic action card is click-through; small interactive card windows are reserved for Pause/Resume/Stop controls. Fullscreen surfaces are created only for pointer/arrow/highlight/spotlight primitives and must stay click-through. Do not reintroduce a fullscreen surface for ordinary cards.
 - **Overlay updates**: use `manager.updateWidget()` for in-place changes. Do not `dismiss` + `show` on every tick; that causes flicker and resets controls.
@@ -111,8 +117,9 @@ All tool calls logged as JSONL to `~/.agenthost/logs/`. Never log passwords, API
 
 - Tests live in `__tests__/` dirs inside each package's `src/`
 - Tests use Vitest (no separate config file; defaults from `vitest`)
-- `packages/mcp-server/src/__tests__/action-overlay.test.ts` — automatic action card lifecycle, persistence, auto-hide, and redaction
-- `packages/app-overlay/src/__tests__/task-progress.test.ts` — progress card states, controls, persistence and hide-marker handling
+- `packages/mcp-server/src/__tests__/action-overlay.test.ts` — automatic action card lifecycle, controls, persistence, auto-hide, and redaction
+- `packages/mcp-server/src/__tests__/task-overlay.test.ts` — automatic current-task card, checklist updates, pause/stop, and dismissal
+- `packages/app-overlay/src/__tests__/task-progress.test.ts` — progress card states, controls, event routing, persistence and hide-marker handling
 - `packages/app-overlay/src/__tests__/linux-renderer.test.ts` — GTK IPC, fallback, restart, event drain
 - `packages/core/src/__tests__/capability-manifest.test.ts` — capability manifest tests
 - Integration tests may require an X11 display (`:0`).

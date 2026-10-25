@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import os from "node:os";
@@ -16,6 +17,7 @@ import {
   requestPause,
   clearPause,
   requestStop,
+  clearActiveTaskApproval,
   AGENTHOST_VERSION,
   type AdapterRegistry,
   type AgentHostConfig,
@@ -78,11 +80,33 @@ import { applyProductionExecutionMetadata, materializeToolDefinitions, toolCapab
 import { listResourceEntries, readResource } from "./resources.js";
 import { runTool } from "./tool-runner.js";
 import { ToolActionOverlay } from "./action-overlay.js";
+import { TaskActivityOverlay } from "./task-overlay.js";
 
 const SERVER_VERSION = AGENTHOST_VERSION;
+const ACTION_PAUSE_REASON = "agent_action_card_pause";
 
 const SERVER_INSTRUCTIONS =
-  "AgentHost is a universal local automation host. It provides desktop automation, file operations, shell commands, vision/OCR, and window management. Use GUI click/type as fallback when policy allows. State-changing calls require an exact dry-run preview and single-use confirmation token unless an active task approval covers a low/medium effect.";
+  "AgentHost is a universal local automation host. It provides desktop automation, file operations, shell commands, vision/OCR, and window management. Use GUI click/type as fallback when policy allows. Routine local actions execute directly. Consequential actions such as external sends/uploads, deletes, private-data reads, and financial effects require an exact dry-run preview and single-use confirmation token. Stop, takeover, and pause flags halt new state-changing calls. For fast decisions, inspect once, act, then verify; avoid repeating unchanged discovery.";
+
+let lastApprovalSignalAt = 0;
+
+function signalApprovalRequired(): void {
+  const now = Date.now();
+  if (now - lastApprovalSignalAt < 5_000) return;
+  lastApprovalSignalAt = now;
+  try {
+    const child = spawn("notify-send", [
+      "-a", "AgentHost",
+      "-u", "normal",
+      "AgentHost approval required",
+      "Open the AgentHost card or run: agenthost confirmations"
+    ], { stdio: "ignore", detached: true });
+    child.on("error", () => undefined);
+    child.unref();
+  } catch {
+    /* Desktop notifications are best effort. */
+  }
+}
 
 function blenderModuleSpecifier(): string {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -182,16 +206,32 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
   });
   const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? false });
+  let taskActivity: TaskActivityOverlay | undefined;
   const actionOverlay = new ToolActionOverlay(overlay, {
     widgetId: `agenthost-action-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`,
     placement: config.overlay?.preferredPosition ?? "top_right",
     persistent: config.overlay?.persistent ?? true,
     autoHideMs: config.overlay?.autoHideMs ?? 15_000,
-    onPause: async () => { await requestPause(config.agentHostDir, "Paused from the AgentHost action card"); },
-    onResume: () => clearPause(config.agentHostDir),
-    onStop: async () => { await requestStop(config.agentHostDir, "Stop requested from the AgentHost action card"); },
+    onPause: async () => { await requestPause(config.agentHostDir, ACTION_PAUSE_REASON); },
+    onResume: async () => {
+      const state = await readRunState(config.agentHostDir);
+      if (state.pause.requested && state.pause.reason === ACTION_PAUSE_REASON) await clearPause(config.agentHostDir);
+    },
+    onStop: async () => {
+      await requestStop(config.agentHostDir, "Stop requested from the AgentHost action card");
+      await clearActiveTaskApproval(config.agentHostDir);
+      await taskActivity?.operatorStopped();
+    },
     isPaused: async () => (await readRunState(config.agentHostDir)).pause.requested
   });
+  taskActivity = new TaskActivityOverlay({
+    manager: overlay,
+    agentHostDir: config.agentHostDir,
+    placement: "bottom_right",
+    persistent: config.overlay?.persistent ?? true,
+    ...(config.overlay?.persistent === false ? { autoHideMs: config.overlay?.autoHideMs ?? 15_000 } : {})
+  });
+  await taskActivity.initialize();
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -355,6 +395,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     }
 
     const result = await runTool(tool, request.params.arguments ?? {}, context);
+    if (result.error?.code === "confirmation_required") signalApprovalRequired();
+    try { await taskActivity?.observe(tool.name, result); } catch { /* Task card updates are advisory. */ }
     return toMcpToolResult(result);
   });
 
@@ -362,6 +404,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const closeResources = async (): Promise<void> => {
     if (resourceClosePromise !== undefined) return await resourceClosePromise;
     resourceClosePromise = (async () => {
+      await taskActivity?.close();
       await actionOverlay.close();
       await overlay.close();
     })();

@@ -36,7 +36,7 @@ const stage = path.join(releaseRoot, `agenthost-v${version}-linux-x64`);
 // directory-entry races while pruning a prior stage, but never reuse it.
 await rm(stage, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 await mkdir(stage, { recursive: true, mode: 0o755 });
-async function copy(source, destination, options = {}) { await mkdir(path.dirname(destination), { recursive: true }); await cp(source, destination, { recursive: true, force: true, ...options }); }
+async function copy(source, destination, options = {}) { await mkdir(path.dirname(destination), { recursive: true }); await cp(source, destination, { recursive: true, force: true, verbatimSymlinks: true, ...options }); }
 for (const packageName of ["core", "mcp-server", "os-linux", "app-overlay", "app-blender", "app-ssh", "agenthost-cli"]) {
   await copy(path.join(root, "packages", packageName, "dist"), path.join(stage, "packages", packageName, "dist"));
   await copy(path.join(root, "packages", packageName, "package.json"), path.join(stage, "packages", packageName, "package.json"));

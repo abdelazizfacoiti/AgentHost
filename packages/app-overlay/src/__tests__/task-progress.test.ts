@@ -78,7 +78,7 @@ describe("TaskProgressOverlay", () => {
       expect(await controller.pollEvents()).toEqual(["pause"]);
       expect(controller.snapshot().status).toBe("pause_requested");
       expect(component(manager, "status_badge")).toMatchObject({ text: "Pausing after this step" });
-      expect(buttons(manager)).toEqual(["Stop"]);
+      expect(buttons(manager)).toEqual(["Resume", "Stop"]);
 
       manager.pushEvent(event("task-1", "resume"));
       expect(await controller.pollEvents()).toEqual(["resume"]);
@@ -182,6 +182,26 @@ describe("TaskProgressOverlay", () => {
       await controller.dismiss();
       await manager.close();
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("routes overlaid events to the correct card when several cards share one manager", async () => {
+    const manager = new OverlayManager(new HeadlessOverlayRenderer(), { sessionId: "session-1" }, { hideMarkerPath: null });
+    const first = new TaskProgressOverlay({ manager, taskId: "task-a", title: "First task", heartbeatMs: 60_000 });
+    const second = new TaskProgressOverlay({ manager, taskId: "task-b", title: "Second task", heartbeatMs: 60_000 });
+    try {
+      await first.start();
+      await second.start();
+      manager.pushEvent(event("task-a", "pause"));
+      manager.pushEvent(event("task-b", "pause"));
+      expect(await second.pollEvents()).toEqual(["pause"]);
+      expect(await first.pollEvents()).toEqual(["pause"]);
+      expect(first.snapshot().status).toBe("pause_requested");
+      expect(second.snapshot().status).toBe("pause_requested");
+    } finally {
+      await first.dismiss();
+      await second.dismiss();
+      await manager.close();
     }
   });
 

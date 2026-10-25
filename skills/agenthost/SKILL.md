@@ -61,8 +61,10 @@ coding tools directly.
    `task.update` and `task.add_event` so progress survives failures. Verify
    every criterion, then call `task.update_status` with `status: "completed"`
    and `verifiedCriteria`; completion is refused while any criterion is
-   unverified. When the requested outcome is visible, stop and report instead
-   of repeating the same call. Do not start a new task until the current one
+   unverified. Use the fast path: inspect once, decide, act, verify. Avoid
+   repeating unchanged discovery or the same tool call; if a call repeats,
+   change strategy or finish. When the requested outcome is visible, stop and
+   report instead of continuing. Do not start a new task until the current one
    is finished unless the user asks.
 7. **Prefer bulk text entry.** Use `desktop.type_text` for text, not per-character
    key presses; use `desktop.hotkey` for shortcuts.
@@ -135,7 +137,12 @@ The human can always intervene outside the chat:
 - `agenthost task approve <taskId> [--max-risk low|medium]` — 30-minute
   approval for an active task's low/medium effects
 - `agenthost task pause <taskId>` / `task resume <taskId>` — task lifecycle
-- `agenthost task watch <taskId> --overlay [--follow]` — live progress card
+- `agenthost task watch <taskId> --overlay [--follow]` — optional standalone
+  progress card
+- The MCP server automatically shows a persistent current-task card while a
+  task is active or paused: goal, phase/current action, checklist, and
+  Pause/Resume/Stop. Close it with its X button; it stays dismissed for that
+  task.
 - Every state-changing tool automatically shows a small action card; it never
   replaces confirmation or stop controls
 - `agenthost overlay hide` — hide persistent cards immediately
@@ -144,8 +151,9 @@ The human can always intervene outside the chat:
 - `agenthost agent stop` — runtime stop when the client owns the MCP process
 - `agenthost agent resume --stop|--takeover|--pause` — operator-only gate clear
 - The action card exposes Pause/Resume/Stop and a close button; approval waits
-  stay visible and are raised above other windows. The close button still
-  works after the MCP server exits.
+  stay visible, are raised above other windows, and send a desktop
+  notification. The notification names `agenthost confirmations`, never the
+  token. The close button still works after the MCP server exits.
 
 Progress cards persist until explicitly dismissed, so a finished task remains
 visible until the operator closes it.
@@ -156,7 +164,19 @@ Resources: pull `agenthost://capabilities.md` for the compact tool brief and
 `agenthost://status` for live stop/takeover/approval state. There is no
 `agenthost://skills` MCP resource.
 
-If no AgentHost MCP tools are exposed: say so, and ask the operator to run
-`agenthost start` (or register the server with their client, e.g.
-`agenthost integrations codex add --apply`). Do not silently substitute another
-automation library; that bypasses approvals and audit logging.
+If no AgentHost MCP tools are exposed, the client has not registered the
+server. Register it for the client you are running in, then ask the operator
+to reload or restart the session so the client spawns it:
+
+- opencode: `agenthost integrations opencode add --apply`
+- Claude Code: `agenthost integrations claude add --apply`
+- Codex: `agenthost integrations codex add --apply`
+- Copilot / VS Code: `agenthost integrations copilot add --apply`
+- Copilot CLI: `agenthost integrations copilot-cli add --apply`
+- Cursor: `agenthost integrations cursor add --apply`
+- Source checkout: `npm run skill:install -- --target <client> --project <cwd>`
+
+AgentHost is a stdio MCP server: the client must launch `agenthost start`.
+Running `agenthost start` yourself does not attach tools to the session. Do not
+substitute pyautogui, xdotool, or another automation library; that bypasses
+approvals and audit logging.

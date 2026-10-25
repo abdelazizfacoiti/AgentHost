@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "agenthost": {
+      "type": "stdio",
+      "command": "agenthost",
+      "args": [
+        "start"
+      ]
+    }
+  }
+}

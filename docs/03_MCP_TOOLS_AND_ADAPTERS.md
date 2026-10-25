@@ -63,7 +63,9 @@ the same loaded set.
 | `task.add_event` | low | metadata_only |
 
 `task.create` starts a persistent task, accepts observable `definitionOfDone`
-criteria (max 12), and clears any active task approval.
+criteria (max 12), and clears any active task approval. Its guidance uses a
+fast path: inspect once, act, then verify. The runner also nudges on the 3rd
+and 6th identical call so the agent changes strategy instead of looping.
 `task.update_status` supports `paused`, `active`, `completed`, and `cancelled`.
 Completing a task that has criteria requires `verifiedCriteria` covering every
 criterion; otherwise the call fails with `definition_of_done_unverified` and no
@@ -81,9 +83,10 @@ For every tool call the central runner performs, in order:
 
 1. Zod schema validation; invalid input returns `invalid_input` and never
    reaches the handler.
-2. Stop/takeover gate for state-changing tools. A requested stop returns
+2. Stop/takeover/pause gate for state-changing tools. A requested stop returns
    `emergency_stop_requested`; human takeover returns
-   `human_takeover_active`. Read-only observation remains available.
+   `human_takeover_active`; an operator pause returns `pause_requested`.
+   Read-only observation remains available.
 3. Effect preview resolution: actual target path, target fingerprint, risk,
    policy approval, and blocked reason. Previews never execute the action.
 4. `dryRun: true` returns the preview. If the effect needs confirmation, it
@@ -123,9 +126,11 @@ agenthost agent resume --stop|--takeover|--pause
 
 `agenthost stop` kills an AgentHost-managed background process and writes the
 stop flag. `agenthost agent pause` holds state-changing tools until
-`agenthost agent resume --pause`. `agenthost agent stop` writes the run flag and
-clears active task approval; it is the appropriate emergency stop when the MCP
-process is owned by the client.
+`agenthost agent resume --pause`. `agenthost task pause` marks an active task
+paused and requests the same run pause with a task-scoped reason;
+`task resume` clears only that reason. `agenthost agent stop` writes the run
+flag and clears active task approval; it is the appropriate emergency stop when
+the MCP process is owned by the client.
 
 ## Files and shell
 
@@ -204,15 +209,27 @@ Overlay is not exposed as MCP tools in minimal-v2. The server owns a
 or updates one public, click-through action card before preview/handler work.
 The card reports running, waiting-for-approval, preview-ready, done, failed, or
 halted state in place. It never blocks tool execution when rendering fails and
-honors `overlay.persistent` / `overlay.autoHideMs`. Local scripts use
-`createOverlayRenderer`, `OverlayManager`, and `TaskProgressOverlay` from
-`packages/app-overlay`.
+honors `overlay.persistent` / `overlay.autoHideMs`. A failed Pause/Resume/Stop
+write is shown as a warning instead of a false state. New
+`confirmation_required` results raise the action card and send a best-effort
+desktop notification naming `agenthost confirmations`; token values are never
+shown. Local scripts use `createOverlayRenderer`, `OverlayManager`, and
+`TaskProgressOverlay` from `packages/app-overlay`.
 
-Task progress cards are persistent by default and remain after terminal states
+The server also keeps an automatic current-task card visible while a task is
+active or paused, showing the goal, phase/current action, definition-of-done
+checklist, running-task count, and Pause/Resume/Stop. It restores the most
+recent active/paused task on startup (24h freshness) and updates from `task.*`
+results. Task cards are persistent by default and remain after terminal states
 until dismissed, `agenthost overlay hide` is run, or the process exits.
-Elapsed time freezes at terminal transition. Pause is cooperative at a step
-boundary; Stop never kills an in-flight tool call. `agenthost overlay hide`
+Elapsed time freezes at terminal transition. Task-card Pause requests the
+scoped global pause and shows Paused with Resume immediately; Stop never kills
+an in-flight tool call. `agenthost overlay hide`
 writes `run/overlay.hide` and sweeps orphaned renderers; `overlay status`
 reports the registered renderer, marker, and live renderer count. Screenshot
 capture temporarily removes and restores all overlay surfaces so AgentHost UI
 is never embedded in a screenshot.
+
+Multiple cards share one manager. Call `pollEvents(overlayId)`; unmatched
+events stay buffered for the other card. Pause reasons are scoped so an
+action-card resume does not clear a task-card pause (or vice versa).

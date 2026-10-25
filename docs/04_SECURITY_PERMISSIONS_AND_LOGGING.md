@@ -85,7 +85,7 @@ Every call to a registered tool passes through one runner:
 
 1. Zod schema validation. Invalid input returns `invalid_input` and never
    reaches the handler.
-2. Stop/takeover gate for state-changing tools.
+2. Stop/takeover/pause gate for state-changing tools.
 3. Effect preview resolution (actual target, target fingerprint, risk,
    approval, blocked reason). Previews never execute.
 4. Dry-run returns the preview plus a pending token when confirmation is
@@ -115,8 +115,8 @@ AgentHost protects its own control plane from agent writes and deletes:
 
 Reads are medium risk; writes and deletes are blocked. Shell commands that
 touch these paths or run mutating `agenthost` commands
-(`task approve|stop`, `confirm`, `deny`, `resume`, `stop`, `takeover`,
-`overlay hide`, `integrations --apply`) are blocked. Inline interpreter code
+(`task approve|pause|stop`, `confirm`, `deny`, `pause`, `resume`, `stop`,
+`takeover`, `overlay hide`, `integrations --apply`) are blocked. Inline interpreter code
 (`python -c`, `node -e`, and similar) is high risk. Wrapper shells,
 metacharacters, destructive file commands, package/service changes, `sudo`,
 filesystem formatting, credential paths, and browser-profile paths remain

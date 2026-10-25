@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { chmod, cp, mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { collectReleaseFiles } from "./release-integrity.mjs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
@@ -53,7 +54,9 @@ const installRoot = path.join(os.homedir(), ".local", "share", "agenthost", "rel
 const previous = `${current}.previous`;
 await mkdir(path.dirname(installRoot), { recursive: true, mode: 0o700 });
 await rm(installRoot, { recursive: true, force: true });
-await cp(archiveRoot, installRoot, { recursive: true, force: true });
+await cp(archiveRoot, installRoot, { recursive: true, force: true, verbatimSymlinks: true });
+const installedInventory = await collectReleaseFiles(installRoot);
+if (installedInventory.symlinkFailures.length > 0) throw new Error(`install_symlink_invalid:${installedInventory.symlinkFailures.join(",")}`);
 await rm(previous, { recursive: true, force: true });
 if (await stat(current).catch(() => undefined)) await rename(current, previous);
 try {

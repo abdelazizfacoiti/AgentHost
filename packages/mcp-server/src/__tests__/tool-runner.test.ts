@@ -6,7 +6,9 @@ import { z } from "zod";
 import {
   acceptConfirmation,
   createTask,
+  clearPause,
   getDefaultPolicy,
+  requestPause,
   requestStop,
   toolSuccess,
   type AuditLogEntry,
@@ -171,6 +173,35 @@ describe("governed tool runner", () => {
     };
     const readResult = await runTool(readTool, {}, context);
     expect(readResult.ok).toBe(true);
+  });
+
+  it("halts state-changing tools under pause while allowing observation", async () => {
+    const home = await tempHome();
+    await requestPause(home, "test pause");
+    const context = makeContext(home, []);
+    const writeHandler = vi.fn(async () => undefined);
+    const writeResult = await runTool(writeTool(writeHandler), { value: "hello" }, context);
+    expect(writeResult.error?.code).toBe("pause_requested");
+    expect(writeResult.observations?.join(" ")).toContain("test pause");
+    expect(writeHandler).not.toHaveBeenCalled();
+
+    const readTool: AgentHostToolDefinition<Record<string, never>, unknown> = {
+      name: "test.read",
+      description: "Test read",
+      riskLevel: "observe",
+      inputSchema: z.object({}).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Test read",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: async () => toolSuccess({ tool: "test.read", riskLevel: "observe", data: { observed: true } })
+    };
+    expect((await runTool(readTool, {}, context)).ok).toBe(true);
+
+    await clearPause(home);
+    const resumed = await runTool(writeTool(writeHandler), { value: "hello", dryRun: true }, context);
+    expect(resumed.ok).toBe(true);
+    expect(resumed.preview).toBe(true);
   });
 
   it("writes routine files directly and blocks control-plane targets", async () => {
@@ -376,10 +407,11 @@ describe("governed tool runner", () => {
       handler: async () => toolSuccess({ tool: "desktop.probe", riskLevel: "observe", data: { found: true } })
     };
     const results = [];
-    for (let index = 0; index < 5; index += 1) results.push(await runTool(probe, { query: "domains" }, context));
-    expect(results[2]?.observations?.join(" ")).not.toContain("run 4 times");
-    expect(results[3]?.observations?.join(" ")).toContain("run 4 times");
-    expect(results[4]?.observations?.join(" ")).not.toContain("run 8 times");
+    for (let index = 0; index < 6; index += 1) results.push(await runTool(probe, { query: "domains" }, context));
+    expect(results[1]?.observations?.join(" ")).not.toContain("run 3 times");
+    expect(results[2]?.observations?.join(" ")).toContain("run 3 times");
+    expect(results[4]?.observations?.join(" ")).not.toContain("run 6 times");
+    expect(results[5]?.observations?.join(" ")).toContain("run 6 times");
   });
 
   it("surfaces approval waits for read-only tools that need confirmation", async () => {

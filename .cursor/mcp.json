@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "agenthost": {
+      "command": "agenthost",
+      "args": [
+        "start"
+      ]
+    }
+  }
+}

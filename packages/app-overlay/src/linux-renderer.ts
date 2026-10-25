@@ -185,7 +185,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   async #ensureStarted(): Promise<boolean> {
     if (this.#closed) return false;
     if (this.#starting !== undefined) return await this.#starting;
-    if (this.#child !== undefined && this.#handshake === "passed" && this.#runtimeState === "ready") return true;
+    if (this.#child !== undefined && this.#handshake === "passed") return true;
     if (this.#child !== undefined) this.#fail("renderer_protocol_error");
     this.#starting = this.#start();
     try { return await this.#starting; } finally { this.#starting = undefined; }

@@ -6,13 +6,18 @@
  *   node scripts/install-agenthost-skill.mjs --target claude
  *   node scripts/install-agenthost-skill.mjs --target codex
  *   node scripts/install-agenthost-skill.mjs --target copilot --project /path/to/repo
+ *   node scripts/install-agenthost-skill.mjs --target copilot-cli
  *   node scripts/install-agenthost-skill.mjs --target cursor --project /path/to/repo
  *   node scripts/install-agenthost-skill.mjs --target all
+ *   node scripts/install-agenthost-skill.mjs --target all --no-mcp
  *   node scripts/install-agenthost-skill.mjs --print   # manual copy
  *
- * The skill is advisory text only; it never executes machine actions.
+ * The skill is advisory text only; it never executes machine actions. Unless
+ * --no-mcp is set, it also runs the corresponding integrations command.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,21 +33,23 @@ function parseArgs(argv) {
   let project = process.cwd();
   let dryRun = false;
   let print = false;
+  let mcp = true;
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
     if (item === "--target") targets.push(argv[++index]);
     else if (item === "--project") project = path.resolve(argv[++index]);
     else if (item === "--dry-run") dryRun = true;
     else if (item === "--print") print = true;
+    else if (item === "--no-mcp") mcp = false;
     else if (item === "--help" || item === "-h") {
-      console.log("usage: install-agenthost-skill.mjs [--target opencode|claude|codex|copilot|cursor|all] [--project DIR] [--dry-run] [--print]");
+      console.log("usage: install-agenthost-skill.mjs [--target opencode|claude|codex|copilot|copilot-cli|cursor|all] [--project DIR] [--dry-run] [--print] [--no-mcp]");
       process.exit(0);
     } else {
       console.error(`unknown argument: ${item}`);
       process.exit(2);
     }
   }
-  return { targets, project, dryRun, print };
+  return { targets, project, dryRun, print, mcp };
 }
 
 function splitFrontmatter(markdown) {
@@ -102,8 +109,20 @@ async function upsertMarkedFile(target, body, dryRun) {
   console.log(`updated ${target}`);
 }
 
+function registerMcp(target, project, dryRun) {
+  const cli = path.resolve(here, "..", "packages", "agenthost-cli", "dist", "index.js");
+  if (!existsSync(cli)) {
+    console.warn(`MCP registration skipped for ${target}: build AgentHost first (npm run build) or run agenthost integrations ${target} add --apply.`);
+    return;
+  }
+  const args = [cli, "integrations", target, "add", "--project", project];
+  if (!dryRun) args.push("--apply");
+  const result = spawnSync(process.execPath, args, { stdio: "inherit", env: process.env });
+  if (result.status !== 0) console.warn(`MCP registration failed for ${target}; run agenthost integrations ${target} add --apply manually.`);
+}
+
 async function main() {
-  const { targets, project, dryRun, print } = parseArgs(process.argv.slice(2));
+  const { targets, project, dryRun, print, mcp } = parseArgs(process.argv.slice(2));
   const markdown = await readFile(source, "utf8");
   if (print) {
     process.stdout.write(markdown);
@@ -111,8 +130,8 @@ async function main() {
   }
   const { frontmatter, body } = splitFrontmatter(markdown);
   const summary = description(frontmatter);
-  const requested = targets.length === 0 ? ["opencode"] : targets.flatMap((entry) => entry === "all" ? ["opencode", "claude", "codex", "copilot", "cursor"] : [entry]);
-  const known = new Set(["opencode", "claude", "codex", "copilot", "cursor"]);
+  const requested = targets.length === 0 ? ["opencode"] : targets.flatMap((entry) => entry === "all" ? ["opencode", "claude", "codex", "copilot", "copilot-cli", "cursor"] : [entry]);
+  const known = new Set(["opencode", "claude", "codex", "copilot", "copilot-cli", "cursor"]);
   for (const target of requested) {
     if (!known.has(target)) {
       console.error(`unknown target: ${target}`);
@@ -127,12 +146,19 @@ async function main() {
       await upsertMarkedFile(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "AGENTS.md"), body, dryRun);
     } else if (target === "copilot") {
       await upsertMarkedFile(path.join(project, ".github", "copilot-instructions.md"), body, dryRun);
+    } else if (target === "copilot-cli") {
+      await upsertMarkedFile(path.join(process.env.COPILOT_HOME ?? path.join(home, ".copilot"), "copilot-instructions.md"), body, dryRun);
     } else if (target === "cursor") {
       const cursor = `---\ndescription: ${summary.replace(/\n/g, " ")}\nglobs: \nalwaysApply: false\n---\n\n${body.trim()}\n`;
       await writeSkillFile(path.join(project, ".cursor", "rules", "agenthost.mdc"), cursor, dryRun);
     }
+    if (mcp) registerMcp(target, project, dryRun);
   }
-  if (!dryRun) console.log("AgentHost skill installed. Restart the assistant session if it caches skills.");
+  if (!dryRun) {
+    console.log(mcp
+      ? "AgentHost skill installed. MCP server registration was applied where supported. Reload or restart the assistant so the client spawns AgentHost."
+      : "AgentHost skill installed without MCP registration. Run the client's agenthost integrations command to expose the tools.");
+  }
 }
 
 await main();

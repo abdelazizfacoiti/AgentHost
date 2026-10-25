@@ -517,11 +517,11 @@ export async function runTool<Input>(
   }
 
   const repeats = noteRepeatedCall(context, tool.name, input);
-  if (repeats === 4 || repeats === 8) {
+  if (repeats === 3 || repeats === 6) {
     result.observations = [
       ...(result.observations ?? []),
-      repeats === 4
-        ? `This exact call has now run ${repeats} times. If the requested outcome is already satisfied, verify the definition of done and report instead of repeating.`
+      repeats === 3
+        ? `This exact call has now run ${repeats} times. Decide now: if the outcome is already satisfied, verify and report; otherwise change strategy instead of repeating.`
         : `This exact call has now run ${repeats} times. Stop looping: verify the definition of done, then complete the task or report the blocker.`
     ];
   }

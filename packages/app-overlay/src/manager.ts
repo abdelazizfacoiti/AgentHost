@@ -27,6 +27,7 @@ export class OverlayManager {
   readonly #targets = new Map<string, { binding: OverlayTargetBinding; resolver?: OverlayTargetResolver | undefined }>();
   readonly #hideMarkerPath: string | null;
   readonly #localEvents: OverlayWidgetEvent[] = [];
+  readonly #pendingEvents: OverlayWidgetEvent[] = [];
   #emergencyHidden = false;
   #rendererEpoch = 0;
   #sweeper: ReturnType<typeof setInterval> | undefined;
@@ -114,12 +115,23 @@ export class OverlayManager {
     this.#payloads.set(overlayId, payload);
     return { ok: true, reason: result.reason ?? "overlay_widget_updated", acknowledged: true, ...(result.rendererEpoch === undefined ? {} : { rendererEpoch: result.rendererEpoch }) };
   }
-  async pollEvents(): Promise<OverlayWidgetEvent[]> {
+  async pollEvents(overlayId?: string): Promise<OverlayWidgetEvent[]> {
     this.#checkHideMarker();
     const renderer = this.#renderer as OverlayRenderer & { drainEvents?: () => Promise<OverlayWidgetEvent[]> | OverlayWidgetEvent[] };
     const events = await (renderer.drainEvents?.() ?? renderer.events());
     const local = this.#localEvents.splice(0, this.#localEvents.length);
-    return [...local, ...events].filter((event) => event.ownerSessionId === this.#owner.sessionId);
+    const fresh = [...local, ...events].filter((event) => event.ownerSessionId === this.#owner.sessionId);
+    if (overlayId === undefined) {
+      const all = [...this.#pendingEvents.splice(0, this.#pendingEvents.length), ...fresh];
+      return all.slice(-200);
+    }
+    const selected: OverlayWidgetEvent[] = [];
+    for (const event of [...this.#pendingEvents.splice(0, this.#pendingEvents.length), ...fresh]) {
+      if (event.overlayId === overlayId) selected.push(event);
+      else this.#pendingEvents.push(event);
+    }
+    if (this.#pendingEvents.length > 200) this.#pendingEvents.splice(0, this.#pendingEvents.length - 200);
+    return selected;
   }
   async update(overlayId: string, patch: Record<string, unknown>): Promise<OverlayOperationResult> { const current = this.#records.get(overlayId); if (current === undefined || current.ownerSessionId !== this.#owner.sessionId) return { ok: false, reason: "overlay_not_found" }; if (Object.keys(patch).some((key) => !["label", "text", "style", "animation", "visible"].includes(key))) return { ok: false, reason: "overlay_update_field_blocked" }; if (typeof patch.label === "string" && redactOverlayText(patch.label, current.sensitivity).errors.length > 0) return { ok: false, reason: "overlay_unsafe_content_blocked" }; if (typeof patch.text === "string" && redactOverlayText(patch.text, current.sensitivity).errors.length > 0) return { ok: false, reason: "overlay_unsafe_content_blocked" }; if (patch.style !== undefined && validateOverlayStyleTokens(patch.style as never).length > 0) return { ok: false, reason: "overlay_style_token_blocked" }; if (patch.animation !== undefined && validateOverlayAnimation(patch.animation as never).length > 0) return { ok: false, reason: "overlay_animation_invalid" }; const next = { ...current, updatedAt: new Date().toISOString(), ...(typeof patch.visible === "boolean" ? { visible: patch.visible } : {}) }; const safePatch: Record<string, unknown> = {}; if (typeof patch.label === "string") safePatch.label = redactOverlayText(patch.label, current.sensitivity).redactedText ?? "[redacted]"; if (typeof patch.text === "string") safePatch.text = redactOverlayText(patch.text, current.sensitivity).redactedText ?? "[redacted]"; if (patch.style !== undefined) safePatch.style = patch.style; if (patch.animation !== undefined) safePatch.animation = patch.animation; if (typeof patch.visible === "boolean") safePatch.visible = patch.visible; const payload = { ...(this.#payloads.get(overlayId) as Record<string, unknown>), ...safePatch }; const result = await this.#renderer.update({ overlayId, type: next.type, payload }); if (!result.ok || result.acknowledged !== true) return { ...result, reason: result.reason || "overlay_render_not_acknowledged" }; if (result.rendererEpoch !== undefined) this.#rendererEpoch = result.rendererEpoch; this.#records.set(overlayId, next); this.#payloads.set(overlayId, payload); return result; }
   async dismiss(overlayId: string): Promise<OverlayOperationResult> { const current = this.#records.get(overlayId); if (current !== undefined && current.ownerSessionId !== this.#owner.sessionId) return { ok: false, reason: "overlay_owner_mismatch" }; this.#records.delete(overlayId); this.#payloads.delete(overlayId); this.#targets.delete(overlayId); return this.#renderer.dismiss(overlayId); }

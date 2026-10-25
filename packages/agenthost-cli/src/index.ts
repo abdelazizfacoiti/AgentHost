@@ -7,6 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, acceptConfirmation, beginTakeover, clearActiveTaskApproval, clearPause, clearStop, defaultAgentHostHome, defaultPublicConfigPath, endTakeover, legacyConfigPath, listConfirmations, loadAgentHostConfig, normalizeSha256, readActiveTaskApproval, readRunState, readSha256Sidecar, redactLocalPath, rejectConfirmation, requestPause, requestStop, sha256File, transitionTask } from "@agenthost/core";
 import { renderTaskHtml, renderTaskMarkdown } from "./task-export.js";
+import { INTEGRATION_TARGETS, integrationAdd, integrationRemove, integrationStatus, publicIntegrationReport, type IntegrationAction, type IntegrationPaths, type IntegrationTarget } from "./integrations.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
@@ -277,6 +278,11 @@ async function attachTaskOverlay(taskId: string, goal: string, initial: Json): P
     let locallyPaused = false;
     let terminalHandled = false;
     let interrupted = false;
+    const overlayPauseReason = `cli_task_overlay_pause:${taskId}`;
+    const clearOwnPause = async (): Promise<void> => {
+      const state = await readRunState(agentHome);
+      if (state.pause.requested && state.pause.reason === overlayPauseReason) await clearPause(agentHome);
+    };
     const onInterrupt = (): void => { interrupted = true; };
     process.once("SIGINT", onInterrupt);
     const controller = new TaskProgressOverlay({
@@ -286,16 +292,37 @@ async function attachTaskOverlay(taskId: string, goal: string, initial: Json): P
       onAction: (action) => {
         if (action === "pause") {
           locallyPaused = true;
-          void requestPause(agentHome, `cli_task_overlay_pause:${taskId}`).catch(() => undefined);
+          void requestPause(agentHome, overlayPauseReason).catch(async () => {
+            locallyPaused = false;
+            await controller.resume();
+          });
         }
         if (action === "resume") {
           locallyPaused = false;
-          void clearPause(agentHome).catch(() => undefined);
+          void (async () => {
+            try {
+              const state = await readRunState(agentHome);
+              if (state.pause.requested && state.pause.reason !== overlayPauseReason) {
+                await controller.pause();
+                return;
+              }
+              if (state.pause.requested) await clearPause(agentHome);
+            } catch {
+              await controller.pause();
+            }
+          })();
         }
         if (action === "stop") {
-          void requestStop(agentHome, "overlay_stop").catch(() => undefined);
-          void clearActiveTaskApproval(agentHome).catch(() => undefined);
-          void controller.requestStop();
+          void (async () => {
+            try {
+              await requestStop(agentHome, "overlay_stop");
+              await clearOwnPause();
+              await clearActiveTaskApproval(agentHome);
+              await controller.stopped("Stopped by operator");
+            } catch {
+              await controller.fail("Stop request failed. State-changing actions may still run.");
+            }
+          })();
         }
       }
     });
@@ -490,13 +517,35 @@ async function doctor(): Promise<Output> {
   if (!mcp.handshake) warnings.push(mcp.reason ?? "mcp_handshake_unavailable");
   return { ok: config.ok, command: "doctor", data: { version: AGENTHOST_VERSION, checks, config: config.ok ? "valid" : config.error, mcp, process: await status(), paths: { agentHostHome: "[agenthost-home]", config: "[config]", mcpEntry: "[installed-mcp-runtime]" } }, warnings };
 }
-async function codex(action: string, flags: ReturnType<typeof parseFlags>): Promise<Output> {
-  const dir = process.env.CODEX_HOME ?? path.join(home, ".codex"); const file = path.join(dir, "config.toml"); if (action === "status") { const text = await readFile(file, "utf8").catch(() => ""); return { ok: true, command: "integrations codex status", data: { configured: text.includes("[mcp_servers.agenthost]"), configPath: existsSync(file) ? "[codex-config]" : null, usesRepositoryPath: /packages[\\/]mcp-server[\\/]dist/.test(text) } }; }
-  if (!existsSync(file)) return fail(`integrations codex ${action}`, "codex_config_missing"); const text = await readFile(file, "utf8"); const header = "[mcp_servers.agenthost]"; const startAt = text.indexOf(header); const endAt = startAt < 0 ? -1 : (() => { const next = text.indexOf("\n[", startAt + header.length); return next < 0 ? text.length : next; })(); const entry = `${header}\ncommand = \"agenthost\"\nargs = [\"start\"]\n`;
-  if (text.length > 2_000_000 || text.includes("\u0000") || text.split("\n").some((line) => line.trimStart().startsWith("[") && !line.trim().endsWith("]"))) return fail(`integrations codex ${action}`, "codex_config_unsupported_or_invalid");
-  if (action === "remove") { if (!flags.flags.has("apply")) return { ok: true, command: "integrations codex remove", data: { preview: true, changed: startAt >= 0 } }; const updated = startAt >= 0 ? text.slice(0, startAt) + text.slice(endAt) : text; await safeWrite(`${file}.agenthost.bak`, text); await safeWrite(file, updated); return { ok: true, command: "integrations codex remove", data: { applied: true, backup: "[codex-backup]" } }; }
-  const updated = startAt >= 0 ? text.slice(0, startAt) + entry + text.slice(endAt) : `${text.trimEnd()}\n\n${entry}`; if (!flags.flags.has("apply")) return { ok: true, command: "integrations codex add", data: { preview: true, proposed: { command: "agenthost", args: ["start"] }, preservesExisting: true, changed: updated !== text } };
-  await safeWrite(`${file}.agenthost.bak`, text); await safeWrite(file, updated); return { ok: true, command: "integrations codex add", data: { applied: true, backup: "[codex-backup]", command: "agenthost", args: ["start"] } };
+async function integrationsCommand(targetArg: string | undefined, args: ReturnType<typeof parseFlags>): Promise<Output> {
+  const action = (args.positional[2] ?? "status") as IntegrationAction;
+  if (!["status", "add", "remove"].includes(action)) return fail("integrations", "unknown_action");
+  const paths: IntegrationPaths = {
+    home,
+    project: path.resolve(args.values.get("project") ?? process.cwd()),
+    ...(process.env.XDG_CONFIG_HOME === undefined ? {} : { xdgConfigHome: process.env.XDG_CONFIG_HOME }),
+    ...(process.env.CODEX_HOME === undefined ? {} : { codexHome: process.env.CODEX_HOME }),
+    ...(process.env.COPILOT_HOME === undefined ? {} : { copilotHome: process.env.COPILOT_HOME })
+  };
+  if (targetArg === undefined || targetArg === "status") {
+    const reports = await Promise.all(INTEGRATION_TARGETS.map((target) => integrationStatus(target, paths)));
+    return { ok: true, command: "integrations status", data: { targets: reports.map(publicIntegrationReport) } };
+  }
+  if (!INTEGRATION_TARGETS.includes(targetArg as IntegrationTarget)) return fail("integrations", "unknown_integration");
+  const target = targetArg as IntegrationTarget;
+  const apply = args.flags.has("apply");
+  const value = action === "add"
+    ? await integrationAdd(target, paths, apply)
+    : action === "remove"
+      ? await integrationRemove(target, paths, apply)
+      : await integrationStatus(target, paths);
+  if (value.error !== undefined) return fail(`integrations ${target} ${action}`, value.error);
+  return {
+    ok: true,
+    command: `integrations ${target} ${action}`,
+    data: publicIntegrationReport(value),
+    ...(value.applied ? { warnings: ["reload_client_session"] } : {})
+  };
 }
 async function update(args: ReturnType<typeof parseFlags>): Promise<Output> {
   const current = path.join(home, ".local", "share", "agenthost", "current");
@@ -534,7 +583,7 @@ async function main(): Promise<number> {
     else if (top === "capabilities") result = await capabilitiesCommand(args);
     else if (top === "permissions") result = await permissionsCommand();
     else if (top === "sessions") result = await sessionsCommand();
-    else if (top === "integrations" && sub === "codex") result = await codex(args.positional[2] ?? "status", args);
+    else if (top === "integrations") result = await integrationsCommand(sub, args);
     else if (top === "config") result = sub === "validate" ? await configValidate() : await configShow();
     else if (top === "update") result = await update(args);
     else if (top === "uninstall") result = await uninstall(args);

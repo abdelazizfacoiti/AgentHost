@@ -87,6 +87,19 @@ export class TaskProgressOverlay {
     return true;
   }
 
+  async setSteps(steps: TaskProgressStep[]): Promise<void> {
+    this.#steps.splice(0, this.#steps.length, ...steps.map((step) => ({ ...step })));
+    this.#normalizeSteps();
+    await this.#render();
+  }
+
+  async setRunningTaskCount(count: number): Promise<void> {
+    const next = Math.max(1, Math.floor(count));
+    if (next === this.#runningTaskCount) return;
+    this.#runningTaskCount = next;
+    await this.#render();
+  }
+
   async setStep(stepIdOrIndex: string | number, state: TaskProgressStepState = "active"): Promise<void> {
     const index = typeof stepIdOrIndex === "number" ? stepIdOrIndex : this.#steps.findIndex((step) => step.id === stepIdOrIndex);
     if (index < 0 || index >= this.#steps.length) return;
@@ -155,7 +168,7 @@ export class TaskProgressOverlay {
 
   async pollEvents(): Promise<TaskProgressAction[]> {
     if (this.#disposed || !this.#started) return [];
-    const events = await this.#options.manager.pollEvents();
+    const events = await this.#options.manager.pollEvents(this.#options.taskId);
     const actions: TaskProgressAction[] = [];
     for (const event of events) {
       if (event.overlayId !== this.#options.taskId) continue;
@@ -257,7 +270,7 @@ export class TaskProgressOverlay {
 
   #buttons(): Array<[string, "pause" | "resume" | "emergency_stop_requested" | "dismissed"]> {
     if (this.#status === "running") return [["Pause", "pause"], ["Stop", "emergency_stop_requested"]];
-    if (this.#status === "pause_requested") return [["Stop", "emergency_stop_requested"]];
+    if (this.#status === "pause_requested") return [["Resume", "resume"], ["Stop", "emergency_stop_requested"]];
     if (this.#status === "paused") return [["Resume", "resume"], ["Stop", "emergency_stop_requested"]];
     if (this.#status === "waiting_approval") return [["Stop", "emergency_stop_requested"]];
     if (this.#status === "stopping") return [];

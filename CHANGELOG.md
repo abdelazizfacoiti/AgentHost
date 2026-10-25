@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- Added `agenthost integrations <client> add|status|remove` for opencode,
+  Claude Code, Codex, Copilot (VS Code + CLI), and Cursor. `--apply` writes
+  one server entry, preserves existing settings, and backs up an existing
+  config. The
+  skill installer now registers the MCP server for the same clients, and the
+  skill can self-register when its tools are missing.
+- Added an automatic persistent current-task card that shows the active goal,
+  phase/current action, definition-of-done checklist, running-task count, and
+  Pause/Resume/Stop. It restores the latest active task on startup and honors
+  an explicit close.
+- Fixed overlay buttons failing when multiple cards shared one manager: events
+  are now routed per overlay instead of being drained by the first poller.
+  Pause reasons are scoped, Stop failures are reported instead of shown as
+  halted, and a stopped task card exposes Dismiss immediately.
+- Fixed GTK renderer event polling overlapping an in-flight update, which
+  could kill a healthy renderer and make the automatic task card disappear.
+  Task-card Pause now requests the scoped global pause and shows Paused with a
+  Resume control immediately.
+- Approval waits now raise the action card and send a best-effort desktop
+  notification to run `agenthost confirmations`; token values are never
+  included.
+- Added overlay Pause/Resume/Stop/Dismiss controls, raised approval cards, and
+  task definition-of-done verification gates.
+- Added fast task-decision guidance (inspect once, act, verify) and earlier
+  duplicate-call nudges.
+- Fixed release installs rewriting relative workspace symlinks to absolute
+  temporary paths, which made the installed `agenthost start` fail with
+  `ERR_MODULE_NOT_FOUND` and left MCP clients disconnected. Install now copies
+  symlinks verbatim and rejects any symlink that escapes the install root.
 - Replaced named policy profiles with one autonomous runtime policy. Routine
   local actions execute directly; external, destructive, private-data, and
   financial effects require exact confirmation. Removed
