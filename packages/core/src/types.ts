@@ -119,6 +119,8 @@ export interface ToolResult<T = unknown> {
   serverPath?: string;
   strategy?: AutomationStrategy;
   preview?: boolean;
+  /** Set when the action card could not be shown, for example `unavailable:overlay_show_timeout`. */
+  overlay?: string;
   confirmation?: ToolConfirmationInfo;
   receipt?: ToolResultReceipt;
   grantDecision?: GrantDecision;
@@ -2137,6 +2139,15 @@ export interface ToolForgeApplySessionGrantsResult {
   grants: GrantSummary[];
 }
 
+export interface AuditTimings {
+  overlayWait: number;
+  safetyEval: number;
+  preview: number;
+  handler: number;
+  auditWrite: number;
+  total: number;
+}
+
 export interface AuditLogEntry {
   timestamp: string;
   sessionId: string;
@@ -2164,6 +2175,7 @@ export interface AuditLogEntry {
   approvalStatus: ApprovalStatus;
   ok: boolean;
   durationMs: number;
+  timings?: AuditTimings;
   outputSummary: string;
   errorCode?: string;
 }

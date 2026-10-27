@@ -20,6 +20,7 @@ import {
 } from "@agenthost/core";
 import type { AgentHostMcpContext } from "./context.js";
 import type { ToolActionHandle } from "./action-overlay.js";
+import { shouldShowActionCard } from "./activity.js";
 import { createSafetyEvaluationContext } from "./grants.js";
 
 export interface ToolPreviewEffect {
@@ -54,10 +55,27 @@ export interface AgentHostToolDefinition<Input, Output, Context = AgentHostMcpCo
 
 export type AnyAgentHostToolDefinition<Context = AgentHostMcpContext> = AgentHostToolDefinition<any, any, Context>;
 
+interface ExecutionTimings {
+  overlayWait: number;
+  safetyEval: number;
+  preview: number;
+  handler: number;
+  auditWrite: number;
+}
+
 interface AuditMeta {
   inputSummary: string;
   preview: boolean;
   confirmation?: ToolConfirmationInfo;
+  timings: ExecutionTimings;
+}
+
+function emptyTimings(): ExecutionTimings {
+  return { overlayWait: 0, safetyEval: 0, preview: 0, handler: 0, auditWrite: 0 };
+}
+
+function elapsedSince(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt);
 }
 
 function confirmationInfo(
@@ -197,7 +215,18 @@ async function executeGoverned(
   context: AgentHostMcpContext,
   audit: AuditMeta
 ): Promise<ToolResult> {
+  let phase: "safety" | "preview" | "handler" | "done" = "safety";
+  let phaseStartedAt = Date.now();
+  const advancePhase = (next: typeof phase): void => {
+    const now = Date.now();
+    if (phase === "safety") audit.timings.safetyEval += now - phaseStartedAt;
+    else if (phase === "preview") audit.timings.preview += now - phaseStartedAt;
+    else if (phase === "handler") audit.timings.handler += now - phaseStartedAt;
+    phase = next;
+    phaseStartedAt = now;
+  };
   const stateChanging = tool.execution?.executionClass === "state_changing";
+  try {
   const rawObject = rawInput !== null && typeof rawInput === "object" && !Array.isArray(rawInput)
     ? rawInput as Record<string, unknown>
     : undefined;
@@ -241,6 +270,7 @@ async function executeGoverned(
       });
     }
   }
+  advancePhase("preview");
   const needsEffect = stateChanging || tool.preview?.resolveEffect !== undefined || tool.safety.getInput !== undefined;
   let effect: ToolPreviewEffect;
   try {
@@ -399,12 +429,20 @@ async function executeGoverned(
   const handlerContext = confirmationAccepted && context.confirmationSatisfied !== true
     ? { ...context, confirmationSatisfied: true }
     : context;
+  advancePhase("handler");
   const result = await tool.handler(parsedInput, handlerContext, tool.execution);
+  advancePhase("done");
   if (audit.confirmation !== undefined) audit.confirmation.executed = result.ok;
   if (result.confirmation === undefined && audit.confirmation !== undefined) {
     result.confirmation = audit.confirmation;
   }
   return result;
+  } finally {
+    const now = Date.now();
+    if (phase === "safety") audit.timings.safetyEval += now - phaseStartedAt;
+    else if (phase === "preview") audit.timings.preview += now - phaseStartedAt;
+    else if (phase === "handler") audit.timings.handler += now - phaseStartedAt;
+  }
 }
 
 interface RepeatEntry {
@@ -453,9 +491,11 @@ export async function runTool<Input>(
 ): Promise<ToolResult> {
   const startedAt = Date.now();
   if (tool.name === "task.create") REPEAT_TRACKER.delete(context);
-  const audit: AuditMeta = { inputSummary: "Tool call", preview: false };
+  const activityMode = context.config.overlay?.mode ?? "always";
+  const audit: AuditMeta = { inputSummary: "Tool call", preview: false, timings: emptyTimings() };
   let action: ToolActionHandle | undefined;
-  if (tool.execution?.executionClass === "state_changing" && inputPassesSchema(tool, input)) {
+  if (shouldShowActionCard(tool.name, tool.execution?.executionClass, activityMode) && inputPassesSchema(tool, input)) {
+    const overlayStartedAt = Date.now();
     try {
       action = await context.actionOverlay?.begin({
         tool: tool.name,
@@ -464,6 +504,8 @@ export async function runTool<Input>(
       });
     } catch {
       action = undefined;
+    } finally {
+      audit.timings.overlayWait += elapsedSince(overlayStartedAt);
     }
   }
   let result: ToolResult;
@@ -504,7 +546,8 @@ export async function runTool<Input>(
     result.serverPath ??= runtime.entryPath;
   }
 
-  if (action === undefined && result.error?.code === "confirmation_required") {
+  if (action === undefined && result.error?.code === "confirmation_required" && activityMode !== "off") {
+    const overlayStartedAt = Date.now();
     try {
       action = await context.actionOverlay?.begin({
         tool: tool.name,
@@ -513,9 +556,12 @@ export async function runTool<Input>(
       });
     } catch {
       action = undefined;
+    } finally {
+      audit.timings.overlayWait += elapsedSince(overlayStartedAt);
     }
   }
 
+  const auditPreparedAt = Date.now();
   const repeats = noteRepeatedCall(context, tool.name, input);
   if (repeats === 3 || repeats === 6) {
     result.observations = [
@@ -526,6 +572,8 @@ export async function runTool<Input>(
     ];
   }
 
+  audit.timings.auditWrite = elapsedSince(auditPreparedAt);
+  const totalMs = elapsedSince(startedAt);
   try {
     await context.logger.log({
       timestamp: new Date().toISOString(),
@@ -545,7 +593,8 @@ export async function runTool<Input>(
       inputSummary: audit.inputSummary,
       approvalStatus: result.approval.status,
       ok: result.ok,
-      durationMs: Date.now() - startedAt,
+      durationMs: totalMs,
+      timings: { ...audit.timings, total: totalMs },
       outputSummary: tool.auditOutputSummary?.(result)
         ?? (result.ok ? `${tool.name} completed.` : `${result.error?.code ?? "tool_failed"}: ${summarizeForLog(result.error?.message ?? "")}`),
       ...(result.error === null ? {} : { errorCode: result.error.code })
@@ -554,7 +603,10 @@ export async function runTool<Input>(
     // A local audit write failure must not turn a completed action into a second action.
   }
 
-  await action?.finish(result).catch(() => undefined);
+  const actionStatus = await action?.finish(result).catch(() => undefined);
+  if (actionStatus !== undefined && !actionStatus.hidden && (!actionStatus.visible || actionStatus.error !== undefined)) {
+    result.overlay = `unavailable:${actionStatus.error ?? "overlay_not_visible"}`;
+  }
 
   return result;
 }

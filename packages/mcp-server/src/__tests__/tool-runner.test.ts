@@ -22,6 +22,7 @@ import { ToolActionOverlay } from "../action-overlay.js";
 import { runTool, type AgentHostToolDefinition } from "../tool-runner.js";
 import { createFileTools } from "../tools/file.js";
 import { createDesktopTools } from "../tools/desktop.js";
+import { createWindowTools } from "../tools/window.js";
 import { createShellTools } from "../tools/shell.js";
 import { applyProductionExecutionMetadata } from "../tool-metadata.js";
 
@@ -93,6 +94,21 @@ function writeTool(handler: (input: { value: string }) => Promise<unknown>, risk
 }
 
 describe("governed tool runner", () => {
+  it("records bounded per-phase timings without leaking arguments", async () => {
+    const home = await tempHome();
+    const logs: AuditLogEntry[] = [];
+    const context = makeContext(home, logs);
+    const tool = writeTool(async () => undefined);
+    tool.execution = { ...stateChanging(), requiresConfirmationToken: false };
+    const result = await runTool(tool, { value: "timing-secret" }, context);
+    expect(result.ok).toBe(true);
+    const timing = logs.at(-1)?.timings;
+    expect(timing).toBeDefined();
+    for (const value of Object.values(timing ?? {})) expect(value).toBeGreaterThanOrEqual(0);
+    expect(timing?.total).toBe(logs.at(-1)?.durationMs);
+    expect(JSON.stringify(timing)).not.toContain("timing-secret");
+  });
+
   it("rejects invalid input before calling the handler", async () => {
     const home = await tempHome();
     const logs: AuditLogEntry[] = [];
@@ -252,7 +268,7 @@ describe("governed tool runner", () => {
       pollEvents: vi.fn(async () => [])
     } as unknown as OverlayManager;
     const context = makeContext(home, []);
-    context.actionOverlay = new ToolActionOverlay(manager, { widgetId: "action-card", now: () => Date.now() });
+    context.actionOverlay = new ToolActionOverlay(manager, { widgetId: "action-card", minDisplayMs: 0, now: () => Date.now() });
     const handler = vi.fn(async () => {
       expect(showWidget).toHaveBeenCalledTimes(1);
     });
@@ -281,13 +297,58 @@ describe("governed tool runner", () => {
     await context.actionOverlay.close();
   });
 
+  it("routes read-only computer actions by overlay.mode", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const finish = vi.fn(async () => undefined);
+    const begin = vi.fn(async () => ({ finish }));
+    (context as unknown as { actionOverlay: unknown }).actionOverlay = { begin };
+    const observation: AgentHostToolDefinition<Record<string, never>, unknown> = {
+      name: "computer.observe_state",
+      description: "Observe",
+      riskLevel: "observe",
+      inputSchema: z.object({}).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Observe computer state",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: async () => toolSuccess({ tool: "computer.observe_state", riskLevel: "observe", data: { observed: true } })
+    };
+
+    (context.config as { overlay?: { mode: string } }).overlay = { mode: "always" };
+    await runTool(observation, {}, context);
+    expect(begin).toHaveBeenCalledTimes(1);
+
+    (context.config as { overlay?: { mode: string } }).overlay = { mode: "on_change" };
+    await runTool(observation, {}, context);
+    expect(begin).toHaveBeenCalledTimes(1);
+
+    const write = writeTool(vi.fn(async () => undefined));
+    write.execution = { ...stateChanging(), requiresConfirmationToken: false };
+    (context.config as { overlay?: { mode: string } }).overlay = { mode: "off" };
+    await runTool(write, { value: "hello" }, context);
+    expect(begin).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports overlay unavailability without failing the action", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const finish = vi.fn(async () => ({ started: false, visible: false, hidden: false, error: "overlay_show_timeout" }));
+    (context as unknown as { actionOverlay: unknown }).actionOverlay = { begin: vi.fn(async () => ({ finish })) };
+    const tool = writeTool(async () => undefined);
+    tool.execution = { ...stateChanging(), requiresConfirmationToken: false };
+    const result = await runTool(tool, { value: "hello" }, context);
+    expect(result.ok).toBe(true);
+    expect(result.overlay).toBe("unavailable:overlay_show_timeout");
+  });
+
   it("captures routine screenshots directly with suppression", async () => {
     const home = await tempHome();
     const context = makeContext(home, []);
     let suppressed = false;
     const screenshot = vi.fn(async (input: { path: string }) => {
       expect(suppressed).toBe(true);
-      return { path: input.path, width: 1, height: 1 };
+      return { supported: true, backend: "scrot", path: input.path, bytesWritten: 3, reason: "Captured." };
     });
     (context as unknown as { linux: unknown }).linux = { screenshot };
     context.overlayScreenshotSuppression = async (capture) => {
@@ -309,6 +370,93 @@ describe("governed tool runner", () => {
     const executed = await runTool(tool, { outputDir }, context);
     expect(executed.ok).toBe(true);
     expect(screenshot).toHaveBeenCalledWith(expect.objectContaining({ path: target }));
+  });
+
+  it("returns failures for desktop actions that did not complete", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    (context as unknown as { linux: unknown }).linux = {
+      screenshot: vi.fn(async (input: { path: string }) => ({
+        supported: false,
+        backend: "scrot",
+        path: input.path,
+        reason: "The screenshot backend did not produce a non-empty image file."
+      })),
+      getActiveWindow: vi.fn(async () => ({
+        supported: true,
+        backend: "xdotool",
+        activeWindow: { windowId: "123" },
+        reason: "Read the active window."
+      })),
+      typeText: vi.fn(async () => ({
+        supported: false,
+        backend: "xdotool",
+        typed: false,
+        characterCount: 3,
+        activeWindow: { windowId: "123" },
+        method: "clipboard",
+        reason: "Layout-unsafe characters require a clipboard backend; install xclip or xsel."
+      })),
+      hotkey: vi.fn(async () => ({
+        supported: false,
+        backend: "xdotool",
+        sent: false,
+        keys: ["CTRL+L"],
+        activeWindow: { windowId: "123" },
+        reason: "The hotkey backend did not complete successfully."
+      })),
+      click: vi.fn(async () => ({
+        supported: false,
+        backend: "xdotool",
+        clicked: false,
+        x: 10,
+        y: 20,
+        button: "left",
+        activeWindow: { windowId: "123" },
+        reason: "The click backend did not complete successfully."
+      })),
+      pointer: vi.fn(async () => ({
+        supported: false,
+        backend: "xdotool",
+        performed: false,
+        action: "move_mouse",
+        activeWindow: { windowId: "123" },
+        reason: "The pointer backend did not complete successfully."
+      })),
+      focusWindow: vi.fn(async () => ({
+        supported: true,
+        backend: "wmctrl",
+        focused: false,
+        window: { windowId: "123" },
+        reason: "The window manager reported success, but the requested window did not become active."
+      }))
+    };
+
+    const desktopTools = createDesktopTools();
+    const screenshot = desktopTools.find((entry) => entry.name === "desktop.screenshot")!;
+    const screenshotResult = await screenshot.handler({ outputDir: path.join(home, "shots") }, context);
+    expect(screenshotResult).toMatchObject({ ok: false, error: { code: "screenshot_failed" } });
+
+    const typeText = desktopTools.find((entry) => entry.name === "desktop.type_text")!;
+    const typeResult = await typeText.handler({ text: "a_b", activeWindow: { windowId: "123" } }, context);
+    expect(typeResult).toMatchObject({ ok: false, error: { code: "type_failed" } });
+    expect(typeResult.error?.message).toContain("xclip");
+
+    const hotkey = desktopTools.find((entry) => entry.name === "desktop.hotkey")!;
+    const hotkeyResult = await hotkey.handler({ keys: ["CTRL+L"], activeWindow: { windowId: "123" } }, context);
+    expect(hotkeyResult).toMatchObject({ ok: false, error: { code: "hotkey_failed" } });
+
+    const click = desktopTools.find((entry) => entry.name === "desktop.click")!;
+    const clickResult = await click.handler({ x: 10, y: 20, activeWindow: { windowId: "123" } }, context);
+    expect(clickResult).toMatchObject({ ok: false, error: { code: "click_failed" } });
+
+    const pointer = desktopTools.find((entry) => entry.name === "desktop.pointer")!;
+    const pointerResult = await pointer.handler({ x: 10, y: 20, activeWindow: { windowId: "123" } }, context);
+    expect(pointerResult).toMatchObject({ ok: false, error: { code: "pointer_failed" } });
+
+    const focus = createWindowTools().find((entry) => entry.name === "window.focus")!;
+    const focusResult = await focus.handler({ windowId: "123" }, context);
+    expect(focusResult).toMatchObject({ ok: false, error: { code: "focus_failed" } });
   });
 
   it("confirms private read-only effects without exposing execution fields to the schema", async () => {
@@ -420,6 +568,7 @@ describe("governed tool runner", () => {
     const finish = vi.fn(async () => undefined);
     const begin = vi.fn(async () => ({ finish }));
     (context as unknown as { actionOverlay: unknown }).actionOverlay = { begin };
+    (context.config as { overlay?: { mode: string } }).overlay = { mode: "on_change" };
     const privateRead: AgentHostToolDefinition<{ path: string }, unknown> = {
       name: "file.read",
       description: "Read private data",
