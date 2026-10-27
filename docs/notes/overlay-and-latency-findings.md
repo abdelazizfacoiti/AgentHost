@@ -1,6 +1,6 @@
 # Overlay and Latency Findings (Phase 0)
 
-Status: investigation complete. No source changes were made for this report.
+Status: investigation complete; Phase 1 implementation notes added below.
 Branch: `v2-essential`, based on `8fb6c50`.
 Environment: Linux X11 (`DISPLAY=:0`), GTK3 overlay available, `scrot` available,
 `gnome-screenshot`/ImageMagick `import`/Tesseract/`xclip`/`xsel` unavailable.
@@ -122,6 +122,37 @@ server process and is likely dominant across a multi-step task.
    - Tesseract is not installed; `vision.analyze_image` fails fast with
      `ocr_backend_unavailable`.
    - The agent should report this limitation and avoid screenshot/OCR loops.
+
+## Phase 1 implementation update
+
+- The primary trigger defect is fixed: one central classifier now covers
+  `computer.*`, `desktop.*`, `window.*`, `vision.*`, `file.*`, and `shell.*`
+  under `overlay.mode: "always"`; `on_change` remains state-changing plus
+  confirmation fallback and `off` disables automatic cards.
+- A second confirmed cause was a stale cross-process hide marker. Any manager
+  that polled later treated an old or untimestamped `run/overlay.hide` as a live
+  dismissal, so the first new card could be hidden. Managers now record their
+  creation time, honor only markers at or after that time, and remove legacy
+  markers without hiding. Regression tests cover both stale and cross-process
+  cases.
+- The renderer prewarms during server startup, is awaited before production
+  cards, respawns once after a previously ready child crashes, and is swept for
+  orphans at startup and shutdown. CLI hide/status use the shared orphan helpers.
+- Routine first paint is bounded at 150 ms (1.5 seconds while approval is
+  pending); visible fast cards hold their terminal state for at least 400 ms.
+  Overlay failure sets `ToolResult.overlay` to `unavailable:<reason>`, leaves the
+  action result intact, and triggers one rate-limited desktop notification.
+- `agenthost overlay status` now reports the effective `overlay.mode` and
+  renderer mode alongside marker/renderer/activity diagnostics.
+- Audit entries gained numeric `timings` for action-card wait, safety gate,
+  preview, handler, audit preparation, and total. `scripts/analyze-audit.mjs`
+  ranks handler time, overlay-wait share, idle gaps, and repeated tool
+  sequences. `auditWrite` measures entry preparation before the JSONL append;
+  actual append latency is not measured by these fields.
+- Residual risk: headless/Wayland rendering remains best-effort and visible
+  success is never claimed when the renderer cannot show the card. The minimum
+  display can delay a completed tool's response by up to 400 ms when the card
+  was visible, but not handler execution.
 
 ## Phase 1 requirements derived from these findings
 

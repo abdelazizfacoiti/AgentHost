@@ -104,9 +104,11 @@ For every tool call the central runner performs, in order:
 7. The handler runs with `confirmationSatisfied` set only for an accepted exact
    confirmation. Handlers revalidate safety and return a `ToolResult`.
 8. The runner writes one redacted JSONL audit entry with tool, risk, approval
-   status, preview/confirmation status, duration, error code, and server
-   version/entry path provenance. Audit write failure does not turn a
-   completed action into a second action.
+   status, preview/confirmation status, duration, bounded phase timings, error
+   code, and server version/entry path provenance. `timings` covers action-card
+   wait, safety gate, preview, handler, audit preparation, and total; it contains
+   numbers only, never arguments. Audit write failure does not turn a completed
+   action into a second action.
 
 Operator commands:
 
@@ -205,30 +207,52 @@ sections of documents that mention them are historical.
 ## Overlay lifecycle
 
 Overlay is not exposed as MCP tools in minimal-v2. The server owns a
-`VisualSurfaceCoordinator`; every state-changing MCP tool automatically opens
-or updates one public, click-through action card before preview/handler work.
-The card reports running, waiting-for-approval, preview-ready, done, failed, or
-halted state in place. It never blocks tool execution when rendering fails and
-honors `overlay.persistent` / `overlay.autoHideMs`. A failed Pause/Resume/Stop
-write is shown as a warning instead of a false state. New
-`confirmation_required` results raise the action card and send a best-effort
-desktop notification naming `agenthost confirmations`; token values are never
-shown. Local scripts use `createOverlayRenderer`, `OverlayManager`, and
-`TaskProgressOverlay` from `packages/app-overlay`.
+`VisualSurfaceCoordinator`; automatic action cards are selected by
+`overlay.mode` (default `always`). `always` opens one public, click-through
+card for computer-action tool families (`computer.*`, `desktop.*`, `window.*`,
+`vision.*`, `file.*`, `shell.*`, plus optional `browser.*`, `blender.*`, and
+`ssh.*`) and for every state-changing tool. `on_change` keeps the older
+behavior of state-changing cards plus confirmation fallback. `off` disables
+automatic cards. Mode only changes feedback; schema, risk, policy, stop,
+preview/confirmation, execution, and audit enforcement stay identical.
+
+The action card opens before preview/handler work and reports running,
+waiting-for-approval, preview-ready, done, failed, or halted state in place.
+Renderer prewarm starts with the MCP server unless mode is `off`; startup and
+shutdown share orphan-renderer cleanup. A card show waits at most 150 ms for a
+first paint in routine work, or 1.5 seconds while approval is required, then
+continues in the background. Once visible, a fast card holds its terminal state
+for at least 400 ms without delaying the handler. Cards honor
+`overlay.persistent` / `overlay.autoHideMs`. A failed render is reported as
+`overlay: "unavailable:<reason>"`, sends one rate-limited best-effort desktop
+notification, and never fails the action. A failed Pause/Resume/Stop write is
+shown as a warning instead of a false state. New `confirmation_required` results raise the action
+card and send a best-effort desktop notification naming
+`agenthost confirmations`; token values are never shown. Local scripts use
+`createOverlayRenderer`, `OverlayManager`, and `TaskProgressOverlay` from
+`packages/app-overlay`.
 
 The server also keeps an automatic current-task card visible while a task is
 active or paused, showing the goal, phase/current action, definition-of-done
 checklist, running-task count, and Pause/Resume/Stop. It restores the most
 recent active/paused task on startup (24h freshness) and updates from `task.*`
-results. Task cards are persistent by default and remain after terminal states
-until dismissed, `agenthost overlay hide` is run, or the process exits.
-Elapsed time freezes at terminal transition. Task-card Pause requests the
-scoped global pause and shows Paused with Resume immediately; Stop never kills
-an in-flight tool call. `agenthost overlay hide`
-writes `run/overlay.hide` and sweeps orphaned renderers; `overlay status`
-reports the registered renderer, marker, and live renderer count. Screenshot
-capture temporarily removes and restores all overlay surfaces so AgentHost UI
-is never embedded in a screenshot.
+results. Without an explicit task, `always` mode shows an implicit
+`Computer activity` card that tracks the latest computer action; creating a
+real task replaces it, and a dismissed implicit card stays dismissed. Task
+cards are persistent by default and remain after terminal states until
+dismissed, `agenthost overlay hide` is run, or the process exits. Elapsed time
+freezes at terminal transition. Task-card Pause requests the scoped global
+pause and shows Paused with Resume immediately; Stop never kills an in-flight
+tool call. `agenthost overlay hide` writes a timestamped `run/overlay.hide`
+marker that only managers already running at that time honor, and sweeps
+orphaned renderers. `agenthost overlay status`, `agenthost doctor`, and
+`agenthost://status.lastActivity` report the effective `overlay.mode`, renderer
+mode, the last `run/activity.json` record (including `started`, `visible`,
+timeout, and error), plus the registered renderer, marker, and live renderer
+count, so a silent headless fallback is visible. Screenshot capture temporarily removes and restores all overlay
+surfaces so AgentHost UI is never embedded in a screenshot. `overlay.mode:
+"off"` skips these automatic task/activity cards too; the explicit
+`agenthost task watch <id> --overlay` card remains opt-in.
 
 Multiple cards share one manager. Call `pollEvents(overlayId)`; unmatched
 events stay buffered for the other card. Pause reasons are scoped so an

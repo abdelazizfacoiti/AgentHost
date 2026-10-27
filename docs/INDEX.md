@@ -13,6 +13,7 @@ surfaces that are not registered in this tree.
 | [Security, permissions, and logging](04_SECURITY_PERMISSIONS_AND_LOGGING.md) | Grants, confirmations, redaction, and privacy |
 | [Release and operations](08_RELEASE_AND_OPERATIONS.md) | Packaging, install, CLI, and release checks |
 | [Privacy and support](11_PRIVACY_AND_SUPPORT.md) | Data boundary, support states, and manual checks |
+| [V2 features and runtime guide](12_V2_FEATURES_AND_RUNTIME_GUIDE.md) | Consolidated live feature inventory, safety flow, CLI, overlay, and limits |
 
 Provider names in examples are illustrative only. Safety is enforced by the
 runtime; documentation never grants permission or bypasses confirmation.

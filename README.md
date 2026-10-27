@@ -72,7 +72,7 @@ The skill file lives at [`skills/agenthost/SKILL.md`](skills/agenthost/SKILL.md)
 | | AgentHost |
 |---|---|
 | **Safety model** | Risk tiers + capability grants + exact-preview, target-bound single-use tokens for consequential effects, with routine local actions direct + short-lived active-task approval for low/medium effects + a redacted audit entry on *every* call |
-| **Visibility** | Automatic on-screen action card for every state change, plus an always-on active-task card with goal, step checklist, elapsed time, and pause/resume/stop controls; approval waits raise the card and send a desktop notification; pointer and highlight primitives pass clicks through |
+| **Visibility** | Automatic on-screen action card for every computer action by default (`overlay.mode` can limit it to state changes or turn it off), plus an active-task/activity card with goal, step checklist, elapsed time, and pause/resume/stop controls; approval waits raise the card and send a desktop notification; pointer and highlight primitives pass clicks through |
 | **Speed** | Inspect-once/act/verify task guidance, duplicate-call nudges, WindowId focus, 2s window-list cache, and cached PATH lookups |
 | **Provider-agnostic** | Any model via MCP stdio; live capability resources keep system prompts small |
 | **Private by construction** | Local stdio transport, redacted logs/traces/overlays, emergency stop independent of the model |

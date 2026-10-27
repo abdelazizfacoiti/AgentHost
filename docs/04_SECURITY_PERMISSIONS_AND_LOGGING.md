@@ -162,6 +162,8 @@ Every governed tool call is logged as JSONL under `~/.agenthost/logs/` with
 - server version and server entry path;
 - preview and confirmation status;
 - input summary, approval status, ok/failure, duration, and error code;
+- bounded `timings` numbers for action-card wait, safety gate, preview, handler,
+  audit preparation, and total;
 - output summary.
 
 Audit summaries are redacted and bounded. Logs never contain passwords, API
@@ -178,9 +180,20 @@ time, and error codes; they never display confirmation-token IDs. The action
 card is click-through. Interactive card windows are reserved for
 Pause/Resume/Stop; fullscreen pointer, highlight, and spotlight surfaces remain
 click-through and never intercept clicks. Screenshots suppress and restore
-overlays around capture. `agenthost overlay hide` writes `run/overlay.hide` and
-sweeps orphaned renderers. Headless/Wayland fallback reports limitations
-instead of claiming unsupported coordinates or visible success.
+overlays around capture. `agenthost overlay hide` writes a timestamped
+`run/overlay.hide` marker that only already-running managers honor, and sweeps
+orphaned renderers.
+
+`overlay.mode` is feedback-only: `always` (default) covers computer-action
+families, `on_change` covers state-changing actions plus confirmation fallback,
+and `off` disables automatic cards. No mode bypasses validation, risk, policy,
+stop/takeover, preview/token, or audit. Renderer startup is prewarmed and
+bounded; `run/activity.json`, `agenthost overlay status`, and
+`agenthost://status` expose the effective overlay mode and the last card's
+started/visible/error state. A failed card reports
+`overlay: "unavailable:<reason>"` and sends one rate-limited best-effort
+notification without failing the action. Headless/Wayland fallback reports
+limitations instead of claiming unsupported coordinates or visible success.
 
 ## Optional adapters
 
