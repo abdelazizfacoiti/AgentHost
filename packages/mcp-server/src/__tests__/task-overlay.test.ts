@@ -63,6 +63,47 @@ describe("TaskActivityOverlay", () => {
     }
   });
 
+  it("shows an implicit session activity card until a real task replaces it", async () => {
+    const home = await tempHome();
+    const { manager, overlay } = createController(home);
+    try {
+      await overlay.initialize();
+      await overlay.noteActivity({ toolName: "computer.observe_state", summary: "Observe computer state" });
+      expect(overlay.snapshot()).toMatchObject({ taskId: "agenthost-activity-default", implicit: true, status: "running" });
+      const payload = manager.suppressionSnapshot()[0]?.payload as Record<string, unknown>;
+      expect(payload.title).toBe("AgentHost · Computer activity");
+      expect(component(manager, "text")).toMatchObject({ text: "computer.observe_state · Observe computer state" });
+
+      await overlay.noteActivity({ toolName: "computer.wait_for", summary: "Wait for active window", outcome: "done" });
+      expect(component(manager, "text")).toMatchObject({ text: "computer.wait_for · Wait for active window · done" });
+
+      const task = await createTask(home, "Real task");
+      await overlay.observe("task.create", toolSuccess({ tool: "task.create", riskLevel: "low", data: task }));
+      expect(overlay.snapshot()).toMatchObject({ taskId: task.taskId, implicit: false });
+      expect((manager.suppressionSnapshot()[0]?.payload as Record<string, unknown>).title).toBe("AgentHost · Real task");
+    } finally {
+      await overlay.close();
+      await manager.close();
+    }
+  });
+
+  it("keeps an implicitly dismissed activity card dismissed", async () => {
+    const home = await tempHome();
+    const { manager, overlay } = createController(home);
+    try {
+      await overlay.initialize();
+      await overlay.noteActivity({ toolName: "computer.observe_state", summary: "Observe computer state" });
+      manager.pushEvent(event("agenthost-activity-default", "dismissed"));
+      expect(await overlay.pollOnce()).toEqual(["dismiss"]);
+      expect(overlay.snapshot()).toMatchObject({ implicit: true, dismissed: true });
+      await overlay.noteActivity({ toolName: "computer.wait_for", summary: "Wait for active window" });
+      expect((await manager.state()).overlays).toHaveLength(0);
+    } finally {
+      await overlay.close();
+      await manager.close();
+    }
+  });
+
   it("updates criteria as verification events arrive", async () => {
     const home = await tempHome();
     const task = await createTask(home, "Research the offer", ["Collect pages", "Extract salary bands"]);

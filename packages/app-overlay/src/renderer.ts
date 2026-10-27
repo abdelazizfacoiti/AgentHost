@@ -30,6 +30,7 @@ export interface OverlayRenderer {
   events(): Promise<OverlayWidgetEvent[]> | OverlayWidgetEvent[];
   drainEvents?(): Promise<OverlayWidgetEvent[]> | OverlayWidgetEvent[];
   diagnostics?(): Promise<OverlayRendererDiagnostics> | OverlayRendererDiagnostics;
+  warmup?(): Promise<void> | void;
   restart?(): Promise<OverlayRendererRestartResult> | OverlayRendererRestartResult;
   close?(): Promise<void> | void;
 }

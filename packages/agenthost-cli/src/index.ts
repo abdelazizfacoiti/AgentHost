@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, acceptConfirmation, beginTakeover, clearActiveTaskApproval, clearPause, clearStop, defaultAgentHostHome, defaultPublicConfigPath, endTakeover, legacyConfigPath, listConfirmations, loadAgentHostConfig, normalizeSha256, readActiveTaskApproval, readRunState, readSha256Sidecar, redactLocalPath, rejectConfirmation, requestPause, requestStop, sha256File, transitionTask } from "@agenthost/core";
+import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, acceptConfirmation, beginTakeover, clearActiveTaskApproval, clearPause, clearStop, defaultAgentHostHome, defaultPublicConfigPath, endTakeover, legacyConfigPath, listConfirmations, loadAgentHostConfig, normalizeSha256, readActiveTaskApproval, readActivityStatus, readRunState, readSha256Sidecar, redactLocalPath, rejectConfirmation, requestPause, requestStop, sha256File, transitionTask } from "@agenthost/core";
 import { renderTaskHtml, renderTaskMarkdown } from "./task-export.js";
 import { INTEGRATION_TARGETS, integrationAdd, integrationRemove, integrationStatus, publicIntegrationReport, type IntegrationAction, type IntegrationPaths, type IntegrationTarget } from "./integrations.js";
 
@@ -452,62 +452,20 @@ async function sessionsCommand(): Promise<Output> {
   const lock = await readLock();
   return { ok: true, command: "sessions", data: { background: lock ?? null, tasksDir: "[agenthost-home]/tasks", stopRequested: existsSync(path.join(agentHome, "run", "stop.requested")), takeoverActive: existsSync(path.join(agentHome, "run", "takeover.active")) } };
 }
-function rendererPids(): number[] {
-  try {
-    const found = spawnSync("pgrep", ["-f", "app-overlay/runtime/gtk3-renderer.py --protocol"], { encoding: "utf8" });
-    return found.stdout.split(/\s+/).map(Number).filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
-  } catch {
-    return [];
-  }
-}
-function terminateOrphanRenderers(): { killed: number[]; skippedLive: number[] } {
-  // Terminate orphaned AgentHost renderer children (matched by our own script
-  // path, never anything else) when their parent is already gone. Live
-  // renderers owned by a running server are left alone.
-  const killed: number[] = [];
-  const skippedLive: number[] = [];
-  for (const pid of rendererPids()) {
-    let parentAlive = false;
-    try {
-      const ppid = Number(spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim());
-      if (Number.isInteger(ppid) && ppid > 1) {
-        try {
-          process.kill(ppid, 0);
-          parentAlive = true;
-        } catch {
-          parentAlive = false;
-        }
-      }
-    } catch {
-      parentAlive = false;
-    }
-    if (parentAlive) {
-      skippedLive.push(pid);
-      continue;
-    }
-    try {
-      process.kill(pid, "SIGTERM");
-      killed.push(pid);
-    } catch {
-      /* Already exited. */
-    }
-  }
-  return { killed, skippedLive };
-}
 async function overlayCommand(sub: string | undefined, flags: ReturnType<typeof parseFlags>): Promise<Output> {
+  const { listOverlayRendererPids, sweepOrphanedOverlayRenderers } = await import("@agenthost/app-overlay");
   if (sub === "hide") {
-    // Full hide: write the cross-process hide marker that every live
-    // OverlayManager polls (persistent cards included), then sweep orphans.
-    // --orphans keeps the old renderer-only behavior for diagnostics.
     const orphansOnly = flags.flags.has("orphans");
     if (!orphansOnly) await safeWrite(path.join(agentHome, "run", "overlay.hide"), `${JSON.stringify({ hidden: true, reason: "cli_overlay_hide", at: new Date().toISOString() })}\n`);
-    const { killed, skippedLive } = terminateOrphanRenderers();
+    const { killed, skippedLive } = sweepOrphanedOverlayRenderers();
     return { ok: true, command: "overlay hide", data: { hidden: !orphansOnly || killed.length > 0, liveManagersNotified: !orphansOnly, hideMarker: !orphansOnly, terminatedRenderers: killed, skippedLiveRenderers: skippedLive } };
   }
   if (sub === "status") {
     const record = await readJson(path.join(agentHome, "run", "overlay-renderer.pid"));
     const pid = typeof record?.pid === "number" ? record.pid : undefined;
-    return { ok: true, command: "overlay status", data: { hideMarkerPending: existsSync(path.join(agentHome, "run", "overlay.hide")), registeredRenderer: pid === undefined ? null : { pid, alive: processAlive(pid), sessionId: typeof record?.sessionId === "string" ? record.sessionId : null }, rendererProcesses: rendererPids().length } };
+    const activity = await readActivityStatus(agentHome);
+    const config = await loadAgentHostConfig({ env: { ...process.env, AGENTHOST_CONFIG: existsSync(publicConfig) ? publicConfig : legacyConfigPath(home) } }).catch(() => undefined);
+    return { ok: true, command: "overlay status", data: { mode: config?.overlay?.mode ?? "always", rendererMode: config?.overlayRendererMode ?? "auto", hideMarkerPending: existsSync(path.join(agentHome, "run", "overlay.hide")), registeredRenderer: pid === undefined ? null : { pid, alive: processAlive(pid), sessionId: typeof record?.sessionId === "string" ? record.sessionId : null }, rendererProcesses: listOverlayRendererPids().length, lastActivity: activity ?? null } };
   }
   return await doctor();
 }
@@ -515,7 +473,7 @@ async function doctor(): Promise<Output> {
   const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: pythonModuleExists("import gi; from gi.repository import Gtk"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
   const warnings = [!checks.architecture ? "x86_64 is the public RC target." : "", !checks.python ? "Install Python 3 for overlay diagnostics." : "", !checks.x11 ? "X11 DISPLAY is unavailable; visible overlay is unsupported." : ""].filter(Boolean);
   if (!mcp.handshake) warnings.push(mcp.reason ?? "mcp_handshake_unavailable");
-  return { ok: config.ok, command: "doctor", data: { version: AGENTHOST_VERSION, checks, config: config.ok ? "valid" : config.error, mcp, process: await status(), paths: { agentHostHome: "[agenthost-home]", config: "[config]", mcpEntry: "[installed-mcp-runtime]" } }, warnings };
+  return { ok: config.ok, command: "doctor", data: { version: AGENTHOST_VERSION, checks, config: config.ok ? "valid" : config.error, mcp, process: await status(), activity: (await readActivityStatus(agentHome)) ?? null, paths: { agentHostHome: "[agenthost-home]", config: "[config]", mcpEntry: "[installed-mcp-runtime]" } }, warnings };
 }
 async function integrationsCommand(targetArg: string | undefined, args: ReturnType<typeof parseFlags>): Promise<Output> {
   const action = (args.positional[2] ?? "status") as IntegrationAction;

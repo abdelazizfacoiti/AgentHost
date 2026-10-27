@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { activeTaskApprovalPath, readActiveTaskApproval, requestStop, type CapabilityRegistrySnapshot, type ToolCapability } from "@agenthost/core";
+import { activeTaskApprovalPath, readActiveTaskApproval, requestStop, writeActivityStatus, type CapabilityRegistrySnapshot, type ToolCapability } from "@agenthost/core";
 import { listResourceEntries, readResource } from "../resources.js";
 import { applyProductionExecutionMetadata, materializeToolDefinitions } from "../tool-metadata.js";
 import { createFileTools } from "../tools/file.js";
@@ -40,7 +40,7 @@ function tool(name: string, executionClass: "state_changing" | "read_only"): Too
   };
 }
 
-function context(home: string) {
+function context(home: string, overlay?: { mode: "always" | "on_change" | "off" }) {
   const registry = {
     listTools: () => [tool("file.write", "state_changing"), tool("file.read", "read_only")],
     listStrategies: () => [],
@@ -49,7 +49,7 @@ function context(home: string) {
   return {
     registry,
     adapters: {} as never,
-    config: { agentHostDir: home } as never
+    config: { agentHostDir: home, ...(overlay === undefined ? {} : { overlay }) } as never
   };
 }
 
@@ -68,10 +68,18 @@ describe("MCP resources", () => {
     expect(json.toolCount).toBe(2);
     expect(json.byExecutionClass).toEqual({ state_changing: 1, read_only: 1 });
     expect(json.resources).not.toContain("agenthost://skills");
+    expect(json.overlay).toMatchObject({ mode: "always", fallback: "agenthost overlay status" });
+    expect(json.overlay.triggers).toContain("computer.*");
 
     const markdown = (await readResource(context(home), "agenthost://capabilities.md")).text;
     expect(markdown).not.toContain("agenthost://skills");
     expect(markdown).toContain("routine local actions");
+    expect(markdown).toContain("Activity overlay: mode `always`");
+
+    const disabledJson = JSON.parse((await readResource(context(home, { mode: "off" }), "agenthost://capabilities")).text);
+    expect(disabledJson.overlay).toMatchObject({ mode: "off", triggers: [] });
+    const disabledMarkdown = (await readResource(context(home, { mode: "off" }), "agenthost://capabilities.md")).text;
+    expect(disabledMarkdown).toContain("automatic cards are disabled");
     await expect(readResource(context(home), "agenthost://unknown")).rejects.toThrow(/Unknown resource/);
   });
 
@@ -97,9 +105,20 @@ describe("MCP resources", () => {
   it("reports live stop state instead of a static claim", async () => {
     const home = await tempHome();
     await requestStop(home, "test stop");
+    await writeActivityStatus(home, {
+      schemaVersion: 1,
+      sessionId: "session_resource_test",
+      mode: "always",
+      tool: "computer.observe_state",
+      phase: "finished",
+      outcome: "ok",
+      overlay: { started: true, visible: true },
+      updatedAt: new Date().toISOString()
+    });
     const status = JSON.parse((await readResource(context(home), "agenthost://status")).text);
     expect(status.runState.stop).toMatchObject({ requested: true, reason: "test stop" });
     expect(status.activeTaskApproval).toBeNull();
+    expect(status.lastActivity).toMatchObject({ tool: "computer.observe_state", overlay: { started: true, visible: true } });
   });
 });
 

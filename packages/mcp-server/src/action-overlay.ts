@@ -9,8 +9,15 @@ export interface ToolActionInput {
   riskLevel: RiskLevel;
 }
 
+export interface ToolActionStatus {
+  started: boolean;
+  visible: boolean;
+  hidden: boolean;
+  error?: string;
+}
+
 export interface ToolActionHandle {
-  finish(result: ToolResult): Promise<void>;
+  finish(result: ToolResult): Promise<ToolActionStatus>;
 }
 
 export interface ToolActionOverlayOptions {
@@ -20,6 +27,8 @@ export interface ToolActionOverlayOptions {
   autoHideMs?: number;
   heartbeatMs?: number;
   eventPollMs?: number;
+  showTimeoutMs?: number;
+  minDisplayMs?: number;
   now?: () => number;
   onPause?: () => Promise<void> | void;
   onResume?: () => Promise<void> | void;
@@ -97,6 +106,9 @@ export class ToolActionOverlay {
   readonly #autoHideMs: number;
   readonly #heartbeatMs: number;
   readonly #eventPollMs: number;
+  readonly #showTimeoutMs: number;
+  readonly #approvalShowTimeoutMs: number;
+  readonly #minDisplayMs: number;
   readonly #now: () => number;
   readonly #onPause: (() => Promise<void> | void) | undefined;
   readonly #onResume: (() => Promise<void> | void) | undefined;
@@ -109,10 +121,14 @@ export class ToolActionOverlay {
   #eventPoll: ReturnType<typeof setInterval> | undefined;
   #autoHide: ReturnType<typeof setTimeout> | undefined;
   #started = false;
+  #visible = false;
+  #visibleSince: number | undefined;
   #hiddenByOperator = false;
   #paused = false;
   #stopRequested = false;
   #controlError: string | undefined;
+  #lastRenderError: string | undefined;
+  #showTimedOut = false;
   #polling = false;
   #disposed = false;
   #sequence = 0;
@@ -125,6 +141,9 @@ export class ToolActionOverlay {
     this.#autoHideMs = options.autoHideMs ?? 15_000;
     this.#heartbeatMs = Math.max(250, options.heartbeatMs ?? 1_000);
     this.#eventPollMs = Math.max(100, options.eventPollMs ?? 350);
+    this.#showTimeoutMs = Math.max(1, options.showTimeoutMs ?? 150);
+    this.#approvalShowTimeoutMs = Math.max(this.#showTimeoutMs, 1_500);
+    this.#minDisplayMs = Math.max(0, options.minDisplayMs ?? 400);
     this.#now = options.now ?? (() => Date.now());
     this.#onPause = options.onPause;
     this.#onResume = options.onResume;
@@ -151,15 +170,15 @@ export class ToolActionOverlay {
     this.#active.set(action.id, action);
     this.#startHeartbeat();
     this.#startEventPoll();
-    await this.#render();
+    await this.#renderWithinBudget();
 
     let settled = false;
     return {
-      finish: async (result: ToolResult): Promise<void> => {
-        if (settled) return;
+      finish: async (result: ToolResult): Promise<ToolActionStatus> => {
+        if (settled) return this.#status();
         settled = true;
         this.#active.delete(action.id);
-        if (this.#hiddenByOperator || this.#disposed) return;
+        if (this.#hiddenByOperator || this.#disposed) return this.#status();
         const phase = settlePhase(result);
         this.#last = {
           tool: action.tool,
@@ -176,12 +195,30 @@ export class ToolActionOverlay {
         } else {
           this.#startHeartbeat();
         }
-        await this.#render();
+        const needsOperator = phase === "waiting_approval" || phase === "halted";
+        if (!needsOperator && this.#visibleSince !== undefined) {
+          const remaining = this.#minDisplayMs - (this.#now() - this.#visibleSince);
+          if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+        }
+        await this.#renderWithinBudget(needsOperator ? this.#approvalShowTimeoutMs : this.#showTimeoutMs);
+        return this.#status();
       }
     };
   }
 
-  snapshot(): { active: number; phase: ToolActionPhase; tool?: string; title?: string; started: boolean; hidden: boolean; paused: boolean; stopRequested: boolean } {
+  snapshot(): {
+    active: number;
+    phase: ToolActionPhase;
+    tool?: string;
+    title?: string;
+    started: boolean;
+    visible: boolean;
+    hidden: boolean;
+    paused: boolean;
+    stopRequested: boolean;
+    showTimedOut: boolean;
+    lastRenderError?: string;
+  } {
     const phase = this.#currentPhase();
     const current = this.#currentAction();
     const tool = current?.tool ?? this.#last?.tool;
@@ -191,9 +228,26 @@ export class ToolActionOverlay {
       ...(tool === undefined ? {} : { tool }),
       ...(this.#started ? { title: this.#widget().title } : {}),
       started: this.#started,
+      visible: this.#started && this.#visible && !this.#hiddenByOperator && !this.#showTimedOut,
       hidden: this.#hiddenByOperator,
       paused: this.#paused,
-      stopRequested: this.#stopRequested
+      stopRequested: this.#stopRequested,
+      showTimedOut: this.#showTimedOut,
+      ...(this.#lastRenderError === undefined ? {} : { lastRenderError: this.#lastRenderError })
+    };
+  }
+
+  #status(): ToolActionStatus {
+    const snapshot = this.snapshot();
+    if (snapshot.hidden) return { started: snapshot.started, visible: false, hidden: true };
+    const error = snapshot.lastRenderError
+      ?? (snapshot.showTimedOut ? "overlay_show_timeout" : undefined)
+      ?? (snapshot.started && !snapshot.visible ? "overlay_not_visible" : undefined);
+    return {
+      started: snapshot.started,
+      visible: snapshot.visible,
+      hidden: false,
+      ...(error === undefined ? {} : { error })
     };
   }
 
@@ -210,6 +264,9 @@ export class ToolActionOverlay {
     this.#hiddenByOperator = false;
     this.#stopRequested = false;
     this.#controlError = undefined;
+    this.#lastRenderError = undefined;
+    this.#showTimedOut = false;
+    this.#setVisibility(false);
     if (!this.#started) return;
     this.#started = false;
     try {
@@ -226,7 +283,7 @@ export class ToolActionOverlay {
   }
 
   #noopHandle(): ToolActionHandle {
-    return { finish: async (): Promise<void> => undefined };
+    return { finish: async (): Promise<ToolActionStatus> => ({ started: false, visible: false, hidden: false }) };
   }
 
   #currentAction(): ActiveAction | undefined {
@@ -302,6 +359,36 @@ export class ToolActionOverlay {
     return [["Pause", "pause"], ["Dismiss", "dismissed"]];
   }
 
+  async #renderWithinBudget(timeoutMs = this.#showTimeoutMs): Promise<void> {
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const budget = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        resolve();
+      }, timeoutMs);
+      const unref = timer as unknown as { unref?: () => void };
+      if (typeof unref.unref === "function") unref.unref();
+    });
+    await Promise.race([this.#render(), budget]);
+    if (timer !== undefined) clearTimeout(timer);
+    if (timedOut) this.#showTimedOut = true;
+  }
+
+  async #rendererVisible(): Promise<boolean> {
+    try {
+      return (await this.#manager.capabilities()).visible === true;
+    } catch {
+      return false;
+    }
+  }
+
+  #setVisibility(visible: boolean): void {
+    if (visible && !this.#visible) this.#visibleSince = this.#now();
+    if (!visible) this.#visibleSince = undefined;
+    this.#visible = visible;
+  }
+
   async #render(): Promise<void> {
     this.#renderQueue = this.#renderQueue.catch(() => undefined).then(async () => {
       if (this.#disposed || this.#hiddenByOperator) return;
@@ -309,16 +396,41 @@ export class ToolActionOverlay {
       try {
         if (!this.#started) {
           const shown = await this.#manager.showWidget(widget);
-          if (shown.ok) this.#started = true;
+          if (shown.ok) {
+            this.#started = true;
+            this.#setVisibility(await this.#rendererVisible());
+            this.#lastRenderError = undefined;
+            this.#showTimedOut = false;
+          } else {
+            this.#setVisibility(false);
+            this.#lastRenderError = shown.errors[0] ?? "overlay_show_failed";
+          }
           return;
         }
         const result = await this.#manager.updateWidget(widget);
         if (!result.ok && result.reason === "overlay_not_found") {
           const shown = await this.#manager.showWidget(widget);
-          if (shown.ok) this.#started = true;
+          if (shown.ok) {
+            this.#started = true;
+            this.#setVisibility(await this.#rendererVisible());
+            this.#lastRenderError = undefined;
+            this.#showTimedOut = false;
+          } else {
+            this.#setVisibility(false);
+            this.#lastRenderError = shown.errors[0] ?? "overlay_show_failed";
+          }
+          return;
+        }
+        if (result.ok) {
+          this.#setVisibility(await this.#rendererVisible());
+          this.#lastRenderError = undefined;
+          this.#showTimedOut = false;
+        } else {
+          this.#setVisibility(false);
+          this.#lastRenderError = result.reason || "overlay_update_failed";
         }
       } catch {
-        /* Overlay rendering is advisory; tool execution continues. */
+        this.#lastRenderError = "overlay_render_failed";
       }
     });
     await this.#renderQueue;
@@ -386,6 +498,7 @@ export class ToolActionOverlay {
   async #hideByOperator(): Promise<void> {
     this.#hiddenByOperator = true;
     this.#started = false;
+    this.#setVisibility(false);
     this.#active.clear();
     this.#last = undefined;
     this.#stopHeartbeat();

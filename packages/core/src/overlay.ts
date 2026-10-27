@@ -3,6 +3,7 @@ import { redactSensitiveText } from "./safety/redaction.js";
 export type OverlayPrimitiveType = "pointer" | "arrow" | "highlight" | "spotlight" | "tooltip" | "instruction_card" | "approval_card" | "warning" | "progress" | "checkpoint_result" | "status_toast" | "comparison" | "cancel_control" | "emergency_stop_control";
 export type OverlayRendererStatus = "available" | "degraded" | "headless" | "unavailable";
 export type OverlayRendererMode = "headless" | "auto" | "gtk3-x11" | "gtk3-native" | "webkit-gtk-react" | "disabled";
+export type OverlayActivityMode = "always" | "on_change" | "off";
 export type OverlaySensitivity = "public" | "private" | "secret";
 export type OverlayTheme = "system" | "light" | "dark";
 export type OverlayDensity = "compact" | "normal";
@@ -10,6 +11,8 @@ export type OverlayPlacement = "top_left" | "top_center" | "top_right" | "bottom
 export type OverlayDisplayPolicy = "primary" | "all";
 export interface OverlayPublicConfig {
   rendererMode: OverlayRendererMode;
+  /** Automatic activity feedback: every computer action, state-changing only, or none. */
+  mode: OverlayActivityMode;
   theme: OverlayTheme;
   density: OverlayDensity;
   reducedMotion: boolean;

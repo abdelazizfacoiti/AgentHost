@@ -11,6 +11,7 @@ const forgeRuntimeSandboxModeSchema = z.enum(["auto", "none", "bubblewrap", "fir
 const overlayRendererModeSchema = z.enum(["headless", "auto", "gtk3-x11", "gtk3-native", "webkit-gtk-react", "disabled"]);
 const overlaySchema = z.object({
   rendererMode: overlayRendererModeSchema.optional(),
+  mode: z.enum(["always", "on_change", "off"]).optional(),
   theme: z.enum(["system", "light", "dark"]).optional(),
   density: z.enum(["compact", "normal"]).optional(),
   reducedMotion: z.boolean().optional(),
@@ -280,6 +281,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
   );
   const overlay: OverlayPublicConfig = {
     rendererMode: overlayRendererMode,
+    mode: fileConfig.overlay?.mode ?? "always",
     theme: fileConfig.overlay?.theme ?? "system",
     density: fileConfig.overlay?.density ?? "normal",
     reducedMotion: fileConfig.overlay?.reducedMotion ?? false,

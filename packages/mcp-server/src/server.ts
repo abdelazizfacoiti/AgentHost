@@ -18,7 +18,9 @@ import {
   clearPause,
   requestStop,
   clearActiveTaskApproval,
+  writeActivityStatus,
   AGENTHOST_VERSION,
+  type ActivityStatusOutcome,
   type AdapterRegistry,
   type AgentHostConfig,
   type AuditLogger,
@@ -63,7 +65,7 @@ import {
   writeLinuxFile,
   analyzeLinuxImage
 } from "@agenthost/os-linux";
-import { createOverlayRenderer, VisualSurfaceCoordinator } from "@agenthost/app-overlay";
+import { createOverlayRenderer, sweepOrphanedOverlayRenderers, VisualSurfaceCoordinator } from "@agenthost/app-overlay";
 import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { GrantStore } from "./grants.js";
 import { createAdapterTools } from "./tools/adapter.js";
@@ -78,9 +80,10 @@ import { createTaskTools } from "./tools/tasks.js";
 import { createAgentTools } from "./tools/agent.js";
 import { applyProductionExecutionMetadata, materializeToolDefinitions, toolCapabilities } from "./tool-metadata.js";
 import { listResourceEntries, readResource } from "./resources.js";
-import { runTool } from "./tool-runner.js";
+import { runTool, type AnyAgentHostToolDefinition } from "./tool-runner.js";
 import { ToolActionOverlay } from "./action-overlay.js";
 import { TaskActivityOverlay } from "./task-overlay.js";
+import { shouldShowActionCard, shouldShowActivityCard } from "./activity.js";
 
 const SERVER_VERSION = AGENTHOST_VERSION;
 const ACTION_PAUSE_REASON = "agent_action_card_pause";
@@ -89,6 +92,59 @@ const SERVER_INSTRUCTIONS =
   "AgentHost is a universal local automation host. It provides desktop automation, file operations, shell commands, vision/OCR, and window management. Use GUI click/type as fallback when policy allows. Routine local actions execute directly. Consequential actions such as external sends/uploads, deletes, private-data reads, and financial effects require an exact dry-run preview and single-use confirmation token. Stop, takeover, and pause flags halt new state-changing calls. For fast decisions, inspect once, act, then verify; avoid repeating unchanged discovery.";
 
 let lastApprovalSignalAt = 0;
+let lastOverlaySignalAt = 0;
+
+function activitySummary(tool: AnyAgentHostToolDefinition, input: unknown): string {
+  try {
+    const summary = typeof tool.inputSummary === "function" ? tool.inputSummary(input) : tool.inputSummary;
+    return summarizeForLog(summary) || "Computer action";
+  } catch {
+    return "Computer action";
+  }
+}
+
+function activityOutcome(result: ToolResult): ActivityStatusOutcome {
+  if (result.ok) return "ok";
+  if (result.error?.code === "confirmation_required") return "approval_required";
+  if (["emergency_stop_requested", "human_takeover_active", "pause_requested", "safety_blocked"].includes(result.error?.code ?? "")) return "halted";
+  return "error";
+}
+
+function recordActivity(
+  agentHostDir: string,
+  sessionId: string,
+  mode: "always" | "on_change" | "off",
+  tool: string,
+  phase: "started" | "finished",
+  actionOverlay: ToolActionOverlay,
+  outcome?: ActivityStatusOutcome
+): void {
+  try {
+    const snapshot = actionOverlay.snapshot();
+    const rawError = snapshot.lastRenderError
+      ?? (snapshot.showTimedOut ? "overlay_show_timeout" : undefined)
+      ?? (snapshot.hidden ? "overlay_hidden_by_operator" : undefined)
+      ?? (snapshot.started && !snapshot.visible ? "overlay_not_visible" : undefined);
+    const error = rawError === undefined ? undefined : rawError.replace(/\s+/g, " ").trim().slice(0, 200) || "overlay_render_failed";
+    void writeActivityStatus(agentHostDir, {
+      schemaVersion: 1,
+      sessionId: sessionId.slice(0, 200) || "session_unknown",
+      mode,
+      tool: tool.slice(0, 200) || "unknown_tool",
+      phase,
+      ...(outcome === undefined ? {} : { outcome }),
+      overlay: {
+        started: snapshot.started,
+        visible: snapshot.visible,
+        ...(error === undefined ? {} : { error }),
+        ...(snapshot.showTimedOut ? { timedOut: true } : {})
+      },
+      updatedAt: new Date().toISOString()
+    }).catch(() => undefined);
+  } catch {
+    /* Activity status is diagnostics only. */
+  }
+}
 
 function signalApprovalRequired(): void {
   const now = Date.now();
@@ -105,6 +161,23 @@ function signalApprovalRequired(): void {
     child.unref();
   } catch {
     /* Desktop notifications are best effort. */
+  }
+}
+
+function signalOverlayUnavailable(): void {
+  const now = Date.now();
+  if (now - lastOverlaySignalAt < 5_000) return;
+  lastOverlaySignalAt = now;
+  try {
+    const child = spawn("notify-send", [
+      "-a", "AgentHost",
+      "-u", "low",
+      "AgentHost overlay unavailable",
+      "The action continued. Run: agenthost overlay status"
+    ], { stdio: "ignore", detached: true });
+    child.on("error", () => undefined);
+    child.unref();
+  } catch {
   }
 }
 
@@ -205,6 +278,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     persistentGrants: policy.grants,
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
   });
+  const activityMode = config.overlay?.mode ?? "always";
   const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? false });
   let taskActivity: TaskActivityOverlay | undefined;
   const actionOverlay = new ToolActionOverlay(overlay, {
@@ -224,14 +298,19 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     },
     isPaused: async () => (await readRunState(config.agentHostDir)).pause.requested
   });
-  taskActivity = new TaskActivityOverlay({
-    manager: overlay,
-    agentHostDir: config.agentHostDir,
-    placement: "bottom_right",
-    persistent: config.overlay?.persistent ?? true,
-    ...(config.overlay?.persistent === false ? { autoHideMs: config.overlay?.autoHideMs ?? 15_000 } : {})
-  });
-  await taskActivity.initialize();
+  if (process.env.NODE_ENV !== "test") sweepOrphanedOverlayRenderers();
+  if (activityMode !== "off") {
+    taskActivity = new TaskActivityOverlay({
+      manager: overlay,
+      agentHostDir: config.agentHostDir,
+      sessionId,
+      placement: "bottom_right",
+      persistent: config.overlay?.persistent ?? true,
+      ...(config.overlay?.persistent === false ? { autoHideMs: config.overlay?.autoHideMs ?? 15_000 } : {})
+    });
+    if (process.env.NODE_ENV !== "test") await overlay.prewarm();
+    await taskActivity.initialize();
+  }
   const linux: LinuxAutomation =
     options.linux ?? {
       getSystemInfo: () => getLinuxSystemInfo(config, registry),
@@ -394,8 +473,24 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       return toMcpToolResult(result);
     }
 
-    const result = await runTool(tool, request.params.arguments ?? {}, context);
+    const rawInput = request.params.arguments ?? {};
+    const showActionCard = shouldShowActionCard(tool.name, tool.execution?.executionClass, activityMode);
+    const trackActivity = shouldShowActivityCard(tool.name, activityMode);
+    if (showActionCard) recordActivity(config.agentHostDir, sessionId, activityMode, tool.name, "started", actionOverlay);
+    if (trackActivity) void taskActivity?.noteActivity({ toolName: tool.name, summary: activitySummary(tool, rawInput) });
+    const result = await runTool(tool, rawInput, context);
     if (result.error?.code === "confirmation_required") signalApprovalRequired();
+    else if (result.overlay?.startsWith("unavailable:") === true) signalOverlayUnavailable();
+    if (showActionCard || (result.error?.code === "confirmation_required" && activityMode !== "off")) {
+      recordActivity(config.agentHostDir, sessionId, activityMode, tool.name, "finished", actionOverlay, activityOutcome(result));
+    }
+    if (trackActivity) {
+      void taskActivity?.noteActivity({
+        toolName: tool.name,
+        summary: activitySummary(tool, rawInput),
+        outcome: result.ok ? "done" : "failed"
+      });
+    }
     try { await taskActivity?.observe(tool.name, result); } catch { /* Task card updates are advisory. */ }
     return toMcpToolResult(result);
   });
@@ -407,6 +502,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       await taskActivity?.close();
       await actionOverlay.close();
       await overlay.close();
+      if (process.env.NODE_ENV !== "test") sweepOrphanedOverlayRenderers();
     })();
     return await resourceClosePromise;
   };

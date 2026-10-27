@@ -175,7 +175,7 @@ describe("TaskProgressOverlay", () => {
       await controller.start();
       await controller.complete();
       expect((await manager.state()).overlays).toHaveLength(1);
-      await writeFile(marker, "{}\n", "utf8");
+      await writeFile(marker, `${JSON.stringify({ hidden: true, at: new Date(Date.now() + 1_000).toISOString() })}\n`, "utf8");
       expect(await controller.pollEvents()).toEqual(["dismiss"]);
       expect((await manager.state()).overlays).toHaveLength(0);
     } finally {

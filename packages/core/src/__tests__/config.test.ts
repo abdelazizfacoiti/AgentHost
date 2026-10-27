@@ -16,7 +16,7 @@ describe("loadAgentHostConfig", () => {
     expect(config.policy.requireConfirmationForStateChanging).toBe(false);
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
     expect(config.overlayRendererMode).toBe("auto");
-    expect(config.overlay).toEqual(expect.objectContaining({ persistent: true, autoHideMs: 0, preferredPosition: "top_right", reducedMotion: false }));
+    expect(config.overlay).toEqual(expect.objectContaining({ mode: "always", persistent: true, autoHideMs: 0, preferredPosition: "top_right", reducedMotion: false }));
     expect((config as unknown as Record<string, unknown>).runtimeActivityOverlay).toBeUndefined();
     expect((config as unknown as Record<string, unknown>).browserBridge).toBeUndefined();
     expect((config as unknown as Record<string, unknown>).controlRoom).toBeUndefined();
@@ -236,6 +236,19 @@ describe("loadAgentHostConfig", () => {
     expect((await loadAgentHostConfig({ env: {}, homeDir, configPath })).overlay).toMatchObject({ persistent: true, autoHideMs: 30_000 });
     await writeFile(configPath, JSON.stringify({ overlay: { terminalAutoHideMs: 5_000 } }), "utf8");
     expect((await loadAgentHostConfig({ env: {}, homeDir, configPath })).overlay).toMatchObject({ persistent: true, autoHideMs: 0 });
+  });
+
+  it("maps overlay activity mode and rejects unknown modes", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-overlay-mode-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    for (const mode of ["always", "on_change", "off"] as const) {
+      await writeFile(configPath, JSON.stringify({ overlay: { mode } }), "utf8");
+      expect((await loadAgentHostConfig({ env: {}, homeDir, configPath })).overlay?.mode).toBe(mode);
+    }
+    await writeFile(configPath, JSON.stringify({ overlay: { mode: "sometimes" } }), "utf8");
+    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
   });
 
   it("allows explicitly selecting the local overlay renderer mode", async () => {

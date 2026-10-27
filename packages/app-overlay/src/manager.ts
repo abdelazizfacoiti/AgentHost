@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { redactOverlayText, validateOverlayAnimation, validateOverlayInteractionPolicy, validateOverlayStyleTokens, validateOverlayTargetBinding, validateOverlayWidget, type OverlayCapabilityReport, type OverlayPrimitive, type OverlaySensitivity, type OverlayStateSnapshot, type OverlayStateSummary, type OverlayTargetBinding, type OverlayTargetSummary, type OverlayWidget, type OverlayWidgetEvent } from "@agenthost/core";
@@ -26,6 +26,7 @@ export class OverlayManager {
   readonly #payloads = new Map<string, unknown>();
   readonly #targets = new Map<string, { binding: OverlayTargetBinding; resolver?: OverlayTargetResolver | undefined }>();
   readonly #hideMarkerPath: string | null;
+  readonly #createdAtMs = Date.now();
   readonly #localEvents: OverlayWidgetEvent[] = [];
   readonly #pendingEvents: OverlayWidgetEvent[] = [];
   #emergencyHidden = false;
@@ -52,6 +53,7 @@ export class OverlayManager {
   }
   capabilities(): Promise<OverlayCapabilityReport> | OverlayCapabilityReport { return this.#renderer.capabilities(); }
   async diagnostics(): Promise<OverlayRendererDiagnostics> { const diagnostics = await this.#renderer.diagnostics?.(); if (diagnostics !== undefined) return { ...diagnostics, activeOverlayCount: this.#records.size }; const capabilities = await this.#renderer.capabilities(); return { requestedMode: "headless", effectiveBackend: "headless", rendererStatus: "headless", sessionType: "unknown", displayPresent: false, waylandDisplayPresent: false, pythonExecutable: "not_used", gtk3Available: false, rendererScriptPresent: false, childState: "stopped", handshake: "not_attempted", capabilities, activeOverlayCount: this.#records.size, restartCount: 0, restartAllowed: false, recommendedAction: "Use headless renderer." }; }
+  async prewarm(): Promise<boolean> { if (this.#renderer.warmup === undefined) return false; try { await this.#renderer.warmup(); return true; } catch { return false; } }
   async state(): Promise<OverlayStateSnapshot> { this.#expire(); await this.#revalidateTargets(); const renderer = await this.#renderer.state(); return { ...renderer, overlays: [...this.#records.values()].filter((item) => item.visible), emergencyHidden: this.#emergencyHidden }; }
   async showPrimitive(input: OverlayPrimitive, resolver?: OverlayTargetResolver, reducedMotion = false): Promise<{ ok: boolean; overlay?: OverlayStateSummary; errors: string[] }> {
     const errors = [...validateOverlayAnimation(input.animation, reducedMotion), ...validateOverlayStyleTokens(input.style), ...validateOverlayInteractionPolicy(input.interaction)];
@@ -148,7 +150,15 @@ export class OverlayManager {
   #expire() { const now = Date.now(); for (const [id, record] of this.#records) if (record.persistent !== true && Date.parse(record.expiresAt) <= now) { this.#records.delete(id); this.#payloads.delete(id); this.#targets.delete(id); void this.#renderer.dismiss(id); } }
   #checkHideMarker(): void {
     if (this.#hideMarkerPath === null || !existsSync(this.#hideMarkerPath)) return;
+    let hiddenAt: number | undefined;
+    try {
+      const marker = JSON.parse(readFileSync(this.#hideMarkerPath, "utf8")) as { at?: unknown };
+      if (typeof marker.at === "string") hiddenAt = Date.parse(marker.at);
+    } catch {
+      hiddenAt = undefined;
+    }
     try { rmSync(this.#hideMarkerPath, { force: true }); } catch { return; }
+    if (hiddenAt === undefined || !Number.isFinite(hiddenAt) || hiddenAt < this.#createdAtMs) return;
     for (const overlayId of this.#records.keys()) this.#localEvents.push({ eventId: `event_local_${randomUUID()}`, overlayId, event: "hide", createdAt: new Date().toISOString(), ownerSessionId: this.#owner.sessionId });
     if (this.#localEvents.length > 100) this.#localEvents.splice(0, this.#localEvents.length - 100);
     void this.emergencyHide();

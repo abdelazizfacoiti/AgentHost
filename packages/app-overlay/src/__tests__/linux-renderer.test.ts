@@ -24,7 +24,7 @@ const supported: OverlayCapabilityReport = {
   limitations: []
 };
 
-interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; missingLiveRegistration?: boolean; rejectShow?: boolean; deferUpdateMs?: number; }
+interface FakeRendererBehavior { invalidHandshake?: boolean; unsupportedRenderer?: boolean; noHandshake?: boolean; noRenderAck?: boolean; wrongEpoch?: boolean; missingLiveRegistration?: boolean; rejectShow?: boolean; deferUpdateMs?: number; crashAfterShow?: boolean; }
 
 function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWithoutNullStreams {
   const child = new EventEmitter() as unknown as { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; killed: boolean; kill: () => boolean; };
@@ -61,6 +61,9 @@ function fakeSpawnProcess(behavior: FakeRendererBehavior = {}): ChildProcessWith
         setTimeout(() => child.stdout.write(encoded), behavior.deferUpdateMs);
       } else {
         child.stdout.write(encoded);
+      }
+      if (request.command === "show" && behavior.crashAfterShow === true) {
+        queueMicrotask(() => (child as unknown as EventEmitter).emit("exit", 1, null));
       }
       newline = buffer.indexOf("\n");
     }
@@ -117,6 +120,33 @@ describe("GTK renderer controller", () => {
       expect((await renderer.capabilities()).rendererStatus).toBe("degraded");
       expect((await renderer.diagnostics()).lastFailure).toBe("renderer_process_exited");
     } finally { await renderer.close(); }
+  });
+
+  it("automatically respawns a crashed renderer once within the restart bound", async () => {
+    let spawns = 0;
+    const renderer = new LinuxOverlayRenderer({
+      mode: "gtk3-x11",
+      probe: () => supported,
+      spawnProcess: () => {
+        spawns += 1;
+        return fakeSpawnProcess({ crashAfterShow: spawns === 1 });
+      },
+      environment: { XDG_SESSION_TYPE: "x11", DISPLAY: ":99" }
+    });
+    try {
+      expect((await renderer.show({ overlayId: "overlay-crash", type: "pointer", payload: { type: "pointer", sensitivity: "public" } })).ok).toBe(true);
+      const deadline = Date.now() + 2_000;
+      let diagnostics = await renderer.diagnostics();
+      while (Date.now() < deadline && (spawns < 2 || diagnostics.childState !== "running")) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        diagnostics = await renderer.diagnostics();
+      }
+      expect(spawns).toBe(2);
+      expect(diagnostics.childState).toBe("running");
+      expect(diagnostics.restartCount).toBeLessThanOrEqual(1);
+    } finally {
+      await renderer.close();
+    }
   });
 
   it("keeps a renderer alive when event polling overlaps an in-flight update", async () => {

@@ -13,12 +13,19 @@ import type { OverlayManager } from "@agenthost/app-overlay";
 export interface TaskActivityOverlayOptions {
   manager: OverlayManager;
   agentHostDir: string;
+  sessionId?: string;
   placement?: OverlayPlacement;
   persistent?: boolean;
   autoHideMs?: number;
   heartbeatMs?: number;
   maxResumeAgeMs?: number;
   now?: () => number;
+}
+
+export interface ActivityNote {
+  toolName: string;
+  summary: string;
+  outcome?: "running" | "done" | "failed";
 }
 
 const TERMINAL_TASK_STATUSES = new Set<AgentTask["status"]>(["completed", "cancelled"]);
@@ -92,6 +99,38 @@ export class TaskActivityOverlay {
     }
   }
 
+  async noteActivity(note: ActivityNote): Promise<void> {
+    if (this.#closed) return;
+    const current = this.#task;
+    if (current !== undefined && !this.#isImplicitTask(current.taskId)) return;
+    const taskId = this.#implicitTaskId();
+    if (this.#dismissedTaskId === taskId) return;
+    const summary = `${note.summary}${note.outcome === "done" ? " · done" : note.outcome === "failed" ? " · failed" : ""}`.slice(0, 300);
+    const now = new Date().toISOString();
+    const task: AgentTask = current === undefined
+      ? {
+          taskId,
+          goal: "Computer activity",
+          status: "active",
+          phase: note.toolName.slice(0, 100),
+          currentAction: summary,
+          events: [],
+          createdAt: now,
+          updatedAt: now
+        }
+      : {
+          ...current,
+          phase: note.toolName.slice(0, 100),
+          currentAction: summary,
+          updatedAt: now
+        };
+    try {
+      await this.#sync(task);
+    } catch {
+      /* Activity feedback is advisory. */
+    }
+  }
+
   async observe(toolName: string, result: ToolResult): Promise<void> {
     if (this.#closed || !toolName.startsWith("task.")) return;
     try {
@@ -138,10 +177,11 @@ export class TaskActivityOverlay {
     await controller.stopped("Stopped by operator");
   }
 
-  snapshot(): { taskId?: string; status?: string; dismissed: boolean } {
+  snapshot(): { taskId?: string; status?: string; implicit: boolean; dismissed: boolean } {
     return {
       ...(this.#task === undefined ? {} : { taskId: this.#task.taskId }),
       ...(this.#controller === undefined ? {} : { status: this.#controller.snapshot().status }),
+      implicit: this.#task !== undefined && this.#isImplicitTask(this.#task.taskId),
       dismissed: this.#dismissedTaskId !== undefined && this.#dismissedTaskId === this.#task?.taskId
     };
   }
@@ -153,6 +193,15 @@ export class TaskActivityOverlay {
     const controller = this.#controller;
     this.#controller = undefined;
     if (controller !== undefined) await controller.dismiss().catch(() => undefined);
+  }
+
+  #implicitTaskId(): string {
+    const session = (this.#options.sessionId ?? "default").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120);
+    return `agenthost-activity-${session}`;
+  }
+
+  #isImplicitTask(taskId: string): boolean {
+    return taskId === this.#implicitTaskId();
   }
 
   #isFresh(task: AgentTask): boolean {
