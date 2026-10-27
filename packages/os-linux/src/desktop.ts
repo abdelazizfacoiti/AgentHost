@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import {
   classifyAppSensitivity,
@@ -373,9 +373,36 @@ async function detectGuiInputSupport(context: LinuxDesktopContext = {}): Promise
   return support("xdotool", "Generic GUI input is available through xdotool.");
 }
 
+const capabilitiesCacheTtlMs = 30_000;
+const capabilitiesCache = new Map<string, { at: number; result: DesktopCapabilitiesResult }>();
+
+export function clearDesktopCapabilitiesCache(): void {
+  capabilitiesCache.clear();
+}
+
+function capabilitiesCacheKey(context: LinuxDesktopContext): string {
+  const env = context.env ?? process.env;
+  return [
+    env.XDG_SESSION_TYPE ?? "",
+    env.DISPLAY ?? "",
+    env.WAYLAND_DISPLAY ?? "",
+    env.PATH ?? "",
+    context.homeDir ?? "",
+    context.agentHostDir ?? ""
+  ].join("\0");
+}
+
 export async function getLinuxDesktopCapabilities(
   context: LinuxAccessibilityContext = {}
 ): Promise<DesktopCapabilitiesResult> {
+  const cacheable = context.runAccessibilityQuery === undefined;
+  const cacheKey = capabilitiesCacheKey(context);
+  const cached = cacheable ? capabilitiesCache.get(cacheKey) : undefined;
+
+  if (cached !== undefined && Date.now() - cached.at < capabilitiesCacheTtlMs) {
+    return cached.result;
+  }
+
   const session = sessionInfo(context);
   const [activeWindow, screenshot, windowList, windowFocus, accessibility, guiInput] = await Promise.all([
     detectActiveWindowSupport(context),
@@ -386,7 +413,7 @@ export async function getLinuxDesktopCapabilities(
     detectGuiInputSupport(context)
   ]);
 
-  return {
+  const result: DesktopCapabilitiesResult = {
     platform: "linux",
     sessionType: session.sessionType,
     displayAvailable: session.displayAvailable,
@@ -398,6 +425,10 @@ export async function getLinuxDesktopCapabilities(
     accessibility,
     guiInput
   };
+  if (cacheable) {
+    capabilitiesCache.set(cacheKey, { at: Date.now(), result });
+  }
+  return result;
 }
 
 async function activeWindowViaXdotool(
@@ -477,15 +508,26 @@ async function runAndValidateScreenshot(
   activeWindow: DesktopWindowContext | undefined,
   context: LinuxDesktopContext = {}
 ): Promise<DesktopScreenshotResult> {
-  const result = await runDesktopCommand(command, args, context);
-  const bytesWritten = await statBytes(outputPath);
-
-  if (result.exitCode !== 0 || bytesWritten === undefined) {
+  try {
+    await rm(outputPath, { force: true });
+  } catch {
     return {
       supported: false,
       backend,
       ...(activeWindow === undefined ? {} : { activeWindow }),
-      reason: "The screenshot backend did not produce an image file."
+      reason: "Unable to replace the existing screenshot output file."
+    };
+  }
+
+  const result = await runDesktopCommand(command, args, context);
+  const bytesWritten = await statBytes(outputPath);
+
+  if (result.exitCode !== 0 || bytesWritten === undefined || bytesWritten === 0) {
+    return {
+      supported: false,
+      backend,
+      ...(activeWindow === undefined ? {} : { activeWindow }),
+      reason: "The screenshot backend did not produce a non-empty image file."
     };
   }
 
@@ -511,6 +553,12 @@ export async function captureLinuxScreenshot(
 
   if (!supportStatus.supported) {
     return unsupportedResult(supportStatus.backend, supportStatus.reason, {});
+  }
+
+  try {
+    await mkdir(path.dirname(outputPath), { recursive: true, mode: 0o700 });
+  } catch {
+    return unsupportedResult(supportStatus.backend, "Unable to create the screenshot output directory.", {});
   }
 
   if (supportStatus.backend === "gnome-screenshot") {
@@ -694,8 +742,8 @@ async function pasteViaClipboard(
     : { ok: false, reason: "The clipboard paste hotkey did not complete successfully." };
 }
 
-/** Best-effort read of the currently active window id for focus restoration. */
-async function previousActiveWindowId(
+/** Best-effort read of the currently active window id for verification and focus restoration. */
+async function readActiveWindowId(
   xdotoolPath: string | undefined,
   context: LinuxDesktopContext
 ): Promise<string | undefined> {
@@ -706,6 +754,56 @@ async function previousActiveWindowId(
   } catch {
     return undefined;
   }
+}
+
+async function activateWindowById(
+  windowId: string,
+  wmctrlPath: string,
+  xdotoolPath: string | undefined,
+  context: LinuxDesktopContext
+): Promise<{ focused: boolean; backend: string; reason: string }> {
+  const targetId = normalizeWindowId(windowId) ?? windowId;
+  const wmctrl = await runDesktopCommand(wmctrlPath, ["-i", "-a", targetId], context);
+
+  if (xdotoolPath === undefined) {
+    return wmctrl.exitCode === 0
+      ? {
+          focused: true,
+          backend: "wmctrl",
+          reason: "Focused the requested X11 window through wmctrl; focus could not be independently verified."
+        }
+      : {
+          focused: false,
+          backend: "wmctrl",
+          reason: "wmctrl could not focus the requested window."
+        };
+  }
+
+  if ((await readActiveWindowId(xdotoolPath, context)) === targetId) {
+    return {
+      focused: true,
+      backend: "wmctrl",
+      reason: "Focused the requested X11 window through wmctrl."
+    };
+  }
+
+  const fallback = await runDesktopCommand(xdotoolPath, ["windowactivate", "--sync", targetId], context);
+
+  if (fallback.exitCode === 0 && (await readActiveWindowId(xdotoolPath, context)) === targetId) {
+    return {
+      focused: true,
+      backend: "xdotool",
+      reason: "Focused the requested X11 window through xdotool after wmctrl did not change the active window."
+    };
+  }
+
+  return {
+    focused: false,
+    backend: "xdotool",
+    reason: wmctrl.exitCode === 0
+      ? "The window manager reported success, but the requested window did not become active."
+      : "Neither wmctrl nor xdotool could focus the requested window."
+  };
 }
 
 export async function sendLinuxHotkey(
@@ -1059,15 +1157,16 @@ export async function focusLinuxWindow(
     if (directPath === undefined) {
       return { supported: false, backend: "unavailable", focused: false, window: requestedWindow, reason: "Window focus requires wmctrl on X11." };
     }
-    const previousId = await previousActiveWindowId(await findCommandPath("xdotool", context), context);
-    const direct = await runDesktopCommand(directPath, ["-i", "-a", normalizedWindowId], context);
+    const xdotoolPath = await findCommandPath("xdotool", context);
+    const previousId = await readActiveWindowId(xdotoolPath, context);
+    const activation = await activateWindowById(normalizedWindowId, directPath, xdotoolPath, context);
     return {
       supported: true,
-      backend: "wmctrl",
-      focused: direct.exitCode === 0,
+      backend: activation.backend,
+      focused: activation.focused,
       window: summarizeWindow({ windowId: normalizedWindowId }, true),
       ...(previousId === undefined ? {} : { previousWindow: { windowId: previousId } }),
-      reason: direct.exitCode === 0 ? "Focused the requested X11 window through wmctrl." : "wmctrl could not focus the requested window."
+      reason: activation.reason
     };
   }
 
@@ -1129,16 +1228,17 @@ export async function focusLinuxWindow(
     };
   }
 
-  const previousId = await previousActiveWindowId(await findCommandPath("xdotool", context), context);
-  const result = await runDesktopCommand(wmctrlPath, ["-i", "-a", target.windowId], context);
+  const xdotoolPath = await findCommandPath("xdotool", context);
+  const previousId = await readActiveWindowId(xdotoolPath, context);
+  const activation = await activateWindowById(target.windowId, wmctrlPath, xdotoolPath, context);
   const summarized = summarizeWindow(target, true);
 
   return {
     supported: true,
-    backend: "wmctrl",
-    focused: result.exitCode === 0,
+    backend: activation.backend,
+    focused: activation.focused,
     window: summarized,
     ...(previousId === undefined ? {} : { previousWindow: { windowId: previousId } }),
-    reason: result.exitCode === 0 ? "Focused the requested X11 window through wmctrl." : "wmctrl could not focus the requested window."
+    reason: activation.reason
   };
 }

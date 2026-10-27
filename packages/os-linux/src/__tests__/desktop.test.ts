@@ -1,9 +1,10 @@
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   captureLinuxScreenshot,
+  clearDesktopCapabilitiesCache,
   clickLinuxDesktop,
   describeTypingStrategy,
   focusLinuxWindow,
@@ -183,7 +184,7 @@ describe("Linux desktop helpers", () => {
     // Emulates real xdotool: getactivewindow prints the wid on its own, while
     // getwindowpid/getwindowname print with an explicit wid. (Chained
     // `getactivewindow getwindowpid getwindowname` prints pid/title only.)
-    await writeFile(bin + "/xdotool", "#!/bin/sh\nif [ \"$1\" = \"getactivewindow\" ]; then\n  echo \"99999\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowpid\" ]; then\n  echo \"$$\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowname\" ]; then\n  echo \"Test Window\"\n  exit 0\nfi\nexit 0\n", "utf8");
+    await writeFile(bin + "/xdotool", "#!/bin/sh\nSTATE=\"$(dirname \"$0\")/active-window\"\nif [ \"$1\" = \"getactivewindow\" ]; then\n  if [ -f \"$STATE\" ]; then cat \"$STATE\"; else echo \"99999\"; fi\n  exit 0\nfi\nif [ \"$1\" = \"windowactivate\" ]; then\n  shift\n  [ \"$1\" = \"--sync\" ] && shift\n  echo \"$1\" > \"$STATE\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowpid\" ]; then\n  echo \"$$\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowname\" ]; then\n  echo \"Test Window\"\n  exit 0\nfi\nexit 0\n", "utf8");
     await writeFile(bin + "/wmctrl", "#!/bin/sh\nexit 0\n", "utf8");
     await chmod(bin + "/xdotool", 0o700);
     await chmod(bin + "/wmctrl", 0o700);
@@ -195,7 +196,7 @@ describe("Linux desktop helpers", () => {
 
     await expect(
       focusLinuxWindow({ windowId: "12345" }, { env })
-    ).resolves.toMatchObject({ supported: true, focused: true, previousWindow: { windowId: "99999" } });
+    ).resolves.toMatchObject({ supported: true, focused: true, backend: "xdotool", previousWindow: { windowId: "99999" } });
   });
 
   it("refuses layout-unsafe typing without a clipboard backend", async () => {
@@ -214,7 +215,7 @@ describe("Linux desktop helpers", () => {
     const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-ids-"));
     await writeFile(
       bin + "/xdotool",
-      "#!/bin/sh\nif [ \"$1\" = \"getactivewindow\" ]; then\n  echo \"77777\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowpid\" ]; then\n  echo \"4242\"\n  if [ \"$3\" = \"getwindowname\" ]; then\n    echo \"Some Title\"\n  fi\n  exit 0\nfi\nexit 0\n",
+      "#!/bin/sh\nSTATE=\"$(dirname \"$0\")/active-window\"\nif [ \"$1\" = \"getactivewindow\" ]; then\n  if [ -f \"$STATE\" ]; then cat \"$STATE\"; else echo \"77777\"; fi\n  exit 0\nfi\nif [ \"$1\" = \"windowactivate\" ]; then\n  shift\n  [ \"$1\" = \"--sync\" ] && shift\n  echo \"$1\" > \"$STATE\"\n  exit 0\nfi\nif [ \"$1\" = \"getwindowpid\" ]; then\n  echo \"4242\"\n  if [ \"$3\" = \"getwindowname\" ]; then\n    echo \"Some Title\"\n  fi\n  exit 0\nfi\nexit 0\n",
       "utf8"
     );
     // 0x1234 == 4660: wmctrl hex ids must fold to the decimal xdotool form.
@@ -239,5 +240,85 @@ describe("Linux desktop helpers", () => {
       focused: true,
       window: { windowId: "4660" }
     });
+  });
+
+  it("creates screenshot output directories before capture", async () => {
+    const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-shot-bin-"));
+    await writeFile(bin + "/scrot", "#!/bin/sh\nprintf 'png' > \"$1\"\n", "utf8");
+    await chmod(bin + "/scrot", 0o700);
+    const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-shot-parent-"));
+    const outputPath = path.join(dir, "nested", "screen.png");
+
+    await expect(
+      captureLinuxScreenshot(
+        { path: outputPath },
+        { env: { PATH: bin, DISPLAY: ":0", XDG_SESSION_TYPE: "x11" } }
+      )
+    ).resolves.toMatchObject({
+      supported: true,
+      backend: "scrot",
+      path: outputPath,
+      bytesWritten: 3
+    });
+  });
+
+  it("does not treat a stale screenshot file as a successful capture", async () => {
+    const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-shot-fail-bin-"));
+    await writeFile(bin + "/scrot", "#!/bin/sh\nexit 1\n", "utf8");
+    await chmod(bin + "/scrot", 0o700);
+    const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-shot-fail-"));
+    const outputPath = path.join(dir, "screen.png");
+    await writeFile(outputPath, "stale", "utf8");
+
+    await expect(
+      captureLinuxScreenshot(
+        { path: outputPath },
+        { env: { PATH: bin, DISPLAY: ":0", XDG_SESSION_TYPE: "x11" } }
+      )
+    ).resolves.toMatchObject({
+      supported: false,
+      backend: "scrot",
+      reason: "The screenshot backend did not produce a non-empty image file."
+    });
+  });
+
+  it("reports focus failure when neither backend changes the active window", async () => {
+    const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-focus-fail-"));
+    await writeFile(bin + "/xdotool", "#!/bin/sh\nif [ \"$1\" = \"getactivewindow\" ]; then echo \"99999\"; fi\nexit 0\n", "utf8");
+    await writeFile(bin + "/wmctrl", "#!/bin/sh\nexit 0\n", "utf8");
+    await chmod(bin + "/xdotool", 0o700);
+    await chmod(bin + "/wmctrl", 0o700);
+
+    await expect(
+      focusLinuxWindow(
+        { windowId: "12345" },
+        { env: { PATH: bin, DISPLAY: ":0", XDG_SESSION_TYPE: "x11" } }
+      )
+    ).resolves.toMatchObject({
+      supported: true,
+      focused: false,
+      reason: "The window manager reported success, but the requested window did not become active."
+    });
+  });
+
+  it("caches desktop capability probes between repeated observations", async () => {
+    clearDesktopCapabilitiesCache();
+    const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-cache-"));
+    const counter = path.join(bin, "python-count");
+    await writeFile(
+      bin + "/python3",
+      `#!/bin/sh\necho x >> "${counter}"\nprintf '%s\\n' '{"supported":false,"backend":"atspi","reason":"test"}'\n`,
+      "utf8"
+    );
+    await chmod(bin + "/python3", 0o700);
+    const env = { PATH: bin, DISPLAY: ":0", XDG_SESSION_TYPE: "x11" };
+
+    await getLinuxDesktopCapabilities({ env });
+    await getLinuxDesktopCapabilities({ env });
+    await expect(readFile(counter, "utf8")).resolves.toBe("x\n");
+
+    clearDesktopCapabilitiesCache();
+    await getLinuxDesktopCapabilities({ env });
+    await expect(readFile(counter, "utf8")).resolves.toBe("x\nx\n");
   });
 });

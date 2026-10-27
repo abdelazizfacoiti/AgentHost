@@ -14,11 +14,18 @@ export const CAPABILITY_FAMILY_SUMMARIES: Record<AgentCapability, { summary: str
   skills: { summary: "Portable skill documents are installed on disk, not exposed as a live MCP resource.", exampleTools: ["task.create", "task.list"] }
 };
 
+export interface OverlayActivityBrief {
+  mode: "always" | "on_change" | "off";
+  triggers: string[];
+  fallback: string;
+}
+
 export interface CapabilityManifestInput {
   version: string;
   /** Omit for static briefs (CLI paste-into-config); live resources always fill it. */
   toolCount?: number;
   byExecutionClass?: Record<string, number>;
+  overlay?: OverlayActivityBrief;
 }
 
 /** One small pull for agent clients (Codex, Claude Code, Copilot, OpenCode)
@@ -36,6 +43,9 @@ export function buildCapabilityMarkdown(input: CapabilityManifestInput): string 
   const inventory = input.toolCount === undefined
     ? "live tool inventory via MCP"
     : `${input.toolCount} tools${classes.length > 0 ? ` [${classes}]` : ""}`;
+  const overlay = input.overlay === undefined
+    ? ""
+    : `\nActivity overlay: mode \`${input.overlay.mode}\`; ${input.overlay.triggers.length === 0 ? "automatic cards are disabled" : `automatic cards cover ${input.overlay.triggers.join(", ")}`}. Fallback status: \`${input.overlay.fallback}\`.\n`;
   return `# AgentHost capabilities (v${input.version}, ${inventory})
 
 AgentHost is a local general-purpose computer-use runtime. Work the loop:
@@ -54,7 +64,7 @@ never auto-chain. Task and agent control metadata are exempt. \`agent.stop\`
 sets the emergency stop and revokes task approval; only the operator CLI
 clears stop/takeover/pause flags. Tasks (\`task.*\`) organize long work. Pull
 \`agenthost://status\` for live stop/takeover state before starting.
-
+${overlay}
 Definition of done: record observable criteria with \`task.create\`
 (\`definitionOfDone\`), verify each one, then call \`task.update_status\`
 with \`status: "completed"\` and \`verifiedCriteria\` listing every criterion.
@@ -80,6 +90,7 @@ export function buildCapabilitiesJson(input: CapabilityManifestInput): Record<st
     version: input.version,
     ...(input.toolCount === undefined ? {} : { toolCount: input.toolCount }),
     ...(input.byExecutionClass === undefined ? {} : { byExecutionClass: input.byExecutionClass }),
+    ...(input.overlay === undefined ? {} : { overlay: input.overlay }),
     families: CAPABILITY_FAMILY_SUMMARIES,
     loop: ["understand", "plan", "inspect", "act", "observe", "verify", "recover"],
     resources: ["agenthost://capabilities", "agenthost://capabilities.md", "agenthost://status"]

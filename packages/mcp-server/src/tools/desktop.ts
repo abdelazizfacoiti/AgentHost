@@ -234,6 +234,25 @@ function safetyFailure(tool: string, safety: ReturnType<typeof evaluateSafety>):
   });
 }
 
+function failedDesktopAction<T>(
+  tool: string,
+  code: string,
+  data: { supported: boolean; backend: string; reason: string }
+): ToolResult<T> {
+  const message = data.reason.trim().length > 0 ? data.reason : `${tool} did not complete.`;
+  return toolFailure<T>({
+    tool,
+    riskLevel: "medium",
+    strategy: "gui_control",
+    error: {
+      code,
+      message,
+      details: { backend: data.backend, supported: data.supported }
+    },
+    observations: [message]
+  });
+}
+
 async function desktopPreview(
   tool: string,
   actionType: "gui_click" | "gui_type",
@@ -337,6 +356,10 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         ? await capture()
         : await context.overlayScreenshotSuppression(capture);
 
+      if (data.supported !== true || data.path === undefined || data.bytesWritten === undefined || data.bytesWritten <= 0) {
+        return failedDesktopAction("desktop.screenshot", "screenshot_failed", data);
+      }
+
       return toolSuccess({
         tool: "desktop.screenshot",
         riskLevel: "medium",
@@ -414,6 +437,10 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
 
       const data = await context.linux.hotkey({ keys: input.keys, activeWindow: validation.activeWindow! });
 
+      if (data.supported !== true || data.sent !== true) {
+        return failedDesktopAction("desktop.hotkey", "hotkey_failed", data);
+      }
+
       return toolSuccess({
         tool: "desktop.hotkey",
         riskLevel: "medium",
@@ -487,6 +514,10 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
       }
 
       const data = await context.linux.typeText({ text: input.text, activeWindow: validation.activeWindow! });
+
+      if (data.supported !== true || data.typed !== true) {
+        return failedDesktopAction("desktop.type_text", "type_failed", data);
+      }
 
       return toolSuccess({
         tool: "desktop.type_text",
@@ -566,6 +597,10 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         button: input.button ?? "left",
         activeWindow: validation.activeWindow!
       });
+
+      if (data.supported !== true || data.clicked !== true) {
+        return failedDesktopAction("desktop.click", "click_failed", data);
+      }
 
       return toolSuccess({
         tool: "desktop.click",
@@ -658,6 +693,10 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         ...(input.endY === undefined ? {} : { endY: input.endY }),
         ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs })
       });
+
+      if (data.supported !== true || data.performed !== true) {
+        return failedDesktopAction("desktop.pointer", "pointer_failed", data);
+      }
 
       return toolSuccess({
         tool: "desktop.pointer",

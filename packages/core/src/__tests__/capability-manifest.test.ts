@@ -24,6 +24,12 @@ describe("capability manifest", () => {
     expect(json).toMatchObject({ product: "agenthost", toolCount: 250 });
   });
 
+  it("states the automatic overlay mode and fallback", () => {
+    const overlay = { mode: "always" as const, triggers: ["computer.*", "desktop.*"], fallback: "agenthost overlay status" };
+    expect(buildCapabilityMarkdown({ version: "0.1.0", overlay })).toContain("Activity overlay: mode `always`");
+    expect(buildCapabilitiesJson({ version: "0.1.0", overlay }).overlay).toEqual(overlay);
+  });
+
   it("covers every registered family", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-manifest-"));
     void homeDir;

@@ -100,6 +100,18 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
           ...(input.title === undefined ? {} : { title: input.title }),
           ...(input.pid === undefined ? {} : { pid: input.pid })
         });
+        if (data.supported !== true || data.focused !== true) {
+          return toolFailure({
+            tool: "window.focus",
+            riskLevel: "medium",
+            error: {
+              code: "focus_failed",
+              message: data.reason,
+              details: { backend: data.backend, supported: data.supported }
+            },
+            observations: [data.reason]
+          });
+        }
         return toolSuccess({ tool: "window.focus", riskLevel: "medium", data, observations: ["Focused window."] });
       } catch (e) {
         return toolFailure({ tool: "window.focus", riskLevel: "medium", error: { code: "focus_failed", message: e instanceof Error ? e.message : "Focus failed" } });
