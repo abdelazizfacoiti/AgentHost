@@ -10,7 +10,7 @@ is provider-agnostic and uses MCP over stdio.
 - Node.js 20+; Python 3 and GTK3/PyGObject are needed for the visible overlay.
 - X11 is the verified visible-overlay path. Wayland reports limited or
   unavailable global-overlay features.
-- The live MCP surface is the 35 tools and 3 resources documented in
+- The live MCP surface is the 36 tools and 3 resources documented in
   `docs/03_MCP_TOOLS_AND_ADAPTERS.md`.
 - Optional adapters are not registered unless explicitly enabled; this tree
   registers no browser bridge, speech, scheduler, Forge, or Control Room

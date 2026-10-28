@@ -321,4 +321,53 @@ describe("Linux desktop helpers", () => {
     await getLinuxDesktopCapabilities({ env });
     await expect(readFile(counter, "utf8")).resolves.toBe("x\nx\n");
   });
+  it("captures a scrot region natively and post-processes JPEG scale with ffmpeg", async () => {
+    const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-shot-options-"));
+    await writeFile(
+      bin + "/scrot",
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/scrot-args\"\nfor last; do :; done\nprintf 'png' > \"$last\"\n",
+      "utf8"
+    );
+    await writeFile(
+      bin + "/ffmpeg",
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/ffmpeg-args\"\nfor last; do :; done\nprintf 'jpg' > \"$last\"\n",
+      "utf8"
+    );
+    await chmod(bin + "/scrot", 0o700);
+    await chmod(bin + "/ffmpeg", 0o700);
+    const env = { PATH: bin, DISPLAY: ":0", XDG_SESSION_TYPE: "x11" };
+
+    const native = await captureLinuxScreenshot(
+      { path: path.join(bin, "region.png"), region: { x: 1, y: 2, width: 30, height: 40 } },
+      { env }
+    );
+    expect(native).toMatchObject({ supported: true, backend: "scrot", path: path.join(bin, "region.png") });
+    expect(await readFile(bin + "/scrot-args", "utf8")).toContain("-a\n1,2,30,40");
+
+    const jpeg = await captureLinuxScreenshot(
+      {
+        path: path.join(bin, "region.jpg"),
+        format: "jpeg",
+        quality: 80,
+        scale: 0.5,
+        region: { x: 1, y: 2, width: 30, height: 40 }
+      },
+      { env }
+    );
+    expect(jpeg).toMatchObject({ supported: true, backend: "scrot+ffmpeg", path: path.join(bin, "region.jpg"), bytesWritten: 3 });
+    const ffmpegArgs = await readFile(bin + "/ffmpeg-args", "utf8");
+    expect(ffmpegArgs).toContain("-q:v");
+    expect(ffmpegArgs).toContain("scale=");
+  });
+
+  it("rejects incompatible screenshot capture options before invoking a backend", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-shot-invalid-"));
+    await expect(
+      captureLinuxScreenshot(
+        { path: path.join(dir, "screen.png"), includeActiveWindowOnly: true, region: { x: 0, y: 0, width: 10, height: 10 } },
+        { env: { PATH: "", DISPLAY: ":0", XDG_SESSION_TYPE: "x11" } }
+      )
+    ).resolves.toMatchObject({ supported: false, reason: "Region capture cannot be combined with active-window capture." });
+  });
+
 });

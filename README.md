@@ -97,6 +97,10 @@ surface honestly instead of pretending an action succeeded.
 | screen geometry | 9.5 ms | 13.1 ms |
 | screenshot | 278.4 ms | 305.8 ms |
 
+`npm run benchmark:agent` measures full runner overhead (schema, policy,
+gates, preview, handler, audit) for observation, filesystem, and a governed
+`computer.run_steps` plan in an isolated home with overlays off.
+
 No external benchmark claims — run it yourself and compare.
 
 ## How it compares

@@ -24,6 +24,7 @@ import { createFileTools } from "../tools/file.js";
 import { createDesktopTools } from "../tools/desktop.js";
 import { createWindowTools } from "../tools/window.js";
 import { createShellTools } from "../tools/shell.js";
+import { createRunStepsTool } from "../tools/run-steps.js";
 import { applyProductionExecutionMetadata } from "../tool-metadata.js";
 
 const roots: string[] = [];
@@ -588,4 +589,206 @@ describe("governed tool runner", () => {
     expect(begin).toHaveBeenCalledWith(expect.objectContaining({ tool: "file.read" }));
     expect(finish).toHaveBeenCalledWith(result);
   });
+  it("executes a governed plan with plan-scoped low/medium approval", async () => {
+    const home = await tempHome();
+    const logs: AuditLogEntry[] = [];
+    const context = makeContext(home, logs);
+    const writes: string[] = [];
+    const write = writeTool(async (input) => { writes.push(input.value); });
+    const runSteps = createRunStepsTool();
+    context.tools = new Map([
+      [write.name, write],
+      [runSteps.name, runSteps]
+    ]);
+
+    const plan = { steps: [{ tool: "test.write", input: { value: "planned" } }] };
+    const preview = await runTool(runSteps, { ...plan, dryRun: true }, context);
+    expect(preview.ok).toBe(true);
+    expect((preview.data as { requiresConfirmation?: boolean }).requiresConfirmation).toBe(true);
+    const tokenId = preview.confirmation?.tokenId;
+    expect(tokenId).toMatch(/^conf_/);
+    expect(writes).toEqual([]);
+
+    const unapproved = await runTool(runSteps, { ...plan, confirmationToken: tokenId }, context);
+    expect(unapproved.error?.code).toBe("confirmation_not_approved");
+    expect(writes).toEqual([]);
+
+    await acceptConfirmation(home, tokenId!);
+    const executed = await runTool(runSteps, { ...plan, confirmationToken: tokenId }, context);
+    expect(executed.ok).toBe(true);
+    expect(writes).toEqual(["planned"]);
+    expect(logs.map((entry) => entry.tool)).toEqual(expect.arrayContaining(["computer.run_steps", "test.write"]));
+  });
+
+  it("still requires a separate token for high-risk plan steps", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const handler = vi.fn(async () => undefined);
+    const high = writeTool(handler, "high");
+    const runSteps = createRunStepsTool();
+    context.tools = new Map([
+      [high.name, high],
+      [runSteps.name, runSteps]
+    ]);
+    const plan = { steps: [{ tool: "test.write", input: { value: "high-risk" } }] };
+
+    const preview = await runTool(runSteps, { ...plan, dryRun: true }, context);
+    expect(preview.ok).toBe(true);
+    expect((preview.data as { requiresConfirmation?: boolean }).requiresConfirmation).toBe(false);
+
+    const blocked = await runTool(runSteps, plan, context);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error?.code).toBe("confirmation_required");
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("rejects nested run_steps and unknown planned tools", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const runSteps = createRunStepsTool();
+    context.tools = new Map([[runSteps.name, runSteps]]);
+
+    const nested = await runTool(runSteps, { steps: [{ tool: "computer.run_steps", input: { steps: [] } }], dryRun: true }, context);
+    expect(nested.error?.code).toBe("invalid_input");
+
+    const unknown = await runTool(runSteps, { steps: [{ tool: "missing.tool" }], dryRun: true }, context);
+    expect(unknown.error?.code).toBe("safety_blocked");
+  });
+
+  it("serializes state-changing handlers while allowing read-only concurrency", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const events: string[] = [];
+    let releaseFirst: () => void = () => undefined;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const stateTool = (name: string, behavior: () => Promise<void>): AgentHostToolDefinition<{ id: string }, unknown> => ({
+      name,
+      description: name,
+      riskLevel: "low",
+      inputSchema: z.object({ id: z.string() }).strict(),
+      mcpInputSchema: {},
+      inputSummary: name,
+      safety: { actionType: "inspect" },
+      execution: { ...stateChanging(), requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false },
+      handler: async () => {
+        await behavior();
+        return toolSuccess({ tool: name, riskLevel: "low", data: { done: true } });
+      }
+    });
+    const first = stateTool("test.first", async () => {
+      events.push("first-start");
+      await firstBlocked;
+      events.push("first-end");
+    });
+    const second = stateTool("test.second", async () => { events.push("second-start"); });
+    const read: AgentHostToolDefinition<{ id: string }, unknown> = {
+      name: "test.read",
+      description: "read",
+      riskLevel: "observe",
+      inputSchema: z.object({ id: z.string() }).strict(),
+      mcpInputSchema: {},
+      inputSummary: "read",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: async () => {
+        events.push("read");
+        return toolSuccess({ tool: "test.read", riskLevel: "observe", data: { done: true } });
+      }
+    };
+
+    const firstRun = runTool(first, { id: "1" }, context);
+    while (!events.includes("first-start")) await new Promise((resolve) => setTimeout(resolve, 5));
+    const secondRun = runTool(second, { id: "2" }, context);
+    const readRun = runTool(read, { id: "3" }, context);
+    await readRun;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(events).toEqual(["first-start", "read"]);
+    releaseFirst();
+    await Promise.all([firstRun, secondRun]);
+    expect(events).toEqual(["first-start", "read", "first-end", "second-start"]);
+  });
+
+  it("writes optional timestamped phase traces without tool arguments", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const trace: Array<{ tool: string; phase: string; summary?: string | undefined }> = [];
+    context.trace = { event: async (entry) => { trace.push(entry); } };
+    const tool = writeTool(async () => undefined);
+    tool.execution = { ...stateChanging(), requiresConfirmationToken: false };
+
+    const result = await runTool(tool, { value: "trace-secret" }, context);
+    expect(result.ok).toBe(true);
+    expect(trace.map((entry) => entry.phase)).toEqual(expect.arrayContaining(["start", "safety", "preview", "handler", "audit", "finish"]));
+    expect(JSON.stringify(trace)).not.toContain("trace-secret");
+  });
+
+  it("rechecks stop after a state-changing call waits in the execution lane", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const events: string[] = [];
+    let releaseFirst: () => void = () => undefined;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const stateTool = (name: string, behavior: () => Promise<void>): AgentHostToolDefinition<{ id: string }, unknown> => ({
+      name,
+      description: name,
+      riskLevel: "low",
+      inputSchema: z.object({ id: z.string() }).strict(),
+      mcpInputSchema: {},
+      inputSummary: name,
+      safety: { actionType: "inspect" },
+      execution: { ...stateChanging(), requiresDryRun: false, requiresConfirmationToken: false, requiresExactTarget: false },
+      handler: async () => {
+        events.push(name);
+        await behavior();
+        return toolSuccess({ tool: name, riskLevel: "low", data: { done: true } });
+      }
+    });
+    const first = stateTool("test.first", async () => { await firstBlocked; });
+    const second = stateTool("test.second", async () => undefined);
+
+    const firstRun = runTool(first, { id: "1" }, context);
+    while (!events.includes("test.first")) await new Promise((resolve) => setTimeout(resolve, 5));
+    const secondRun = runTool(second, { id: "2" }, context);
+    await requestStop(home, "operator stop during queue");
+    releaseFirst();
+    const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+    expect(firstResult.ok).toBe(true);
+    expect(secondResult.ok).toBe(false);
+    expect(secondResult.error?.code).toBe("emergency_stop_requested");
+    expect(events).toEqual(["test.first"]);
+  });
+
+  it("does not let a plan token cover a high-risk step", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const writes: string[] = [];
+    const medium = writeTool(async (input) => { writes.push(input.value); });
+    const highHandler = vi.fn(async () => undefined);
+    const high = writeTool(highHandler, "high");
+    high.name = "test.high";
+    const runSteps = createRunStepsTool();
+    context.tools = new Map([
+      [medium.name, medium],
+      [high.name, high],
+      [runSteps.name, runSteps]
+    ]);
+    const plan = {
+      steps: [
+        { tool: "test.write", input: { value: "medium" } },
+        { tool: "test.high", input: { value: "high" } }
+      ]
+    };
+
+    const preview = await runTool(runSteps, { ...plan, dryRun: true }, context);
+    const tokenId = preview.confirmation?.tokenId;
+    expect(tokenId).toMatch(/^conf_/);
+    await acceptConfirmation(home, tokenId!);
+
+    const executed = await runTool(runSteps, { ...plan, confirmationToken: tokenId }, context);
+    expect(executed.ok).toBe(false);
+    expect(executed.error?.code).toBe("confirmation_required");
+    expect(writes).toEqual(["medium"]);
+    expect(highHandler).not.toHaveBeenCalled();
+  });
+
 });

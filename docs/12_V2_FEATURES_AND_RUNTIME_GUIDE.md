@@ -73,7 +73,7 @@ this tree. Browser work uses ordinary desktop automation when policy allows.
 
 ## 3. Live surface
 
-The current server exposes **35 base MCP tools** and **3 resources**.
+The current server exposes **36 base MCP tools** and **3 resources**.
 
 Tool counts are generated from the loaded set at startup. The authoritative
 source is always:
@@ -89,7 +89,8 @@ source is always:
 |---|---|---|
 | System | `system.get_info`, `system.list_capabilities`, `system.check_dependency` | Runtime/system information, live capability inventory, dependency availability |
 | Adapters | `adapter.list`, `adapter.get` | Inspect registered optional adapters |
-| Computer observation | `computer.observe_state`, `computer.wait_for` | Active window, screen geometry, capabilities, window list, wait for UI state |
+| Computer observation | `computer.observe_state`, `computer.wait_for` | Active window, screen geometry, capabilities, window list, bounded condition waits with state snapshots |
+| Governed plans | `computer.run_steps` | Up to 20 nested governed calls with plan-scoped low/medium approval |
 | Windows | `window.list`, `window.focus` | Enumerate windows; focus and verify by ID/app/title/PID |
 | Desktop | `desktop.screenshot`, `desktop.click`, `desktop.pointer`, `desktop.hotkey`, `desktop.type_text` | Screenshot, click, pointer movement/scroll/drag, key chords, typing |
 | Files | `file.read`, `file.list`, `file.exists`, `file.write`, `file.ensure_dir`, `file.copy`, `file.move`, `file.delete` | Bounded local file operations; file-only deletion |
@@ -123,8 +124,10 @@ version and entry-path provenance from the live runtime.
 - Desktop backend and capability information.
 - Optional visible-window list.
 
-`computer.wait_for` polls active-window state every ~150 ms until it matches or
-times out. It replaces fixed sleeps and returns immediately once the UI settles.
+`computer.wait_for` polls active-window, any-window, and/or screen conditions
+every ~150 ms until they match or the timeout expires. It returns a timestamped
+state snapshot and short fingerprint on success or timeout, replacing fixed
+sleeps with one bounded wait.
 
 ### Window control
 
@@ -149,7 +152,7 @@ immediately before execution.
 | `desktop.hotkey` | One or more key combinations |
 | `desktop.type_text` | Up to 10,000 characters into the active window |
 | `desktop.pointer` | Pointer movement, scrolling, and drag primitives |
-| `desktop.screenshot` | Full-screen or active-window-only PNG capture |
+| `desktop.screenshot` | Full-screen, active-window-only, or region PNG/JPEG capture with scale/quality |
 
 Typing behavior:
 
@@ -164,6 +167,11 @@ Screenshot behavior:
 - Removes stale output first.
 - Rejects missing, empty, or zero-byte captures.
 - Suppresses AgentHost overlays during capture and restores them afterward.
+- Supports optional `region`, `scale`, `format: "jpeg"`, and `quality`; native
+  `scrot -a` region capture avoids post-processing, while crop/scale/JPEG
+  conversion requires `ffmpeg` and fails explicitly when unavailable.
+- Returns image dimensions and capture options in `screenshotMetadata` when
+  readable.
 
 Desktop backends report unsupported or failed actions explicitly. A tool does
 not report success unless the backend confirms that the action was performed.
@@ -330,6 +338,20 @@ agenthost task approve <taskId> [--max-risk low|medium]
 - Creating, completing, or cancelling a task clears approval.
 - Stop and takeover clear approval.
 - Paused, completed, cancelled, missing, or expired tasks do not get auto-chain.
+
+### Plan approval
+
+`computer.run_steps` accepts up to 20 named tool calls. Its own preview is bound
+to the exact plan fingerprint, and a confirmed plan token covers only the
+low/medium effects inside that exact plan:
+
+- Every nested call still re-enters schema, policy, runtime gates, safety
+  preview, audit, and execution metadata.
+- High-risk steps still need their own per-step token.
+- Preview-only nested calls never mint, consume, or log a token.
+- Nested `computer.run_steps` calls are rejected.
+- Stop/pause/takeover is rechecked after the state-changing execution lane is
+  acquired.
 
 ### Grants
 
@@ -802,7 +824,15 @@ Current v2 safeguards include:
 - Cache bypass when a custom accessibility probe is supplied.
 - Window list caching.
 - OCR result caching per image.
-- `computer.wait_for` instead of fixed sleeps.
+- `computer.wait_for` instead of fixed sleeps, with state snapshots/fingerprints.
+- `computer.run_steps` for bounded multi-step plans without a model round trip
+  between each step; every nested call still re-enters the governed runner.
+- Plan-scoped confirmation for low/medium effects; high-risk steps still need
+  their own token.
+- State-changing execution is serialized per MCP session; read-only calls may
+  run concurrently and stop/takeover is rechecked after queueing.
+- Optional `AGENTHOST_TRACE=1` writes redacted timestamped phase traces under
+  `~/.agenthost/logs/traces/<session>.jsonl`.
 - Active-window verification before GUI input.
 - Focus verification and fallback.
 - Screenshot directory creation, stale-file removal, and zero-byte rejection.
@@ -880,8 +910,9 @@ At the time of writing, the tree passes:
 
 - `npm run build`
 - `npm run lint`
-- `npm test` — 57 files, 336 tests
-- `npm run smoke:mcp` — 35 tools, 3 resources
+- `npm test` — 58 files, 353 tests
+- `npm run smoke:mcp` — 36 tools, 3 resources
+- `npm run benchmark:agent` — isolated, non-destructive runner overhead benchmark
 - `git diff --check`
 
 Real X11 screenshot capture was also verified with `scrot` at 386,291 bytes.

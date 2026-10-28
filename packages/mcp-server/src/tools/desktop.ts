@@ -47,12 +47,36 @@ const activeWindowSchema = z
 const screenshotInputSchema = z
   .object({
     outputDir: nonEmptyString.optional(),
-    filename: z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._-]+\.png$/).optional(),
+    filename: z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._-]+\.(?:png|jpg|jpeg)$/i).optional(),
     includeActiveWindowOnly: z.boolean().optional(),
+    format: z.enum(["png", "jpeg"]).optional(),
+    quality: z.number().int().min(1).max(100).optional(),
+    scale: z.number().min(0.1).max(1).optional(),
+    region: z.object({
+      x: z.number().int().min(0),
+      y: z.number().int().min(0),
+      width: z.number().int().min(1).max(10000),
+      height: z.number().int().min(1).max(10000)
+    }).strict().optional(),
     dryRun: z.boolean().optional(),
     confirmationToken: confirmationTokenSchema
   })
-  .strict();
+  .strict()
+  .superRefine((input, ctx) => {
+    if (input.region !== undefined && input.includeActiveWindowOnly === true) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "region cannot be combined with includeActiveWindowOnly." });
+    }
+    const resolved = input.format ?? (/\.jpe?g$/i.test(input.filename ?? "") ? "jpeg" : "png");
+    if (input.filename !== undefined) {
+      const pngName = /\.png$/i.test(input.filename);
+      if ((resolved === "png" && !pngName) || (resolved === "jpeg" && pngName)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "filename extension must match format." });
+      }
+    }
+    if (input.quality !== undefined && resolved !== "jpeg") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "quality is only supported for jpeg." });
+    }
+  });
 
 const hotkeyInputSchema = z
   .object({
@@ -108,21 +132,41 @@ const activeWindowMcpSchema = {
   additionalProperties: false
 };
 
+function screenshotFormat(input: ScreenshotInput): "png" | "jpeg" {
+  if (input.format !== undefined) return input.format;
+  return /\.jpe?g$/i.test(input.filename ?? "") ? "jpeg" : "png";
+}
+
 function screenshotPath(input: ScreenshotInput, context: AgentHostMcpContext): string {
   const outputDir =
     input.outputDir === undefined
       ? path.join(context.config.agentHostDir, "screenshots")
       : normalizePathForPolicy(input.outputDir, { agentHostDir: context.config.agentHostDir });
   const scope = input.includeActiveWindowOnly === true ? "window" : "screen";
-  const filename = input.filename ?? `screenshot-${context.sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}-${scope}.png`;
+  const extension = screenshotFormat(input) === "jpeg" ? "jpg" : "png";
+  const filename = input.filename ?? `screenshot-${context.sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}-${scope}.${extension}`;
   return normalizePathForPolicy(path.join(outputDir, filename), { agentHostDir: context.config.agentHostDir });
 }
 
-async function pngSize(filePath: string): Promise<{ width: number; height: number } | undefined> {
+async function imageSize(filePath: string): Promise<{ width: number; height: number } | undefined> {
   try {
     const raw = await readFile(filePath);
-    if (raw.length < 24 || raw.toString("ascii", 12, 16) !== "IHDR") return undefined;
-    return { width: raw.readUInt32BE(16), height: raw.readUInt32BE(20) };
+    if (raw.length >= 24 && raw.toString("ascii", 12, 16) === "IHDR") {
+      return { width: raw.readUInt32BE(16), height: raw.readUInt32BE(20) };
+    }
+    if (raw.length >= 4 && raw[0] === 0xff && raw[1] === 0xd8) {
+      let offset = 2;
+      while (offset + 9 < raw.length) {
+        if (raw[offset] !== 0xff) return undefined;
+        const marker = raw[offset + 1];
+        const length = raw.readUInt16BE(offset + 2);
+        if (marker !== undefined && marker >= 0xc0 && marker <= 0xc3) {
+          return { height: raw.readUInt16BE(offset + 5), width: raw.readUInt16BE(offset + 7) };
+        }
+        offset += 2 + length;
+      }
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -296,15 +340,29 @@ async function desktopPreview(
 export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpContext>[] {
   const screenshot: AgentHostToolDefinition<ScreenshotInput, DesktopScreenshotResult, AgentHostMcpContext> = {
     name: "desktop.screenshot",
-    description: "Captures a screenshot to an approved local folder. Use includeActiveWindowOnly for faster OCR.",
+    description: "Captures a PNG/JPEG screenshot to an approved local folder with optional region, scale, and JPEG quality. Use includeActiveWindowOnly or a region for faster OCR.",
     riskLevel: "medium",
     inputSchema: screenshotInputSchema,
     mcpInputSchema: {
       type: "object",
       properties: {
         outputDir: { type: "string" },
-        filename: { type: "string", pattern: "^[A-Za-z0-9._-]+\\.png$" },
+        filename: { type: "string", pattern: "^[A-Za-z0-9._-]+\\.(png|jpg|jpeg)$" },
         includeActiveWindowOnly: { type: "boolean" },
+        format: { type: "string", enum: ["png", "jpeg"] },
+        quality: { type: "integer", minimum: 1, maximum: 100 },
+        scale: { type: "number", minimum: 0.1, maximum: 1 },
+        region: {
+          type: "object",
+          properties: {
+            x: { type: "integer", minimum: 0 },
+            y: { type: "integer", minimum: 0 },
+            width: { type: "integer", minimum: 1, maximum: 10000 },
+            height: { type: "integer", minimum: 1, maximum: 10000 }
+          },
+          required: ["x", "y", "width", "height"],
+          additionalProperties: false
+        },
         ...executionMcpProperties
       },
       additionalProperties: false
@@ -327,7 +385,14 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           approval: safety.approval,
           blocked: safety.blocked,
           reasons: safety.reasons,
-          data: { path: outputPath, includeActiveWindowOnly: input.includeActiveWindowOnly ?? false }
+          data: {
+            path: outputPath,
+            includeActiveWindowOnly: input.includeActiveWindowOnly ?? false,
+            format: screenshotFormat(input),
+            ...(input.region === undefined ? {} : { region: input.region }),
+            ...(input.scale === undefined ? {} : { scale: input.scale }),
+            ...(input.quality === undefined ? {} : { quality: input.quality })
+          }
         };
       }
     },
@@ -350,7 +415,11 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
 
       const capture = () => context.linux.screenshot({
         path: outputPath,
-        ...(input.includeActiveWindowOnly === undefined ? {} : { includeActiveWindowOnly: input.includeActiveWindowOnly })
+        ...(input.includeActiveWindowOnly === undefined ? {} : { includeActiveWindowOnly: input.includeActiveWindowOnly }),
+        format: input.format ?? screenshotFormat(input),
+        ...(input.quality === undefined ? {} : { quality: input.quality }),
+        ...(input.scale === undefined ? {} : { scale: input.scale }),
+        ...(input.region === undefined ? {} : { region: input.region })
       });
       const data = context.overlayScreenshotSuppression === undefined
         ? await capture()
@@ -360,6 +429,20 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return failedDesktopAction("desktop.screenshot", "screenshot_failed", data);
       }
 
+      const size = await imageSize(outputPath);
+      if (size !== undefined) {
+        data.screenshotMetadata = {
+          screenshotId: path.basename(outputPath),
+          capturedAt: new Date().toISOString(),
+          captureKind: input.includeActiveWindowOnly === true ? "active_window" : "full_screen",
+          imageWidth: size.width,
+          imageHeight: size.height,
+          geometryAvailable: true,
+          format: screenshotFormat(input),
+          ...(input.scale === undefined ? {} : { scale: input.scale }),
+          ...(input.region === undefined ? {} : { region: input.region })
+        };
+      }
       return toolSuccess({
         tool: "desktop.screenshot",
         riskLevel: "medium",

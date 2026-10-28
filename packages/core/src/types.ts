@@ -1120,7 +1120,17 @@ export interface DesktopScreenshotResult {
   path?: string;
   bytesWritten?: number;
   activeWindow?: DesktopWindowContext;
-  screenshotMetadata?: { screenshotId: string; capturedAt: string; captureKind: "full_screen" | "active_window"; imageWidth: number; imageHeight: number; geometryAvailable: boolean };
+  screenshotMetadata?: {
+    screenshotId: string;
+    capturedAt: string;
+    captureKind: "full_screen" | "active_window";
+    imageWidth: number;
+    imageHeight: number;
+    geometryAvailable: boolean;
+    format?: "png" | "jpeg";
+    scale?: number;
+    region?: { x: number; y: number; width: number; height: number };
+  };
   reason: string;
 }
 
@@ -2146,6 +2156,24 @@ export interface AuditTimings {
   handler: number;
   auditWrite: number;
   total: number;
+}
+
+export type ToolTracePhase = "start" | "overlay" | "safety" | "preview" | "confirmation" | "handler" | "audit" | "finish";
+
+export interface ToolTraceEvent {
+  timestamp: string;
+  sessionId: string;
+  tool: string;
+  phase: ToolTracePhase;
+  elapsedMs: number;
+  riskLevel?: RiskLevel | undefined;
+  ok?: boolean | undefined;
+  code?: string | undefined;
+  summary?: string | undefined;
+}
+
+export interface ToolTraceLogger {
+  event(entry: ToolTraceEvent): Promise<void>;
 }
 
 export interface AuditLogEntry {

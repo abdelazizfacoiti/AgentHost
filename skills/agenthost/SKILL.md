@@ -76,8 +76,9 @@ coding tools directly.
 | Need | Tool |
 |---|---|
 | Observe desktop state | `computer.observe_state` |
-| Capture screenshot | `desktop.screenshot` |
+| Capture screenshot | `desktop.screenshot` (optional region/JPEG/scale) |
 | Wait for a condition | `computer.wait_for` |
+| Run a bounded governed plan | `computer.run_steps` |
 | Click / move pointer | `desktop.click`, `desktop.pointer` |
 | Type text / shortcuts | `desktop.type_text`, `desktop.hotkey` |
 | Windows | `window.list`, `window.focus` |

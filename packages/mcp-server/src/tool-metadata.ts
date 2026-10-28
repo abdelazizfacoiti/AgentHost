@@ -22,7 +22,7 @@ declare(["agent.status"], readOnly());
 declare(["agent.stop", "agent.takeover_begin"], metadataOnly());
 declare(["task.create", "task.status", "task.update", "task.update_status", "task.add_event", "task.list"], metadataOnly());
 declare([
-  "desktop.click", "desktop.hotkey", "desktop.pointer", "desktop.screenshot", "desktop.type_text", "file.copy", "file.ensure_dir", "file.move", "file.write", "shell.run", "window.focus"
+  "computer.run_steps", "desktop.click", "desktop.hotkey", "desktop.pointer", "desktop.screenshot", "desktop.type_text", "file.copy", "file.ensure_dir", "file.move", "file.write", "shell.run", "window.focus"
 ], directStateChanging());
 declare(["file.delete"], confirmedStateChanging());
 declare(["blender.run_python"], confirmedStateChanging("optional_adapter"));

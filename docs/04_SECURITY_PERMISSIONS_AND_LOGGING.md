@@ -171,6 +171,17 @@ keys, session/confirmation token values, cookies, private keys, full
 sensitive files, screenshots, raw OCR/page text, or hidden environment values.
 A local audit write failure is swallowed so a completed action is not repeated.
 
+`computer.run_steps` writes one wrapper audit entry plus one entry for every
+nested tool call. Only the wrapper mints the plan token; preview-only nested
+calls never mint, consume, or log confirmation tokens.
+
+Set `AGENTHOST_TRACE=1` to additionally write timestamped phase events to
+`~/.agenthost/logs/traces/<session>.jsonl` with the same `0700`/`0600`
+permissions. Traces contain tool name, phase, elapsed time, risk, result code,
+and bounded redacted summaries — never tool arguments, confirmation-token
+values, file contents, OCR text, or screenshots. Trace writes are best-effort
+and never change execution or audit behavior.
+
 ## Overlay safety
 
 Overlay surfaces are visual only. They never invoke target-app tools or create

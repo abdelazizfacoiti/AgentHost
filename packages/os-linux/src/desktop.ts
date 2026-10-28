@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -32,6 +33,10 @@ export interface LinuxDesktopContext extends LinuxLookupContext {
 export interface LinuxDesktopScreenshotInput {
   path: string;
   includeActiveWindowOnly?: boolean;
+  format?: "png" | "jpeg";
+  quality?: number;
+  scale?: number;
+  region?: { x: number; y: number; width: number; height: number };
 }
 
 export interface LinuxDesktopHotkeyInput {
@@ -541,6 +546,22 @@ async function runAndValidateScreenshot(
   };
 }
 
+function validateScreenshotOptions(input: LinuxDesktopScreenshotInput, format: "png" | "jpeg"): string | undefined {
+  if (input.region !== undefined && input.includeActiveWindowOnly === true) {
+    return "Region capture cannot be combined with active-window capture.";
+  }
+  if (input.region !== undefined && (![input.region.x, input.region.y, input.region.width, input.region.height].every(Number.isInteger) || input.region.width <= 0 || input.region.height <= 0)) {
+    return "Region capture requires positive integer coordinates and dimensions.";
+  }
+  if (input.scale !== undefined && (!Number.isFinite(input.scale) || input.scale < 0.1 || input.scale > 1)) {
+    return "Screenshot scale must be between 0.1 and 1.";
+  }
+  if (input.quality !== undefined && (format !== "jpeg" || !Number.isInteger(input.quality) || input.quality < 1 || input.quality > 100)) {
+    return "Screenshot quality requires JPEG format and an integer between 1 and 100.";
+  }
+  return undefined;
+}
+
 export async function captureLinuxScreenshot(
   input: LinuxDesktopScreenshotInput,
   context: LinuxDesktopContext = {}
@@ -549,6 +570,11 @@ export async function captureLinuxScreenshot(
     input.path,
     context.agentHostDir === undefined ? {} : { agentHostDir: context.agentHostDir }
   );
+  const format = input.format ?? (/\.jpe?g$/i.test(outputPath) ? "jpeg" : "png");
+  const invalid = validateScreenshotOptions(input, format);
+  if (invalid !== undefined) {
+    return unsupportedResult("unavailable", invalid, {});
+  }
   const supportStatus = await detectScreenshotSupport(context);
 
   if (!supportStatus.supported) {
@@ -561,18 +587,29 @@ export async function captureLinuxScreenshot(
     return unsupportedResult(supportStatus.backend, "Unable to create the screenshot output directory.", {});
   }
 
-  if (supportStatus.backend === "gnome-screenshot") {
+  const backend = supportStatus.backend;
+  const nativeRegion = backend === "scrot" && input.region !== undefined;
+  const transformNeeded = format === "jpeg" || input.scale !== undefined || (input.region !== undefined && !nativeRegion);
+  const tempPath = transformNeeded
+    ? path.join(path.dirname(outputPath), `.agenthost-capture-${randomUUID()}.png`)
+    : outputPath;
+  const capturePath = transformNeeded ? tempPath : outputPath;
+  const ffmpeg = transformNeeded ? await findCommandPath("ffmpeg", context) : undefined;
+  if (transformNeeded && ffmpeg === undefined) {
+    return unsupportedResult(backend, "Screenshot format, scale, and region post-processing requires ffmpeg on PATH.", {});
+  }
+
+  let captured: DesktopScreenshotResult;
+  if (backend === "gnome-screenshot") {
     const command = await findCommandPath("gnome-screenshot", context);
 
     if (command === undefined) {
       return unsupportedResult("unavailable", "gnome-screenshot is no longer available on PATH.", {});
     }
 
-    const args = input.includeActiveWindowOnly ? ["-w", "-f", outputPath] : ["-f", outputPath];
-    return runAndValidateScreenshot("gnome-screenshot", command, args, outputPath, undefined, context);
-  }
-
-  if (supportStatus.backend === "scrot") {
+    const args = input.includeActiveWindowOnly ? ["-w", "-f", capturePath] : ["-f", capturePath];
+    captured = await runAndValidateScreenshot("gnome-screenshot", command, args, capturePath, undefined, context);
+  } else if (backend === "scrot") {
     const scrotPath = await findCommandPath("scrot", context);
 
     if (scrotPath === undefined) {
@@ -585,42 +622,84 @@ export async function captureLinuxScreenshot(
       return unsupportedResult("scrot", "Active-window screenshots require active-window inspection support.", {});
     }
 
-    const args = input.includeActiveWindowOnly ? ["-u", outputPath] : [outputPath];
-    return runAndValidateScreenshot(
+    const args = input.includeActiveWindowOnly
+      ? ["-u", capturePath]
+      : input.region === undefined
+        ? [capturePath]
+        : ["-a", `${input.region.x},${input.region.y},${input.region.width},${input.region.height}`, capturePath];
+    captured = await runAndValidateScreenshot(
       "scrot",
       scrotPath,
       args,
-      outputPath,
+      capturePath,
       activeWindow?.supported ? activeWindow.activeWindow : undefined,
       context
     );
-  }
+  } else {
+    const importPath = await findCommandPath("import", context);
 
-  const importPath = await findCommandPath("import", context);
-
-  if (importPath === undefined) {
-    return unsupportedResult("unavailable", "ImageMagick import is no longer available on PATH.", {});
-  }
-
-  let activeWindow: DesktopWindowContext | undefined;
-  let args = ["-window", "root", outputPath];
-
-  if (input.includeActiveWindowOnly) {
-    const activeWindowResult = await getLinuxActiveWindow(context);
-
-    if (!activeWindowResult.supported || activeWindowResult.activeWindow?.windowId === undefined) {
-      return unsupportedResult(
-        "imagemagick-import",
-        "Active-window screenshots require active-window inspection support.",
-        {}
-      );
+    if (importPath === undefined) {
+      return unsupportedResult("unavailable", "ImageMagick import is no longer available on PATH.", {});
     }
 
-    activeWindow = activeWindowResult.activeWindow;
-    args = ["-window", activeWindowResult.activeWindow.windowId, outputPath];
+    let activeWindow: DesktopWindowContext | undefined;
+    let args = ["-window", "root", capturePath];
+
+    if (input.includeActiveWindowOnly) {
+      const activeWindowResult = await getLinuxActiveWindow(context);
+
+      if (!activeWindowResult.supported || activeWindowResult.activeWindow?.windowId === undefined) {
+        return unsupportedResult(
+          "imagemagick-import",
+          "Active-window screenshots require active-window inspection support.",
+          {}
+        );
+      }
+
+      activeWindow = activeWindowResult.activeWindow;
+      args = ["-window", activeWindowResult.activeWindow.windowId, capturePath];
+    }
+
+    captured = await runAndValidateScreenshot("imagemagick-import", importPath, args, capturePath, activeWindow, context);
   }
 
-  return runAndValidateScreenshot("imagemagick-import", importPath, args, outputPath, activeWindow, context);
+  if (captured.supported !== true) {
+    if (transformNeeded) await rm(tempPath, { force: true }).catch(() => undefined);
+    return captured;
+  }
+
+  if (!transformNeeded) {
+    return captured;
+  }
+
+  const filters: string[] = [];
+  if (input.region !== undefined && !nativeRegion) {
+    filters.push(`crop=${input.region.width}:${input.region.height}:${input.region.x}:${input.region.y}`);
+  }
+  if (input.scale !== undefined && input.scale !== 1) {
+    filters.push(`scale=trunc(iw*${input.scale}/2)*2:trunc(ih*${input.scale}/2)*2`);
+  }
+  const ffmpegArgs = ["-y", "-loglevel", "error", "-i", tempPath];
+  if (filters.length > 0) ffmpegArgs.push("-vf", filters.join(","));
+  ffmpegArgs.push("-frames:v", "1");
+  if (format === "jpeg") {
+    ffmpegArgs.push("-q:v", String(Math.max(2, Math.min(31, Math.round(31 - (input.quality ?? 85) * 0.29)))));
+  }
+  ffmpegArgs.push(outputPath);
+
+  const transform = await runDesktopCommand(ffmpeg!, ffmpegArgs, context);
+  const bytesWritten = transform.exitCode === 0 ? await statBytes(outputPath) : undefined;
+  await rm(tempPath, { force: true }).catch(() => undefined);
+  if (transform.exitCode !== 0 || bytesWritten === undefined || bytesWritten === 0) {
+    return unsupportedResult(`${backend}+ffmpeg`, "Screenshot post-processing failed.", {});
+  }
+  return {
+    ...captured,
+    backend: `${backend}+ffmpeg`,
+    path: outputPath,
+    bytesWritten,
+    reason: "Captured and post-processed a desktop screenshot locally."
+  };
 }
 
 function xdotoolButton(button: DesktopMouseButton): string {

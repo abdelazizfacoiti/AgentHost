@@ -1,6 +1,6 @@
 # AgentHost Product Specification
 
-> **Current minimal-v2 status:** only the 35 tools documented in
+> **Current minimal-v2 status:** only the 36 tools documented in
 > `docs/03_MCP_TOOLS_AND_ADAPTERS.md` are registered. Browser Bridge,
 > accessibility, speech, Forge, workflow/scheduler, checkpoints/receipts,
 > Control Room, and `task.execute_plan` are not live surfaces in this tree.

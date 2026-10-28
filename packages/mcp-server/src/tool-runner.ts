@@ -16,12 +16,14 @@ import {
   type RiskLevel,
   type ToolConfirmationInfo,
   type ToolExecutionMetadata,
-  type ToolResult
+  type ToolResult,
+  type ToolTracePhase
 } from "@agenthost/core";
 import type { AgentHostMcpContext } from "./context.js";
 import type { ToolActionHandle } from "./action-overlay.js";
 import { shouldShowActionCard } from "./activity.js";
 import { createSafetyEvaluationContext } from "./grants.js";
+import { withStateChangingLane } from "./execution-gate.js";
 
 export interface ToolPreviewEffect {
   summary?: string;
@@ -76,6 +78,28 @@ function emptyTimings(): ExecutionTimings {
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
+}
+
+async function traceEvent(
+  context: AgentHostMcpContext,
+  tool: string,
+  phase: ToolTracePhase,
+  startedAt: number,
+  extra: { riskLevel?: RiskLevel | undefined; ok?: boolean | undefined; code?: string | undefined; summary?: string | undefined } = {}
+): Promise<void> {
+  if (context.trace === undefined) return;
+  try {
+    await context.trace.event({
+      timestamp: new Date().toISOString(),
+      sessionId: context.sessionId,
+      tool,
+      phase,
+      elapsedMs: elapsedSince(startedAt),
+      ...extra
+    });
+  } catch {
+    /* Tracing is optional diagnostics and never changes execution. */
+  }
 }
 
 function confirmationInfo(
@@ -213,7 +237,9 @@ async function executeGoverned(
   tool: AnyAgentHostToolDefinition,
   rawInput: unknown,
   context: AgentHostMcpContext,
-  audit: AuditMeta
+  audit: AuditMeta,
+  startedAt: number,
+  previewOnly: boolean
 ): Promise<ToolResult> {
   let phase: "safety" | "preview" | "handler" | "done" = "safety";
   let phaseStartedAt = Date.now();
@@ -262,6 +288,7 @@ async function executeGoverned(
   if (stateChanging) {
     const gate = evaluateRunStateGate(await readRunState(context.config.agentHostDir));
     if (!gate.allowed) {
+      await traceEvent(context, tool.name, "safety", startedAt, { riskLevel: tool.riskLevel, ok: false, code: gate.code ?? "emergency_stop_requested" });
       return toolFailure({
         tool: tool.name,
         riskLevel: tool.riskLevel,
@@ -270,6 +297,7 @@ async function executeGoverned(
       });
     }
   }
+  await traceEvent(context, tool.name, "safety", startedAt, { riskLevel: tool.riskLevel, ok: true });
   advancePhase("preview");
   const needsEffect = stateChanging || tool.preview?.resolveEffect !== undefined || tool.safety.getInput !== undefined;
   let effect: ToolPreviewEffect;
@@ -290,6 +318,7 @@ async function executeGoverned(
   }
   const riskLevel = resolveRisk(effect, tool.riskLevel);
   const approval = resolveApproval(effect);
+  await traceEvent(context, tool.name, "preview", startedAt, { riskLevel, ok: effect.blocked !== true });
   const requiresConfirmation = (
     tool.execution?.requiresConfirmationToken === true ||
     effect.requiresConfirmation === true ||
@@ -314,7 +343,7 @@ async function executeGoverned(
 
   if (dryRun === true) {
     let confirmation: ToolConfirmationInfo | undefined;
-    if (requiresConfirmation) {
+    if (requiresConfirmation && !previewOnly) {
       const pending = await prepareForTool({ tool, parsedInput, context, riskLevel, effect });
       confirmation = confirmationInfo("previewGenerated", {
         tokenId: pending.tokenId,
@@ -323,6 +352,11 @@ async function executeGoverned(
       });
     }
     if (confirmation !== undefined) audit.confirmation = confirmation;
+    await traceEvent(context, tool.name, "confirmation", startedAt, {
+      riskLevel,
+      ok: true,
+      code: confirmation === undefined ? "preview_only" : "confirmation_required"
+    });
     return toolSuccess({
       tool: tool.name,
       riskLevel,
@@ -332,7 +366,8 @@ async function executeGoverned(
       data: {
         summary: effect.summary ?? audit.inputSummary,
         ...(effect.targetFingerprint === undefined ? {} : { targetFingerprint: targetFingerprint(effect.targetFingerprint) }),
-        ...(effect.data === undefined ? {} : { effect: effect.data })
+        ...(effect.data === undefined ? {} : { effect: effect.data }),
+        requiresConfirmation
       },
       observations: [
         "No action was executed.",
@@ -343,7 +378,19 @@ async function executeGoverned(
   }
 
   let confirmationAccepted = false;
-  if (requiresConfirmation) {
+  const planCovers = context.planApproval !== undefined
+    && context.planApproval.planFingerprint.length > 0
+    && (riskLevel === "low" || (riskLevel === "medium" && context.planApproval.maxRisk === "medium"));
+  if (requiresConfirmation && planCovers) {
+    audit.confirmation = confirmationInfo("tokenAccepted", {
+      reason: "Plan-scoped confirmation covered this low/medium effect.",
+      used: false,
+      accepted: true,
+      executed: false
+    });
+    confirmationAccepted = true;
+    await traceEvent(context, tool.name, "confirmation", startedAt, { riskLevel, ok: true, code: "plan_approval" });
+  } else if (requiresConfirmation) {
     const tokenId = providedToken;
     const activeApproval = await readActiveTaskApproval(context.config.agentHostDir);
     const activeTask = activeApproval === undefined ? undefined : await loadTask(context.config.agentHostDir, activeApproval.taskId);
@@ -424,14 +471,39 @@ async function executeGoverned(
       });
     }
     confirmationAccepted = true;
+    await traceEvent(context, tool.name, "confirmation", startedAt, {
+      riskLevel,
+      ok: true,
+      code: audit.confirmation?.tokenId === undefined ? "task_approval" : "token_accepted"
+    });
   }
 
   const handlerContext = confirmationAccepted && context.confirmationSatisfied !== true
     ? { ...context, confirmationSatisfied: true }
     : context;
   advancePhase("handler");
-  const result = await tool.handler(parsedInput, handlerContext, tool.execution);
+  const runHandler = async (): Promise<ToolResult> => {
+    if (stateChanging) {
+      const gate = evaluateRunStateGate(await readRunState(context.config.agentHostDir));
+      if (!gate.allowed) {
+        return toolFailure({
+          tool: tool.name,
+          riskLevel,
+          error: {
+            code: gate.code ?? "emergency_stop_requested",
+            message: gate.reason ?? "Execution is halted by the operator."
+          },
+          observations: ["No action was executed.", gate.reason ?? "Execution is halted by the operator."]
+        });
+      }
+    }
+    return tool.handler(parsedInput, handlerContext, tool.execution);
+  };
+  const result = stateChanging
+    ? await withStateChangingLane(context, runHandler)
+    : await runHandler();
   advancePhase("done");
+  await traceEvent(context, tool.name, "handler", startedAt, { riskLevel: result.riskLevel, ok: result.ok, code: result.error?.code });
   if (audit.confirmation !== undefined) audit.confirmation.executed = result.ok;
   if (result.confirmation === undefined && audit.confirmation !== undefined) {
     result.confirmation = audit.confirmation;
@@ -487,12 +559,14 @@ function noteRepeatedCall(context: AgentHostMcpContext, toolName: string, input:
 export async function runTool<Input>(
   tool: AnyAgentHostToolDefinition<AgentHostMcpContext>,
   input: Input,
-  context: AgentHostMcpContext
+  context: AgentHostMcpContext,
+  options: { previewOnly?: boolean } = {}
 ): Promise<ToolResult> {
   const startedAt = Date.now();
   if (tool.name === "task.create") REPEAT_TRACKER.delete(context);
   const activityMode = context.config.overlay?.mode ?? "always";
   const audit: AuditMeta = { inputSummary: "Tool call", preview: false, timings: emptyTimings() };
+  await traceEvent(context, tool.name, "start", startedAt, { riskLevel: tool.riskLevel, ok: true });
   let action: ToolActionHandle | undefined;
   if (shouldShowActionCard(tool.name, tool.execution?.executionClass, activityMode) && inputPassesSchema(tool, input)) {
     const overlayStartedAt = Date.now();
@@ -508,10 +582,12 @@ export async function runTool<Input>(
       audit.timings.overlayWait += elapsedSince(overlayStartedAt);
     }
   }
+  await traceEvent(context, tool.name, "overlay", startedAt, { riskLevel: tool.riskLevel, ok: true });
+
   let result: ToolResult;
 
   try {
-    result = await executeGoverned(tool, input, context, audit);
+    result = await executeGoverned(tool, input, context, audit, startedAt, options.previewOnly === true);
   } catch (error) {
     if (error instanceof ConfirmationError) {
       audit.confirmation = confirmationInfo("tokenRejected", {
@@ -561,6 +637,7 @@ export async function runTool<Input>(
     }
   }
 
+  await traceEvent(context, tool.name, "audit", startedAt, { riskLevel: result.riskLevel, ok: result.ok, code: result.error?.code });
   const auditPreparedAt = Date.now();
   const repeats = noteRepeatedCall(context, tool.name, input);
   if (repeats === 3 || repeats === 6) {
@@ -608,6 +685,12 @@ export async function runTool<Input>(
     result.overlay = `unavailable:${actionStatus.error ?? "overlay_not_visible"}`;
   }
 
+  await traceEvent(context, tool.name, "finish", startedAt, {
+    riskLevel: result.riskLevel,
+    ok: result.ok,
+    code: result.error?.code,
+    summary: summarizeForLog(result.error?.message ?? (result.ok ? "completed" : "failed"))
+  });
   return result;
 }
 

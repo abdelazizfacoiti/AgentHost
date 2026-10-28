@@ -6,6 +6,7 @@ import type {
   AppStrategyTaskType,
   AdapterRegistrySnapshot,
   AuditLogger,
+  ToolTraceLogger,
   AccessibilityFindElementResult,
   AccessibilityFocusElementResult,
   AccessibilityInspectElementResult,
@@ -66,7 +67,14 @@ export interface LinuxAutomation {
   deletePath?(input: { path: string; recursive?: boolean }): Promise<{ path: string; deleted: boolean }>;
   getDesktopCapabilities(): Promise<DesktopCapabilitiesResult>;
   getActiveWindow(): Promise<DesktopGetActiveWindowResult>;
-  screenshot(input: { path: string; includeActiveWindowOnly?: boolean }): Promise<DesktopScreenshotResult>;
+  screenshot(input: {
+    path: string;
+    includeActiveWindowOnly?: boolean;
+    format?: "png" | "jpeg";
+    quality?: number;
+    scale?: number;
+    region?: { x: number; y: number; width: number; height: number };
+  }): Promise<DesktopScreenshotResult>;
   listWindows(input: { limit?: number; includeTitles?: boolean }): Promise<WindowListResult>;
   focusWindow(input: { windowId?: string; appName?: string; title?: string; pid?: number }): Promise<WindowFocusResult>;
   hotkey(input: { keys: string[]; activeWindow: DesktopWindowContext }): Promise<DesktopHotkeyResult>;
@@ -152,6 +160,10 @@ export interface AgentHostMcpContext {
   registry: CapabilityRegistrySnapshot;
   adapters: AdapterRegistrySnapshot;
   logger: AuditLogger;
+  /** Optional timestamped phase trace, enabled with AGENTHOST_TRACE=1. */
+  trace?: ToolTraceLogger;
+  /** Internal to a confirmed computer.run_steps execution; never set by MCP input. */
+  planApproval?: { planFingerprint: string; maxRisk: "low" | "medium" };
   grants: GrantStore;
   overlay?: OverlayManager;
   actionOverlay?: ToolActionOverlay;

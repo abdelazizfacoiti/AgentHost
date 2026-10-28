@@ -10,6 +10,7 @@ import {
   createBaseCapabilityRegistry,
   createSessionId,
   JsonlAuditLogger,
+  JsonlTraceLogger,
   loadAgentHostConfig,
   summarizeForLog,
   validateOptionalAdapterExecutionPolicy,
@@ -241,6 +242,7 @@ export interface AgentHostServerOptions {
   registry?: CapabilityRegistry;
   adapters?: AdapterRegistry;
   logger?: AuditLogger;
+  trace?: import("@agenthost/core").ToolTraceLogger;
   sessionId?: string;
   linux?: LinuxAutomation;
   sessionGrants?: import("@agenthost/core").CapabilityGrant[];
@@ -273,6 +275,14 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const blenderEnabled = await registerOptionalBlenderRuntime(config, adapters);
   const sshEnabled = await registerOptionalSshRuntime(config, adapters);
   const logger = options.logger ?? new JsonlAuditLogger(config.logFile);
+  const trace = options.trace ?? (process.env.AGENTHOST_TRACE === "1"
+    ? new JsonlTraceLogger(path.join(
+        config.agentHostDir,
+        "logs",
+        "traces",
+        `${sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}.jsonl`
+      ))
+    : undefined);
   const policy = options.policy ?? config.policy;
   const grants = new GrantStore({
     persistentGrants: policy.grants,
@@ -364,6 +374,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     registry,
     adapters,
     logger,
+    ...(trace === undefined ? {} : { trace }),
     grants,
     overlay,
     actionOverlay,

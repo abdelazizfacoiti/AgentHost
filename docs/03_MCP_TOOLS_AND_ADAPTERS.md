@@ -1,7 +1,7 @@
 # AgentHost MCP Tools and Adapter Specification
 
 All callable tools return `ToolResult`. MCP transport is stdio. The current
-minimal-v2 server exposes 35 base tools. This number is generated from the
+minimal-v2 server exposes 36 base tools. This number is generated from the
 loaded set at startup; treat `system.list_capabilities` and
 `agenthost://capabilities` as authoritative instead of hard-coding counts.
 
@@ -35,7 +35,8 @@ the same loaded set.
 
 | Tool | Risk | Execution |
 |---|---|---|
-| `desktop.screenshot` | medium | state_changing (routine) |
+| `computer.run_steps` | medium | state_changing (governed plan) |
+| `desktop.screenshot` | medium | state_changing (routine; optional JPEG/region/scale) |
 | `desktop.click` | medium | state_changing (routine) |
 | `desktop.pointer` | medium | state_changing (routine) |
 | `desktop.hotkey` | medium | state_changing (routine) |
@@ -156,6 +157,15 @@ touch those paths or invoke mutating `agenthost` commands are blocked.
 
 ## Desktop and vision
 
+`computer.run_steps` executes up to 20 named tool calls with the same runner,
+schema, policy, stop/takeover, audit, and execution gates. A confirmed plan
+token covers only low/medium effects inside that exact plan fingerprint; high
+effects still need their own single-use token, and nested plans are rejected.
+
+`computer.wait_for` accepts active-window, any-window, and/or screen conditions
+and returns a timestamped snapshot plus a short state fingerprint on success or
+timeout, so agents can replace fixed sleeps with one bounded wait.
+
 `desktop.click`, `desktop.pointer`, `desktop.hotkey`, and `desktop.type_text`
 require an explicit active-window context and are validated again immediately
 before execution. `desktop.type_text` routes ASCII letters/digits/space
@@ -167,7 +177,10 @@ through `xdotool type` and other text through clipboard paste; install
 Tesseract when available and return bounded, redacted suggestions. They never
 click or type. `desktop.screenshot` writes under
 `~/.agenthost/screenshots/` unless `outputDir` is supplied, so it follows the
-routine direct-execution path; high-risk or consequential effects still use exact confirmation.
+routine direct-execution path; high-risk or consequential effects still use
+exact confirmation. Optional `format`, `quality`, `scale`, and `region` fields
+support JPEG OCR captures, downscaling, and native `scrot -a` region capture;
+post-processing requires `ffmpeg`, and unsupported combinations fail explicitly.
 
 ## MCP resources
 
