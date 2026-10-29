@@ -10,6 +10,11 @@ contradictory, or duplicate declarations fail registration. MCP `tools/list`,
 `system.list_capabilities`, and the capability resources are projected from
 the same loaded set.
 
+State-changing `desktop.*`, `window.*`, `file.*`, and `shell.*` results also
+carry a bounded top-level `state` snapshot when the backend can provide it:
+active-window metadata, `windowChanged`, newly appeared windows, and a cheap
+screen-change hint. Missing backend data is omitted rather than guessed.
+
 ## Inventory
 
 ### Observation and discovery
@@ -167,11 +172,20 @@ and returns a timestamped snapshot plus a short state fingerprint on success or
 timeout, so agents can replace fixed sleeps with one bounded wait.
 
 `desktop.click`, `desktop.pointer`, `desktop.hotkey`, and `desktop.type_text`
-require an explicit active-window context and are validated again immediately
-before execution. `desktop.type_text` routes ASCII letters/digits/space
+accept either the backward-compatible `activeWindow` context or a `target`
+selector (`windowId`, `appName`, `title`, or `pid`). A target is focused,
+verified immediately before execution, and returns `focus_failed` if focus or
+verification fails. `desktop.type_text` routes ASCII letters/digits/space
 through `xdotool type` and other text through clipboard paste; install
 `xclip` or `xsel` for non-ASCII input. `window.focus` returns
-`previousWindow` so focus can be restored.
+`previousWindow` so focus can be restored and accepts the same `target`
+selector.
+
+Any tool may carry bounded routine bookkeeping metadata as
+`task: { phase?, currentAction? }`. The runner removes it before the handler
+schema, updates the active task, and appends a redacted progress/observation/
+error event. It never auto-completes a task or changes definition-of-done
+verification rules.
 
 `vision.analyze_image`, `vision.find_text`, and `vision.find_target` use local
 Tesseract when available and return bounded, redacted suggestions. They never

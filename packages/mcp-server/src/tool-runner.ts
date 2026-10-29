@@ -5,6 +5,9 @@ import {
   consumeConfirmation,
   evaluateSafety,
   loadTask,
+  listTasks,
+  appendTaskEvent,
+  updateTask,
   prepareConfirmation,
   readActiveTaskApproval,
   summarizeForLog,
@@ -17,6 +20,7 @@ import {
   type ToolConfirmationInfo,
   type ToolExecutionMetadata,
   type ToolResult,
+  type ToolStateSnapshot,
   type ToolTracePhase
 } from "@agenthost/core";
 import type { AgentHostMcpContext } from "./context.js";
@@ -134,7 +138,7 @@ function inputSummaryForAudit(tool: AnyAgentHostToolDefinition, input: unknown):
   }
 }
 
-function actionTargetFor(toolName: string, input: unknown): ToolActionTarget | undefined {
+async function actionTargetFor(toolName: string, input: unknown, context: AgentHostMcpContext): Promise<ToolActionTarget | undefined> {
   if (input === null || typeof input !== "object") return undefined;
   const value = input as Record<string, unknown>;
   const point = (x: unknown, y: unknown): ToolActionTarget | undefined => (
@@ -146,7 +150,68 @@ function actionTargetFor(toolName: string, input: unknown): ToolActionTarget | u
   if (toolName === "desktop.pointer") {
     return point(value.startX, value.startY) ?? point(value.x, value.y);
   }
+  if (toolName === "window.focus") {
+    const wanted = value.target !== null && typeof value.target === "object" ? value.target as Record<string, unknown> : value;
+    const windows = await context.linux.listWindows({ limit: 100, includeTitles: true }).catch(() => undefined);
+    const match = windows?.windows.find((window) =>
+      (typeof wanted.windowId !== "string" || window.windowId === wanted.windowId)
+      && (typeof wanted.appName !== "string" || window.appName?.toLowerCase() === wanted.appName.toLowerCase())
+      && (typeof wanted.title !== "string" || window.title?.toLowerCase() === wanted.title.toLowerCase())
+      && (typeof wanted.pid !== "number" || window.pid === wanted.pid)
+    );
+    const bounds = match?.bounds;
+    if (bounds !== undefined) return {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      ...(match?.windowId === undefined ? {} : { windowId: match.windowId })
+    };
+  }
   return undefined;
+}
+
+const STATE_RESULT_FAMILIES = new Set(["desktop", "window", "file", "shell"]);
+type CapturedToolState = ToolStateSnapshot & { screenFingerprint?: string };
+
+function needsStateResult(tool: AnyAgentHostToolDefinition): boolean {
+  return tool.execution?.executionClass === "state_changing" && STATE_RESULT_FAMILIES.has(tool.name.split(".", 1)[0] ?? "");
+}
+
+async function captureToolState(context: AgentHostMcpContext): Promise<CapturedToolState> {
+  const [active, windows, screen] = await Promise.all([
+    context.linux.getActiveWindow().catch(() => undefined),
+    context.linux.listWindows({ limit: 50, includeTitles: true }).catch(() => undefined),
+    context.linux.getScreenGeometry?.().catch(() => undefined) ?? Promise.resolve(undefined)
+  ]);
+  return {
+    capturedAt: new Date().toISOString(),
+    ...(active?.activeWindow === undefined ? {} : { activeWindow: active.activeWindow }),
+    ...(windows === undefined ? {} : { newlyAppearedWindows: windows.windows.slice(0, 8) }),
+    ...(screen?.bounds === undefined ? {} : { screenFingerprint: JSON.stringify(screen.bounds) })
+  };
+}
+
+function attachStateDelta(result: ToolResult, before: CapturedToolState | undefined, after: CapturedToolState): ToolResult {
+  if (before === undefined) {
+    const { screenFingerprint: _screenFingerprint, ...state } = after;
+    result.state = state;
+    return result;
+  }
+  const beforeActive = before.activeWindow;
+  const afterActive = after.activeWindow;
+  const windowChanged = JSON.stringify(beforeActive ?? null) !== JSON.stringify(afterActive ?? null);
+  const priorIds = new Set((before.newlyAppearedWindows ?? []).map((window) => window.windowId));
+  const newlyAppearedWindows = (after.newlyAppearedWindows ?? []).filter((window) => !priorIds.has(window.windowId)).slice(0, 8);
+  const beforeScreen = before.screenFingerprint;
+  const { screenFingerprint: afterScreen, ...afterState } = after;
+  result.state = {
+    ...afterState,
+    windowChanged,
+    ...(beforeScreen === undefined || afterScreen === undefined ? {} : { screenChangedHint: beforeScreen !== afterScreen }),
+    ...(newlyAppearedWindows.length === 0 ? {} : { newlyAppearedWindows })
+  };
+  return result;
 }
 
 function schemaIssues(error: { issues?: Array<{ path?: Array<string | number>; message?: string }> }): Array<{ path: string; message: string }> {
@@ -166,6 +231,35 @@ function inputPassesSchema(tool: AnyAgentHostToolDefinition, input: unknown): bo
     return tool.inputSchema.safeParse(input).success === true;
   } catch {
     return false;
+  }
+}
+
+interface RoutineTaskMetadata { phase?: string; currentAction?: string }
+
+function parseRoutineTaskMetadata(value: unknown): { metadata?: RoutineTaskMetadata; error?: string } {
+  if (value === undefined) return {};
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return { error: "task metadata must be an object" };
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== "phase" && key !== "currentAction")) return { error: "task metadata contains an unsupported field" };
+  const phase = record.phase;
+  const currentAction = record.currentAction;
+  if (phase !== undefined && (typeof phase !== "string" || phase.trim().length === 0 || phase.length > 200)) return { error: "task.phase must be a bounded non-empty string" };
+  if (currentAction !== undefined && (typeof currentAction !== "string" || currentAction.trim().length === 0 || currentAction.length > 500)) return { error: "task.currentAction must be a bounded non-empty string" };
+  return { metadata: { ...(phase === undefined ? {} : { phase: phase.trim() }), ...(currentAction === undefined ? {} : { currentAction: currentAction.trim() }) } };
+}
+
+async function recordRoutineTaskMetadata(context: AgentHostMcpContext, metadata: RoutineTaskMetadata | undefined, tool: string, result: ToolResult): Promise<void> {
+  if (metadata === undefined) return;
+  try {
+    const active = (await listTasks(context.config.agentHostDir)).find((task) => task.status === "active");
+    if (active === undefined) return;
+    await updateTask(context.config.agentHostDir, active.taskId, metadata);
+    const summary = result.ok
+      ? `${tool} completed${result.observations?.[0] === undefined ? "." : `: ${summarizeForLog(result.observations[0])}`}`
+      : `${tool} failed: ${summarizeForLog(result.error?.message ?? result.error?.code ?? "tool_failed")}`;
+    await appendTaskEvent(context.config.agentHostDir, active.taskId, result.ok ? "observation" : "error", summary);
+  } catch {
+    /* Routine bookkeeping must never change the governed tool result. */
   }
 }
 
@@ -274,11 +368,17 @@ async function executeGoverned(
   const dryRun = tool.preview?.isDryRun?.(rawInput as never)
     ?? rawObject?.dryRun === true;
   const providedToken = typeof rawObject?.confirmationToken === "string" ? rawObject.confirmationToken : undefined;
+  const taskMetadata = parseRoutineTaskMetadata(rawObject?.task);
+  if (taskMetadata.error !== undefined) {
+    audit.inputSummary = "Invalid tool input";
+    return toolFailure({ tool: tool.name, riskLevel: tool.riskLevel, error: { code: "invalid_input", message: taskMetadata.error }, observations: ["No action was executed."] });
+  }
   const parseInput = rawObject === undefined
     ? rawInput
     : Object.fromEntries(Object.entries(rawObject).filter(([key, value]) =>
         !(key === "dryRun" && typeof value === "boolean") &&
-        !(key === "confirmationToken" && typeof value === "string")));
+        !(key === "confirmationToken" && typeof value === "string") &&
+        !(key === "task" && value !== undefined)));
 
   let parsedInput = parseInput;
   if (tool.inputSchema !== undefined && typeof tool.inputSchema.safeParse === "function") {
@@ -585,7 +685,7 @@ export async function runTool<Input>(
   let action: ToolActionHandle | undefined;
   if (shouldShowActionCard(tool.name, tool.execution?.executionClass, activityMode) && inputPassesSchema(tool, input)) {
     const overlayStartedAt = Date.now();
-    const target = actionTargetFor(tool.name, input);
+    const target = await actionTargetFor(tool.name, input, context);
     try {
       action = await context.actionOverlay?.begin({
         tool: tool.name,
@@ -604,6 +704,7 @@ export async function runTool<Input>(
   await traceEvent(context, tool.name, "overlay", startedAt, { riskLevel: tool.riskLevel, ok: true });
 
   let result: ToolResult;
+  const stateBefore = needsStateResult(tool) ? await captureToolState(context).catch(() => undefined) : undefined;
 
   try {
     result = await executeGoverned(tool, input, context, audit, startedAt, options.previewOnly === true);
@@ -634,6 +735,15 @@ export async function runTool<Input>(
       });
     }
   }
+
+  if (needsStateResult(tool)) {
+    const stateAfter = await captureToolState(context).catch(() => undefined);
+    if (stateAfter !== undefined) attachStateDelta(result, stateBefore, stateAfter);
+  }
+  const routineTask = input !== null && typeof input === "object" && !Array.isArray(input)
+    ? parseRoutineTaskMetadata((input as Record<string, unknown>).task).metadata
+    : undefined;
+  await recordRoutineTaskMetadata(context, routineTask, tool.name, result);
 
   const runtime = context.runtime;
   if (runtime !== undefined) {

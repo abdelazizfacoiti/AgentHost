@@ -14,10 +14,16 @@ const focusInput = z.object({
   appName: z.string().trim().min(1).max(200).optional(),
   title: z.string().trim().min(1).max(500).optional(),
   pid: z.number().int().min(1).optional(),
+  target: z.object({
+    windowId: z.string().trim().min(1).max(200).optional(),
+    appName: z.string().trim().min(1).max(200).optional(),
+    title: z.string().trim().min(1).max(500).optional(),
+    pid: z.number().int().min(1).optional()
+  }).strict().optional(),
   dryRun: z.boolean().optional(),
   confirmationToken: z.string().trim().min(8).max(120).optional()
 }).strict().superRefine((input, ctx) => {
-  if (input.windowId === undefined && input.appName === undefined && input.title === undefined && input.pid === undefined) {
+  if (input.windowId === undefined && input.appName === undefined && input.title === undefined && input.pid === undefined && input.target === undefined) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Must specify at least one of windowId, appName, title, or pid." });
   }
 });
@@ -68,17 +74,18 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     inputSchema: focusInput,
     mcpInputSchema: {
       type: "object",
-      properties: { windowId: { type: "string" }, appName: { type: "string" }, title: { type: "string" }, pid: { type: "integer" }, dryRun: { type: "boolean" }, confirmationToken: { type: "string", minLength: 8, maxLength: 120 } },
+      properties: { windowId: { type: "string" }, appName: { type: "string" }, title: { type: "string" }, pid: { type: "integer" }, target: { type: "object", properties: { windowId: { type: "string" }, appName: { type: "string" }, title: { type: "string" }, pid: { type: "integer" } }, additionalProperties: false }, dryRun: { type: "boolean" }, confirmationToken: { type: "string", minLength: 8, maxLength: 120 } },
       additionalProperties: false
     },
     inputSummary: "Focus window",
-    auditInputSummary: (i) => `Focus window ${i.windowId ?? i.appName ?? i.title ?? String(i.pid ?? "unknown")}.`,
-    safety: { actionType: "window_action", getInput: (i) => ({ appName: i.appName }) },
+    auditInputSummary: (i) => `Focus window ${i.target?.windowId ?? i.target?.appName ?? i.target?.title ?? String(i.target?.pid ?? i.windowId ?? i.appName ?? i.title ?? i.pid ?? "unknown")}.`,
+    safety: { actionType: "window_action", getInput: (i) => ({ appName: i.target?.appName ?? i.appName }) },
     preview: {
       isDryRun: (i) => i.dryRun === true,
       resolveEffect: (i, context) => {
         const safety = safetyCheck("window.focus", context, i.appName);
-        const target = i.windowId ?? i.appName ?? i.title ?? String(i.pid ?? "unknown");
+        const selected = i.target ?? { ...(i.windowId === undefined ? {} : { windowId: i.windowId }), ...(i.appName === undefined ? {} : { appName: i.appName }), ...(i.title === undefined ? {} : { title: i.title }), ...(i.pid === undefined ? {} : { pid: i.pid }) };
+        const target = selected.windowId ?? selected.appName ?? selected.title ?? String(selected.pid ?? "unknown");
         return {
           summary: `Focus window ${target}.`,
           targetFingerprint: `window:${target}`,
@@ -86,20 +93,21 @@ export function createWindowTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
           approval: safety.approval,
           blocked: safety.blocked,
           reasons: safety.reasons,
-          data: { windowId: i.windowId ?? null, appName: i.appName ?? null, title: i.title ?? null, pid: i.pid ?? null }
+          data: { windowId: selected.windowId ?? null, appName: selected.appName ?? null, title: selected.title ?? null, pid: selected.pid ?? null }
         };
       }
     },
     async handler(input, context) {
-      const safety = safetyCheck("window.focus", context, input.appName);
+      const safety = safetyCheck("window.focus", context, input.target?.appName ?? input.appName);
       if (!safety.allowed) return failure("window.focus", safety);
       try {
-        const data = await context.linux.focusWindow({
-          ...(input.windowId === undefined ? {} : { windowId: input.windowId }),
-          ...(input.appName === undefined ? {} : { appName: input.appName }),
-          ...(input.title === undefined ? {} : { title: input.title }),
-          ...(input.pid === undefined ? {} : { pid: input.pid })
-        });
+        const selected = {
+          ...(((input.target?.windowId ?? input.windowId) === undefined) ? {} : { windowId: input.target?.windowId ?? input.windowId }),
+          ...(((input.target?.appName ?? input.appName) === undefined) ? {} : { appName: input.target?.appName ?? input.appName }),
+          ...(((input.target?.title ?? input.title) === undefined) ? {} : { title: input.target?.title ?? input.title }),
+          ...(((input.target?.pid ?? input.pid) === undefined) ? {} : { pid: input.target?.pid ?? input.pid })
+        } as { windowId?: string; appName?: string; title?: string; pid?: number };
+        const data = await context.linux.focusWindow(selected);
         if (data.supported !== true || data.focused !== true) {
           return toolFailure({
             tool: "window.focus",

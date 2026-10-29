@@ -111,6 +111,15 @@ export interface ToolError {
   details?: unknown;
 }
 
+/** Bounded post-action context used to avoid an observe-then-act round trip. */
+export interface ToolStateSnapshot {
+  capturedAt: string;
+  activeWindow?: DesktopWindowContext;
+  windowChanged?: boolean;
+  newlyAppearedWindows?: DesktopWindowSummary[];
+  screenChangedHint?: boolean;
+}
+
 export interface ToolResult<T = unknown> {
   ok: boolean;
   tool: string;
@@ -126,6 +135,7 @@ export interface ToolResult<T = unknown> {
   grantDecision?: GrantDecision;
   actionDecision?: ActionEffectDecisionSummary;
   verification?: ActionVerificationSummary;
+  state?: ToolStateSnapshot;
   approval: ApprovalInfo;
   data: T | null;
   observations: string[];

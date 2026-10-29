@@ -33,12 +33,16 @@ coding tools directly.
 
 ## Hard rules
 
-1. **Inspect before acting.** Start with `computer.observe_state`, `window.list`,
-   or `desktop.screenshot`; never click blind.
-2. **Preferred order:** app-specific adapter → official API/plugin → CLI/script →
+1. **Use the fidelity ladder.** Prefer shell/file tools first, then an app adapter/API,
+   accessibility, and GUI only when needed. Use `computer.observe_state` or
+   `desktop.screenshot` when grounding is required; never click blind.
+2. **Prefer one governed call.** Give GUI input tools a `target` selector when
+   possible; use the returned `state` snapshot instead of an observe-then-act
+   round trip. Use `computer.run_steps` for known bounded sequences.
+3. **Preferred order:** app-specific adapter → official API/plugin → CLI/script →
    browser automation → accessibility tree → GUI screenshot/click/type → guide
    mode. GUI clicking is the fallback, not the default.
-3. **Respect confirmation only at consequential boundaries.** Routine local
+4. **Respect confirmation only at consequential boundaries.** Routine local
    actions — opening apps, focusing windows, screenshots, clicks, typing,
    hotkeys, shell, and file reads/writes — execute directly. Do not pause for
    per-step confirmation. External sends/uploads, destructive delete,
@@ -50,25 +54,27 @@ coding tools directly.
    action. For repeated low/medium work, the operator can run
    `agenthost task approve <activeTaskId> [--max-risk low|medium]`; that does
    not cover high-risk or consequential effects.
-4. **Respect stop.** If output contains `emergency_stop_requested` or
+5. **Respect stop.** If output contains `emergency_stop_requested` or
    `human_takeover_active`, halt state-changing work immediately. `agent.stop`
    and `agent.takeover_begin` request those gates; only the operator can clear
    them with `agenthost agent resume --stop` or `--takeover`.
-5. **No secrets through the GUI.** Never type passwords, API keys, tokens, or
+6. **No secrets through the GUI.** Never type passwords, API keys, tokens, or
    payment data. Ask the operator to enter them.
-6. **Track work with a definition of done.** For multi-step jobs use
+7. **Track work with a definition of done.** For multi-step jobs use
    `task.create` with observable `definitionOfDone` criteria, then
    `task.update` and `task.add_event` so progress survives failures. Verify
    every criterion, then call `task.update_status` with `status: "completed"`
    and `verifiedCriteria`; completion is refused while any criterion is
    unverified. Use the fast path: inspect once, decide, act, verify. Avoid
-   repeating unchanged discovery or the same tool call; if a call repeats,
+   repeating unchanged discovery or the same tool call; pass optional
+   `task: { phase, currentAction }` metadata for routine progress instead of
+   separate `task.update`/`task.add_event` calls. If a call repeats,
    change strategy or finish. When the requested outcome is visible, stop and
    report instead of continuing. Do not start a new task until the current one
    is finished unless the user asks.
-7. **Prefer bulk text entry.** Use `desktop.type_text` for text, not per-character
+8. **Prefer bulk text entry.** Use `desktop.type_text` for text, not per-character
    key presses; use `desktop.hotkey` for shortcuts.
-8. **Leave the machine as found.** Restore focus/state when the task ends; report
+9. **Leave the machine as found.** Restore focus/state when the task ends; report
    what changed.
 
 ## Tool map

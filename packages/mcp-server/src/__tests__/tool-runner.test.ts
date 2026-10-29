@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   acceptConfirmation,
   createTask,
+  loadTask,
   clearPause,
   getDefaultPolicy,
   requestPause,
@@ -561,6 +562,47 @@ describe("governed tool runner", () => {
     expect(results[2]?.observations?.join(" ")).toContain("run 3 times");
     expect(results[4]?.observations?.join(" ")).not.toContain("run 6 times");
     expect(results[5]?.observations?.join(" ")).toContain("run 6 times");
+  });
+
+  it("attaches bounded post-action state for governed desktop-family calls", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    let activeId = "before";
+    (context as unknown as { linux: unknown }).linux = {
+      getActiveWindow: vi.fn(async () => ({ supported: true, backend: "test", activeWindow: { windowId: activeId }, reason: "ok" })),
+      listWindows: vi.fn(async () => ({ supported: true, backend: "test", windows: [{ windowId: activeId }], truncated: false, reason: "ok" })),
+      getScreenGeometry: vi.fn(async () => ({ supported: true, bounds: { x: 0, y: 0, width: 100, height: 100 }, reason: "ok" }))
+    };
+    const tool: AgentHostToolDefinition<{ value: string }, unknown> = {
+      name: "file.write",
+      description: "state test",
+      riskLevel: "low",
+      inputSchema: z.object({ value: z.string() }).strict(),
+      mcpInputSchema: {},
+      inputSummary: "state test",
+      safety: { actionType: "file_write" },
+      execution: { ...stateChanging(), requiresDryRun: false, requiresConfirmationToken: false },
+      handler: async () => {
+        activeId = "after";
+        return toolSuccess({ tool: "file.write", riskLevel: "low", data: { wrote: true } });
+      }
+    };
+    const result = await runTool(tool, { value: "bounded" }, context);
+    expect(result.ok).toBe(true);
+    expect(result.state).toMatchObject({ activeWindow: { windowId: "after" }, windowChanged: true });
+  });
+
+  it("updates the active task from bounded routine task metadata", async () => {
+    const home = await tempHome();
+    const task = await createTask(home, "Bookkeeping test");
+    const context = makeContext(home, []);
+    const tool = writeTool(async () => undefined);
+    tool.execution = { ...stateChanging(), requiresDryRun: false, requiresConfirmationToken: false };
+    const result = await runTool(tool, { value: "ok", task: { phase: "verify", currentAction: "check result" } } as never, context);
+    expect(result.ok).toBe(true);
+    const saved = await loadTask(home, task.taskId);
+    expect(saved).toMatchObject({ phase: "verify", currentAction: "check result" });
+    expect(saved?.events.some((event) => event.kind === "observation")).toBe(true);
   });
 
   it("surfaces approval waits for read-only tools that need confirmation", async () => {

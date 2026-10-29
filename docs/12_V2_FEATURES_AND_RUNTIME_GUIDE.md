@@ -912,11 +912,14 @@ Enabling them does not add `blender.run_python` or `ssh.run_command` to
 ```text
 1. Read agenthost://capabilities.md
 2. Create a task with observable completion criteria
-3. Observe state with computer.observe_state
-4. Inspect files, apps, windows, and OCR as needed
-5. Act with the safest applicable tool
-6. Observe and verify the result
-7. Record progress, errors, and recovery events
+3. Follow the fidelity ladder: shell/file or an app adapter first, then
+   accessibility/GUI only when needed
+4. For GUI input, pass `target: {windowId|appName|title|pid}` when possible;
+   use the returned bounded `state` snapshot instead of observe-then-act
+5. Use `computer.run_steps` for known bounded sequences
+6. Act with the safest applicable tool and verify the returned state/result
+7. Pass `task: {phase?, currentAction?}` for routine bookkeeping; reserve
+   `task.update`/`task.add_event` for explicit, richer records
 8. Complete the task only after every criterion is verified
 ```
 

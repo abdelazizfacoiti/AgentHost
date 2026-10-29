@@ -28,6 +28,7 @@ export interface ToolSuccessInput<T> {
   approval?: ApprovalInfo;
   actionDecision?: ActionEffectDecisionSummary;
   verification?: ActionVerificationSummary;
+  state?: import("./types.js").ToolStateSnapshot;
   observations?: string[];
 }
 
@@ -41,6 +42,7 @@ export function toolSuccess<T>(input: ToolSuccessInput<T>): ToolResult<T> {
     ...(input.grantDecision === undefined ? {} : { grantDecision: input.grantDecision }),
     ...(input.actionDecision === undefined ? {} : { actionDecision: input.actionDecision }),
     ...(input.verification === undefined ? {} : { verification: input.verification }),
+    ...(input.state === undefined ? {} : { state: input.state }),
     approval: input.approval ?? noApprovalRequired(),
     data: input.data,
     observations: input.observations ?? [],
@@ -65,6 +67,7 @@ export interface ToolFailureInput {
   approval?: ApprovalInfo;
   actionDecision?: ActionEffectDecisionSummary;
   verification?: ActionVerificationSummary;
+  state?: import("./types.js").ToolStateSnapshot;
   observations?: string[];
 }
 
@@ -78,6 +81,7 @@ export function toolFailure<T = never>(input: ToolFailureInput): ToolResult<T> {
     ...(input.grantDecision === undefined ? {} : { grantDecision: input.grantDecision }),
     ...(input.actionDecision === undefined ? {} : { actionDecision: input.actionDecision }),
     ...(input.verification === undefined ? {} : { verification: input.verification }),
+    ...(input.state === undefined ? {} : { state: input.state }),
     approval: input.approval ?? noApprovalRequired(),
     data: null,
     observations: input.observations ?? [],

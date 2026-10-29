@@ -44,6 +44,16 @@ const activeWindowSchema = z
     }
   });
 
+const targetWindowSchema = activeWindowSchema;
+type WindowSelector = z.infer<typeof activeWindowSchema>;
+type GuiContextInput = { activeWindow?: WindowSelector | undefined; target?: WindowSelector | undefined };
+const guiContextRefine = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) => schema.superRefine((input, ctx) => {
+  const value = input as { activeWindow?: unknown; target?: unknown };
+  if (value.activeWindow === undefined && value.target === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide activeWindow for compatibility or target to focus and verify in one call." });
+  }
+});
+
 const screenshotInputSchema = z
   .object({
     outputDir: nonEmptyString.optional(),
@@ -78,42 +88,42 @@ const screenshotInputSchema = z
     }
   });
 
-const hotkeyInputSchema = z
+const hotkeyInputSchema = guiContextRefine(z
   .object({
     keys: z.array(z.string().trim().min(1).max(100)).min(1).max(10),
-    activeWindow: activeWindowSchema,
+    activeWindow: activeWindowSchema.optional(),
+    target: targetWindowSchema.optional(),
     dryRun: z.boolean().optional(),
     confirmationToken: confirmationTokenSchema
-  })
-  .strict();
+  }).strict());
 
-const typeTextInputSchema = z
+const typeTextInputSchema = guiContextRefine(z
   .object({
     text: z.string().min(1).max(10_000),
-    activeWindow: activeWindowSchema,
+    activeWindow: activeWindowSchema.optional(),
+    target: targetWindowSchema.optional(),
     dataSensitivity: z.enum(["none", "low", "sensitive", "secret"]).optional(),
     dryRun: z.boolean().optional(),
     confirmationToken: confirmationTokenSchema
-  })
-  .strict();
+  }).strict());
 
-const clickInputSchema = z
+const clickInputSchema = guiContextRefine(z
   .object({
     x: z.number().int().min(0),
     y: z.number().int().min(0),
     button: z.enum(["left", "middle", "right"]).optional(),
-    activeWindow: activeWindowSchema,
+    activeWindow: activeWindowSchema.optional(),
+    target: targetWindowSchema.optional(),
     dryRun: z.boolean().optional(),
     confirmationToken: confirmationTokenSchema
-  })
-  .strict();
+  }).strict());
 
-const pointerInputSchema = z.object({
+const pointerInputSchema = guiContextRefine(z.object({
   x: z.number().int().min(0).optional(), y: z.number().int().min(0).optional(),
   direction: z.enum(["up", "down", "left", "right"]).optional(), amount: z.number().int().min(1).max(20).optional(),
   startX: z.number().int().min(0).optional(), startY: z.number().int().min(0).optional(), endX: z.number().int().min(0).optional(), endY: z.number().int().min(0).optional(), durationMs: z.number().int().min(0).max(2000).optional(),
-  activeWindow: activeWindowSchema, dryRun: z.boolean().optional(), confirmationToken: confirmationTokenSchema
-}).strict();
+  activeWindow: activeWindowSchema.optional(), target: targetWindowSchema.optional(), dryRun: z.boolean().optional(), confirmationToken: confirmationTokenSchema
+}).strict());
 
 type ScreenshotInput = z.infer<typeof screenshotInputSchema>;
 type HotkeyInput = z.infer<typeof hotkeyInputSchema>;
@@ -174,6 +184,19 @@ async function imageSize(filePath: string): Promise<{ width: number; height: num
 
 function activeWindowAppName(activeWindow: DesktopWindowContext): string | undefined {
   return activeWindow.appName;
+}
+
+function inputWindow(input: GuiContextInput): WindowSelector {
+  return input.target ?? input.activeWindow!;
+}
+
+function plainWindowSelector(value: WindowSelector): { windowId?: string; appName?: string; title?: string; pid?: number } {
+  return {
+    ...(value.windowId === undefined ? {} : { windowId: value.windowId }),
+    ...(value.appName === undefined ? {} : { appName: value.appName }),
+    ...(value.title === undefined ? {} : { title: value.title }),
+    ...(value.pid === undefined ? {} : { pid: value.pid })
+  };
 }
 
 function toActiveWindowContext(input: {
@@ -262,6 +285,17 @@ async function validateActiveWindow(context: AgentHostMcpContext, expected: Desk
   return { supported: true, backend: current.backend, activeWindow: current.activeWindow, matched: true };
 }
 
+async function resolveGuiWindow(context: AgentHostMcpContext, input: GuiContextInput): Promise<Awaited<ReturnType<typeof validateActiveWindow>>> {
+  const requested = input.target ?? input.activeWindow!;
+  if (input.target !== undefined) {
+    const focused = await context.linux.focusWindow(plainWindowSelector(requested));
+    if (focused.supported !== true || focused.focused !== true) {
+      return { supported: focused.supported, backend: focused.backend, reason: "focus_failed", matched: false };
+    }
+  }
+  return validateActiveWindow(context, toActiveWindowContext(plainWindowSelector(requested)));
+}
+
 function safetyFailure(tool: string, safety: ReturnType<typeof evaluateSafety>): ToolResult<never> {
   return toolFailure({
     tool,
@@ -300,15 +334,15 @@ function failedDesktopAction<T>(
 async function desktopPreview(
   tool: string,
   actionType: "gui_click" | "gui_type",
-  input: { activeWindow: z.infer<typeof activeWindowSchema> },
+  input: GuiContextInput,
   context: AgentHostMcpContext,
   summary: (window: string) => string,
   target: (window: string) => string,
   data: Record<string, unknown>,
   dataSensitivity?: "none" | "low" | "sensitive" | "secret"
 ) {
-  const activeWindow = toActiveWindowContext(input.activeWindow);
-  const validation = await validateActiveWindow(context, activeWindow);
+  const activeWindow = toActiveWindowContext(inputWindow(input));
+  const validation = await resolveGuiWindow(context, input);
   const windowLabel = activeWindow.windowId ?? activeWindow.appName ?? activeWindow.title ?? String(activeWindow.pid ?? "unknown");
   if (!validation.supported || !validation.matched) {
     return {
@@ -468,13 +502,14 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           maxItems: 10
         },
         activeWindow: activeWindowMcpSchema,
+        target: activeWindowMcpSchema,
         ...executionMcpProperties
       },
-      required: ["keys", "activeWindow"],
+        required: ["keys"],
       additionalProperties: false
     },
     inputSummary: "Send hotkey",
-    auditInputSummary: (i) => `Send hotkey ${i.keys.join("+")} to ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
+    auditInputSummary: (i) => `Send hotkey ${i.keys.join("+")} to ${activeWindowAppName(toActiveWindowContext(inputWindow(i))) ?? "active window"}.`,
     preview: {
       isDryRun: (i) => i.dryRun === true,
       resolveEffect: (i, context) => desktopPreview("desktop.hotkey", "gui_click", i, context, (window) => `Send hotkey ${i.keys.join("+")} to ${window}.`, (window) => `hotkey:${window}:${i.keys.join("+")}`, { keys: i.keys })
@@ -482,13 +517,12 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     safety: {
       actionType: "inspect",
       getInput: (input) => {
-        const appName = activeWindowAppName(toActiveWindowContext(input.activeWindow));
+        const appName = activeWindowAppName(toActiveWindowContext(inputWindow(input)));
         return appName === undefined ? {} : { appName };
       }
     },
     async handler(input, context): Promise<ToolResult<DesktopHotkeyResult>> {
-      const activeWindow = toActiveWindowContext(input.activeWindow);
-      const validation = await validateActiveWindow(context, activeWindow);
+      const validation = await resolveGuiWindow(context, input);
 
       if (!validation.supported || !validation.matched) {
         return toolFailure({
@@ -544,14 +578,15 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
       properties: {
         text: { type: "string", minLength: 1, maxLength: 10000 },
         activeWindow: activeWindowMcpSchema,
+        target: activeWindowMcpSchema,
         dataSensitivity: { type: "string", enum: ["none", "low", "sensitive", "secret"] },
         ...executionMcpProperties
       },
-      required: ["text", "activeWindow"],
+        required: ["text"],
       additionalProperties: false
     },
     inputSummary: "Type text",
-    auditInputSummary: (i) => `Type ${i.text.length} characters into ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
+    auditInputSummary: (i) => `Type ${i.text.length} characters into ${activeWindowAppName(toActiveWindowContext(inputWindow(i))) ?? "active window"}.`,
     preview: {
       isDryRun: (i) => i.dryRun === true,
       resolveEffect: (i, context) => desktopPreview("desktop.type_text", "gui_type", i, context, (window) => `Type ${i.text.length} characters into ${window}.`, (window) => `type:${window}:${i.text.length}`, { textLength: i.text.length, dataSensitivity: i.dataSensitivity ?? "none" }, i.dataSensitivity)
@@ -559,13 +594,12 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     safety: {
       actionType: "inspect",
       getInput: (input) => {
-        const appName = activeWindowAppName(toActiveWindowContext(input.activeWindow));
+        const appName = activeWindowAppName(toActiveWindowContext(inputWindow(input)));
         return appName === undefined ? {} : { appName };
       }
     },
     async handler(input, context): Promise<ToolResult<DesktopTypeTextResult>> {
-      const activeWindow = toActiveWindowContext(input.activeWindow);
-      const validation = await validateActiveWindow(context, activeWindow);
+      const validation = await resolveGuiWindow(context, input);
 
       if (!validation.supported || !validation.matched) {
         return toolFailure({
@@ -624,13 +658,14 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         y: { type: "integer", minimum: 0 },
         button: { type: "string", enum: ["left", "middle", "right"] },
         activeWindow: activeWindowMcpSchema,
+        target: activeWindowMcpSchema,
         ...executionMcpProperties
       },
-      required: ["x", "y", "activeWindow"],
+      required: ["x", "y"],
       additionalProperties: false
     },
     inputSummary: "Click at coordinates",
-    auditInputSummary: (i) => `Click ${i.button ?? "left"} at (${i.x}, ${i.y}) in ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
+    auditInputSummary: (i) => `Click ${i.button ?? "left"} at (${i.x}, ${i.y}) in ${activeWindowAppName(toActiveWindowContext(inputWindow(i))) ?? "active window"}.`,
     preview: {
       isDryRun: (i) => i.dryRun === true,
       resolveEffect: (i, context) => desktopPreview("desktop.click", "gui_click", i, context, (window) => `Click ${i.button ?? "left"} at (${i.x}, ${i.y}) in ${window}.`, (window) => `click:${window}:${i.x}:${i.y}:${i.button ?? "left"}`, { x: i.x, y: i.y, button: i.button ?? "left" })
@@ -638,13 +673,12 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     safety: {
       actionType: "inspect",
       getInput: (input) => {
-        const appName = activeWindowAppName(toActiveWindowContext(input.activeWindow));
+        const appName = activeWindowAppName(toActiveWindowContext(inputWindow(input)));
         return appName === undefined ? {} : { appName };
       }
     },
     async handler(input, context): Promise<ToolResult<DesktopClickResult>> {
-      const activeWindow = toActiveWindowContext(input.activeWindow);
-      const validation = await validateActiveWindow(context, activeWindow);
+      const validation = await resolveGuiWindow(context, input);
 
       if (!validation.supported || !validation.matched) {
         return toolFailure({
@@ -713,13 +747,14 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         endY: { type: "integer", minimum: 0 },
         durationMs: { type: "integer", minimum: 0, maximum: 2000 },
         activeWindow: activeWindowMcpSchema,
+        target: activeWindowMcpSchema,
         ...executionMcpProperties
       },
-      required: ["activeWindow"],
+      required: [],
       additionalProperties: false
     },
     inputSummary: "Pointer action",
-    auditInputSummary: (i) => `Pointer ${i.direction ?? (i.startX !== undefined ? "drag" : "action")} in ${activeWindowAppName(toActiveWindowContext(i.activeWindow)) ?? "active window"}.`,
+    auditInputSummary: (i) => `Pointer ${i.direction ?? (i.startX !== undefined ? "drag" : "action")} in ${activeWindowAppName(toActiveWindowContext(inputWindow(i))) ?? "active window"}.`,
     preview: {
       isDryRun: (i) => i.dryRun === true,
       resolveEffect: (i, context) => desktopPreview("desktop.pointer", "gui_click", i, context, (window) => `Pointer action in ${window}.`, (window) => `pointer:${window}:${i.x ?? ""}:${i.y ?? ""}:${i.direction ?? ""}:${i.startX ?? ""}:${i.startY ?? ""}:${i.endX ?? ""}:${i.endY ?? ""}`, { x: i.x, y: i.y, direction: i.direction, amount: i.amount, startX: i.startX, startY: i.startY, endX: i.endX, endY: i.endY })
@@ -727,13 +762,12 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
     safety: {
       actionType: "inspect",
       getInput: (input) => {
-        const appName = activeWindowAppName(toActiveWindowContext(input.activeWindow));
+        const appName = activeWindowAppName(toActiveWindowContext(inputWindow(input)));
         return appName === undefined ? {} : { appName };
       }
     },
     async handler(input, context): Promise<ToolResult<DesktopPointerResult>> {
-      const activeWindow = toActiveWindowContext(input.activeWindow);
-      const validation = await validateActiveWindow(context, activeWindow);
+      const validation = await resolveGuiWindow(context, input);
 
       if (!validation.supported || !validation.matched) {
         return toolFailure({
