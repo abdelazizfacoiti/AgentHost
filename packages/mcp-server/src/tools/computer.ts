@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { toolSuccess, type DesktopWindowBounds, type DesktopWindowContext, type ToolResult } from "@agenthost/core";
+import { evaluateSafety, normalizePathForPolicy, toolFailure, toolSuccess, type DesktopWindowBounds, type DesktopWindowContext, type ToolResult } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
 import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
 import { createRunStepsTool } from "./run-steps.js";
+import { createSafetyEvaluationContext } from "../grants.js";
 
 const observeInput = z.object({
   includeWindows: z.boolean().optional()
@@ -26,11 +27,14 @@ const screenMatch = z.object({
 const waitInput = z.object({
   expectedActiveWindow: windowMatch.optional(),
   expectedWindow: windowMatch.optional(),
+  windowAppears: windowMatch.optional(),
+  titleMatches: z.string().trim().min(1).max(500).optional(),
+  fileExists: z.string().trim().min(1).max(1000).optional(),
   expectedScreen: screenMatch.optional(),
   timeoutMs: z.number().int().min(200).max(30_000).optional()
 }).strict().superRefine((value, ctx) => {
-  if (value.expectedActiveWindow === undefined && value.expectedWindow === undefined && value.expectedScreen === undefined) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide expectedActiveWindow, expectedWindow, or expectedScreen." });
+  if (value.expectedActiveWindow === undefined && value.expectedWindow === undefined && value.windowAppears === undefined && value.titleMatches === undefined && value.fileExists === undefined && value.expectedScreen === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide a window, title, file, or screen condition." });
   }
 });
 
@@ -95,7 +99,7 @@ export function createComputerTools(): AnyAgentHostToolDefinition<AgentHostMcpCo
 
   const waitFor: AgentHostToolDefinition<z.infer<typeof waitInput>, unknown, AgentHostMcpContext> = {
     name: "computer.wait_for",
-    description: "Polls active-window, any-window, or screen conditions until they match (or timeout), returning a timestamped state snapshot and fingerprint. Replaces fixed multi-second sleeps.",
+    description: "Polls active-window, window-appears, title, file, or screen conditions until they match (or timeout), returning a timestamped state snapshot and fingerprint. Replaces fixed multi-second sleeps.",
     riskLevel: "observe",
     inputSchema: waitInput,
     mcpInputSchema: {
@@ -121,6 +125,13 @@ export function createComputerTools(): AnyAgentHostToolDefinition<AgentHostMcpCo
           },
           additionalProperties: false
         },
+        windowAppears: {
+          type: "object",
+          properties: { windowId: { type: "string" }, appName: { type: "string" }, title: { type: "string" }, pid: { type: "integer" } },
+          additionalProperties: false
+        },
+        titleMatches: { type: "string", minLength: 1, maxLength: 500 },
+        fileExists: { type: "string", minLength: 1, maxLength: 1000 },
         expectedScreen: {
           type: "object",
           properties: {
@@ -138,6 +149,12 @@ export function createComputerTools(): AnyAgentHostToolDefinition<AgentHostMcpCo
     inputSummary: "Wait for window or screen state",
     safety: { actionType: "observe" },
     async handler(input, context): Promise<ToolResult<unknown>> {
+      let fileConditionPath: string | undefined;
+      if (input.fileExists !== undefined) {
+        fileConditionPath = normalizePathForPolicy(input.fileExists, { agentHostDir: context.config.agentHostDir });
+        const safety = evaluateSafety({ tool: "computer.wait_for", actionType: "file_read", filePath: fileConditionPath, strategy: "cli_or_script" }, context.policy, createSafetyEvaluationContext(context));
+        if (!safety.allowed) return toolFailure({ tool: "computer.wait_for", riskLevel: safety.riskLevel, approval: safety.approval, error: { code: safety.blocked ? "safety_blocked" : "approval_required", message: safety.blocked ? "Blocked by safety engine." : "File condition requires approval.", details: safety }, observations: safety.reasons });
+      }
       const start = Date.now();
       const timeout = input.timeoutMs ?? 5000;
       let lastState: Record<string, unknown> | undefined;
@@ -149,7 +166,7 @@ export function createComputerTools(): AnyAgentHostToolDefinition<AgentHostMcpCo
         const [active, screen, windows] = await Promise.all([
           context.linux.getActiveWindow(),
           screenPromise,
-          input.expectedWindow === undefined
+          input.expectedWindow === undefined && input.windowAppears === undefined && input.titleMatches === undefined
             ? Promise.resolve(undefined)
             : context.linux.listWindows({ limit: 50 }).catch(() => undefined)
         ]);
@@ -157,10 +174,18 @@ export function createComputerTools(): AnyAgentHostToolDefinition<AgentHostMcpCo
           || (active.supported && active.activeWindow !== undefined && matches(input.expectedActiveWindow, active.activeWindow));
         const screenMatched = input.expectedScreen === undefined
           || (screen.supported && screen.bounds !== undefined && screenMatches(input.expectedScreen, screen.bounds));
-        const matchedWindow = input.expectedWindow === undefined
+        const expectedAnyWindow = input.expectedWindow ?? input.windowAppears;
+        const matchedWindow = expectedAnyWindow === undefined
           ? undefined
-          : windows?.windows.find((entry) => matches(input.expectedWindow ?? {}, entry));
-        const windowMatched = input.expectedWindow === undefined || matchedWindow !== undefined;
+          : windows?.windows.find((entry) => matches(expectedAnyWindow, entry));
+        const windowMatched = expectedAnyWindow === undefined || matchedWindow !== undefined;
+        const titleMatched = input.titleMatches === undefined
+          || (active.activeWindow?.title?.toLowerCase().includes(input.titleMatches.toLowerCase()) === true)
+          || (windows?.windows.some((entry) => entry.title?.toLowerCase().includes(input.titleMatches!.toLowerCase())) === true);
+        const file = input.fileExists === undefined
+          ? undefined
+          : await context.linux.fileExists({ path: fileConditionPath ?? input.fileExists }).catch(() => ({ exists: false }));
+        const fileMatched = input.fileExists === undefined || file?.exists === true;
         const state = {
           activeWindow: active.activeWindow,
           screen: screen.supported ? screen.bounds : undefined,
@@ -168,7 +193,7 @@ export function createComputerTools(): AnyAgentHostToolDefinition<AgentHostMcpCo
           capturedAt: new Date().toISOString()
         };
         lastState = state;
-        if (activeMatched && screenMatched && windowMatched) {
+        if (activeMatched && screenMatched && windowMatched && titleMatched && fileMatched) {
           return toolSuccess({
             tool: "computer.wait_for",
             riskLevel: "observe",

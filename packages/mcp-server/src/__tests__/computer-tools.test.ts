@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { getDefaultPolicy } from "@agenthost/core";
 import type { AgentHostMcpContext } from "../context.js";
 import { runTool } from "../tool-runner.js";
 import { createComputerTools } from "../tools/computer.js";
@@ -18,6 +19,8 @@ describe("computer state tools", () => {
     const context = {
       sessionId: "test-session",
       config: { agentHostDir: home, configPath: path.join(home, "config.json"), logFile: path.join(home, "logs", "audit.jsonl") },
+      policy: getDefaultPolicy(),
+      grants: { listActiveGrants: () => [] },
       logger: { log: async () => undefined },
       linux: {
         getActiveWindow: async () => ({ supported: true, backend: "test", activeWindow: { windowId: "1", appName: "Notes", title: "Plan" }, reason: "ok" }),
@@ -30,7 +33,8 @@ describe("computer state tools", () => {
 
     const result = await runTool(wait!, {
       expectedActiveWindow: { appName: "Notes" },
-      expectedWindow: { title: "Home" },
+      windowAppears: { title: "Home" },
+      titleMatches: "Plan",
       expectedScreen: { width: 1920, height: 1080 },
       timeoutMs: 500
     }, context);
@@ -52,6 +56,7 @@ describe("computer state tools", () => {
     const context = {
       sessionId: "test-session",
       config: { agentHostDir: home, configPath: path.join(home, "config.json"), logFile: path.join(home, "logs", "audit.jsonl") },
+      policy: getDefaultPolicy(),
       logger: { log: async () => undefined },
       linux: {
         getActiveWindow: async () => ({ supported: true, backend: "test", activeWindow: { windowId: "1", appName: "Notes" }, reason: "ok" }),
@@ -62,5 +67,29 @@ describe("computer state tools", () => {
 
     const result = await runTool(wait, { expectedActiveWindow: { appName: "Gmail" }, timeoutMs: 200 }, context);
     expect(result.data).toMatchObject({ matched: false });
+  });
+
+  it("waits for a file to appear", async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "agenthost-computer-file-"));
+    roots.push(home);
+    const fileRoot = await mkdtemp(path.join(os.tmpdir(), "agenthost-wait-file-"));
+    roots.push(fileRoot);
+    const target = path.join(fileRoot, "ready.txt");
+    const context = {
+      sessionId: "test-session",
+      config: { agentHostDir: home, configPath: path.join(home, "config.json"), logFile: path.join(home, "logs", "audit.jsonl") },
+      policy: getDefaultPolicy(),
+      grants: { listActiveGrants: () => [] },
+      logger: { log: async () => undefined },
+      linux: {
+        getActiveWindow: async () => ({ supported: true, backend: "test", activeWindow: { windowId: "1", appName: "Notes" }, reason: "ok" }),
+        getScreenGeometry: async () => ({ supported: false, reason: "not_needed" }),
+        fileExists: async ({ path: candidate }: { path: string }) => ({ path: candidate, exists: candidate === target, type: "file" as const })
+      }
+    } as unknown as AgentHostMcpContext;
+    const wait = createComputerTools().find((tool) => tool.name === "computer.wait_for")!;
+    const result = await runTool(wait, { fileExists: target, timeoutMs: 200 }, context);
+    expect(result).toMatchObject({ ok: true, error: null });
+    expect(result.data).toMatchObject({ matched: true });
   });
 });

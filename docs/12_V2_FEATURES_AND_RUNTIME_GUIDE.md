@@ -89,7 +89,7 @@ source is always:
 |---|---|---|
 | System | `system.get_info`, `system.list_capabilities`, `system.check_dependency` | Runtime/system information, live capability inventory, dependency availability |
 | Adapters | `adapter.list`, `adapter.get` | Inspect registered optional adapters |
-| Computer observation | `computer.observe_state`, `computer.wait_for` | Active window, screen geometry, capabilities, window list, bounded condition waits with state snapshots |
+| Computer observation | `computer.observe_state`, `computer.wait_for` | Active window, window-appears, title, file, and screen condition waits with state snapshots |
 | Governed plans | `computer.run_steps` | Up to 20 nested governed calls with plan-scoped low/medium approval |
 | Windows | `window.list`, `window.focus` | Enumerate windows; focus and verify by ID/app/title/PID |
 | Desktop | `desktop.screenshot`, `desktop.click`, `desktop.pointer`, `desktop.hotkey`, `desktop.type_text` | Screenshot, click, pointer movement/scroll/drag, key chords, typing |

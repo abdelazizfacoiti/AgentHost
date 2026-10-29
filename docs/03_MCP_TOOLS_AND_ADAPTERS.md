@@ -169,7 +169,7 @@ schema, policy, stop/takeover, audit, and execution gates. A confirmed plan
 token covers only low/medium effects inside that exact plan fingerprint; high
 effects still need their own single-use token, and nested plans are rejected.
 
-`computer.wait_for` accepts active-window, any-window, and/or screen conditions
+`computer.wait_for` accepts active-window, window-appears, title, file, and/or screen conditions
 and returns a timestamped snapshot plus a short state fingerprint on success or
 timeout, so agents can replace fixed sleeps with one bounded wait.
 
