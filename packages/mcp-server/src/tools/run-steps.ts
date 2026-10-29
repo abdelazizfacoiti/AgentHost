@@ -170,7 +170,10 @@ export function createRunStepsTool(): AnyAgentHostToolDefinition<AgentHostMcpCon
           failed = toolFailure({ tool: "computer.run_steps", riskLevel: "medium", error: { code: "unknown_tool", message: `Unknown tool: ${step.tool}` }, observations: [`Step ${index + 1} was not executed.`] });
           break;
         }
-        const result = await runTool(target as AnyAgentHostToolDefinition<AgentHostMcpContext>, step.input ?? {}, childContext);
+        const result = await runTool(target as AnyAgentHostToolDefinition<AgentHostMcpContext>, step.input ?? {}, {
+          ...childContext,
+          planStep: { index, total: input.steps.length }
+        });
         results.push({
           index,
           tool: step.tool,

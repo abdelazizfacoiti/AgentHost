@@ -13,6 +13,8 @@ const VISUAL_INTENTS = new Set<VisualSurfaceProtocolEnvelope["approvedIntents"][
 ]);
 
 const PRIMITIVE_SURFACE_TYPES: Record<OverlayPrimitiveType, VisualSurfaceType> = {
+  frame: "target_highlight",
+  target_ring: "target_highlight",
   pointer: "pointer",
   arrow: "arrow",
   highlight: "target_highlight",

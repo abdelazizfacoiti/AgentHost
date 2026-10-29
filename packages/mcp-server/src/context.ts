@@ -164,6 +164,8 @@ export interface AgentHostMcpContext {
   trace?: ToolTraceLogger;
   /** Internal to a confirmed computer.run_steps execution; never set by MCP input. */
   planApproval?: { planFingerprint: string; maxRisk: "low" | "medium" };
+  /** One-based step position within the current computer.run_steps plan. */
+  planStep?: { index: number; total: number };
   grants: GrantStore;
   overlay?: OverlayManager;
   actionOverlay?: ToolActionOverlay;

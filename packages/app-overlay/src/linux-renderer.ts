@@ -4,14 +4,21 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { OverlayCapabilityReport, OverlayRendererMode, OverlayStateSnapshot, OverlayWidgetEvent } from "@agenthost/core";
+import type { OverlayCapabilityReport, OverlayDockSide, OverlayLayout, OverlayRendererMode, OverlayStateSnapshot, OverlayWidgetEvent } from "@agenthost/core";
 import { HeadlessOverlayRenderer } from "./headless-renderer.js";
 import { probeGtk3, probeLinuxOverlay, type OverlayEnvironment } from "./linux-probe.js";
 import { OVERLAY_IPC_MAX_BYTES, OVERLAY_IPC_MAX_IN_FLIGHT, OVERLAY_IPC_VERSION, serializeRendererMessage, validateRendererHandshake, validateRendererOperationData, validateRendererReply, type OverlayRendererCommand, type OverlayRendererReply, type OverlayRendererRequest } from "./linux-renderer-protocol.js";
 import type { OverlayOperationResult, OverlayRenderRecord, OverlayRenderer, OverlayRendererDiagnostics, OverlayRendererRestartResult } from "./renderer.js";
 
 export type LinuxOverlaySpawn = (command: string, args: string[], options: { stdio: ["pipe", "pipe", "pipe"]; env: NodeJS.ProcessEnv }) => ChildProcessWithoutNullStreams;
-export interface LinuxOverlayRendererOptions { environment?: OverlayEnvironment; mode?: OverlayRendererMode; sessionId?: string; pythonCommand?: string; scriptPath?: string; commandTimeoutMs?: number; startupTimeoutMs?: number; renderAckTimeoutMs?: number; maxRestarts?: number; probe?: () => Promise<OverlayCapabilityReport> | OverlayCapabilityReport; spawnProcess?: LinuxOverlaySpawn; pidFilePath?: string | null; }
+export interface OverlayVisualConfig {
+  layout: OverlayLayout;
+  dockSide: OverlayDockSide;
+  dockWidthPercent: number;
+  dockReserveSpace: boolean;
+  maxWidth: number;
+}
+export interface LinuxOverlayRendererOptions { environment?: OverlayEnvironment; mode?: OverlayRendererMode; sessionId?: string; pythonCommand?: string; scriptPath?: string; commandTimeoutMs?: number; startupTimeoutMs?: number; renderAckTimeoutMs?: number; maxRestarts?: number; probe?: () => Promise<OverlayCapabilityReport> | OverlayCapabilityReport; spawnProcess?: LinuxOverlaySpawn; pidFilePath?: string | null; visual?: Partial<OverlayVisualConfig>; }
 
 const RENDERER_PROCESS_PATTERN = "app-overlay/runtime/gtk3-renderer.py --protocol";
 export interface OverlayOrphanSweepResult { killed: number[]; skippedLive: number[]; }
@@ -80,6 +87,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
   readonly #probeOverride: (() => Promise<OverlayCapabilityReport> | OverlayCapabilityReport) | undefined;
   readonly #spawnProcess: LinuxOverlaySpawn;
   readonly #pidFilePath: string | null;
+  readonly #visual: Partial<OverlayVisualConfig>;
   readonly #token = randomBytes(32).toString("hex");
   readonly #pending = new Map<string, { command: OverlayRendererCommand; resolve: (reply: OverlayRendererReply) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   #child: ChildProcessWithoutNullStreams | undefined;
@@ -117,6 +125,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     this.#maxRestarts = Math.min(1, Math.max(0, options.maxRestarts ?? 1));
     this.#probeOverride = options.probe;
     this.#spawnProcess = options.spawnProcess ?? ((command, args, spawnOptions) => spawn(command, args, spawnOptions));
+    this.#visual = options.visual ?? {};
     // PID registry lets `agenthost overlay hide/status` find live renderers.
     // Unit tests pass a minimal environment without PATH; skip the registry
     // there so tests never write into the operator's home directory.
@@ -258,7 +267,7 @@ export class LinuxOverlayRenderer implements OverlayRenderer {
     child.once("error", (error) => { const message = error instanceof Error ? error.message : "renderer_spawn_error"; this.#lastStderrSummary = message.replace(/[A-Za-z0-9+/=_-]{32,}/g, "[redacted]").replace(/\s+/g, " ").slice(0, 512); this.#childFailed(child, "renderer_process_exited"); });
     child.once("exit", (code, signal) => this.#childFailed(child, "renderer_process_exited", code, signal));
     const candidateEpoch = this.#rendererEpoch + 1;
-    const hello = await this.#request("hello", { sessionId: this.#sessionId, rendererEpoch: candidateEpoch }, this.#startupTimeoutMs).catch((error: unknown) => { this.#fail(error instanceof Error ? error.message : "renderer_handshake_timeout"); return undefined; });
+    const hello = await this.#request("hello", { sessionId: this.#sessionId, rendererEpoch: candidateEpoch, visual: this.#visual }, this.#startupTimeoutMs).catch((error: unknown) => { this.#fail(error instanceof Error ? error.message : "renderer_handshake_timeout"); return undefined; });
     if (hello?.ok !== true) { this.#fail(typeof hello?.error === "string" ? hello.error : this.#lastFailure ?? "renderer_protocol_error"); return false; }
     if (!validateRendererHandshake(hello.data)) { this.#fail("renderer_protocol_error"); return false; }
     if (hello.data.rendererEpoch !== candidateEpoch) { this.#fail("renderer_epoch_mismatch"); return false; }

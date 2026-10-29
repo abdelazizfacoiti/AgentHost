@@ -10,6 +10,7 @@ import hmac
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -38,7 +39,8 @@ VERSION = 1
 MAX_BYTES = 256 * 1024
 COMMANDS = {"hello", "capabilities", "show", "update", "dismiss", "clear", "emergency_hide", "state", "events", "close"}
 EVENTS = {"accepted", "rejected", "dismissed", "cancelled", "next", "back", "acknowledgement_checked", "emergency_stop_requested", "continue", "pause", "resume", "cancel", "acknowledge", "show_details", "hide", "retry_visual_render", "inspect_diagnostics", "open_control_room", "review_prepared_action", "emergency_hide", "close_control_surface"}
-SURFACE_TYPES = {"pointer", "arrow", "highlight", "spotlight"}
+SURFACE_TYPES = {"frame", "pointer", "arrow", "highlight", "spotlight"}
+RING_TYPES = {"target_ring"}
 CARD_TYPES = {"widget", "tooltip", "instruction_card", "approval_card", "warning", "progress", "checkpoint_result", "status_toast", "comparison", "cancel_control", "emergency_stop_control"}
 CARD_WIDTH = 380
 CARD_MARGIN = 24
@@ -198,6 +200,7 @@ class Renderer:
         self.cards = {}
         self.surface_windows = []
         self.surface_fixed = []
+        self.ring_windows = {}
         self.records = {}
         self.events = []
         self.emergency_hidden = False
@@ -208,6 +211,15 @@ class Renderer:
         self.widget_css_ready = False
         self.command_queue = []
         self.queue_scheduled = False
+        self.dock_window = None
+        self.frame_tick_source = None
+        self.visual = {
+            "layout": "ambient",
+            "dockSide": "right",
+            "dockWidthPercent": 20,
+            "dockReserveSpace": True,
+            "maxWidth": CARD_WIDTH,
+        }
         self.monitor_source = GLib.timeout_add_seconds(2, self.monitor_tick)
 
     def capability(self):
@@ -282,6 +294,130 @@ class Renderer:
         except Exception:
             return None
 
+    def layout_area(self):
+        dock = self.dock_geometry()
+        if dock is not None:
+            area = Gdk.Rectangle()
+            area.x, area.y, area.width, area.height = dock
+            return area
+        return self.workarea()
+
+    def apply_visual_config(self, value):
+        if not isinstance(value, dict):
+            return
+        layout = value.get("layout")
+        if layout in {"ambient", "dock"}:
+            self.visual["layout"] = layout
+        dock_side = value.get("dockSide")
+        if dock_side in {"left", "right"}:
+            self.visual["dockSide"] = dock_side
+        dock_width = value.get("dockWidthPercent")
+        if isinstance(dock_width, (int, float)) and 10 <= dock_width <= 40:
+            self.visual["dockWidthPercent"] = int(dock_width)
+        reserve = value.get("dockReserveSpace")
+        if isinstance(reserve, bool):
+            self.visual["dockReserveSpace"] = reserve
+        max_width = value.get("maxWidth")
+        if isinstance(max_width, (int, float)) and 240 <= max_width <= 1200:
+            self.visual["maxWidth"] = int(max_width)
+        self.destroy_dock()
+        self.ensure_dock()
+
+    def dock_geometry(self):
+        if self.visual.get("layout") != "dock":
+            return None
+        display = Gdk.Display.get_default()
+        if display is None:
+            return None
+        monitor = display.get_primary_monitor()
+        if monitor is None:
+            monitor = display.get_monitor(0)
+        if monitor is None:
+            return None
+        geometry = monitor.get_geometry()
+        width = max(240, int(geometry.width * int(self.visual.get("dockWidthPercent", 20)) / 100))
+        width = min(width, geometry.width)
+        x = geometry.x if self.visual.get("dockSide") == "left" else geometry.x + geometry.width - width
+        return (x, geometry.y, width, geometry.height)
+
+    def ensure_dock(self):
+        if self.visual.get("layout") != "dock" or self.emergency_hidden:
+            self.destroy_dock()
+            return
+        if self.dock_window is not None:
+            return
+        area = self.dock_geometry()
+        if area is None:
+            return
+        x, y, width, height = area
+        window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+        window.set_decorated(False)
+        window.set_title("AgentHost Sidebar")
+        window.set_keep_above(True)
+        window.set_skip_taskbar_hint(True)
+        window.set_skip_pager_hint(True)
+        window.set_accept_focus(False)
+        window.set_focus_on_map(False)
+        window.set_app_paintable(True)
+        try:
+            window.set_type_hint(Gdk.WindowTypeHint.DOCK)
+        except Exception:
+            pass
+        screen = Gdk.Screen.get_default()
+        if screen is not None:
+            window.set_screen(screen)
+            visual = screen.get_rgba_visual()
+            if visual is not None:
+                window.set_visual(visual)
+        window.move(x, y)
+        window.set_default_size(width, height)
+        window.realize()
+        gdk_window = window.get_window()
+        if gdk_window is not None:
+            if self.visual.get("dockReserveSpace", True):
+                self.set_dock_strut(gdk_window, x, y, width, height)
+            self.make_click_through(gdk_window)
+        window.show_all()
+        if gdk_window is not None:
+            self.make_click_through(gdk_window)
+        self.dock_window = window
+
+    def set_dock_strut(self, gdk_window, x, y, width, height):
+        screen = Gdk.Screen.get_default()
+        screen_width = screen.get_width() if screen is not None else 1920
+        values = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        if self.visual.get("dockSide") == "left":
+            values[0] = max(0, x + width)
+            values[4] = y
+            values[5] = y + height - 1
+        else:
+            values[1] = max(0, screen_width - x)
+            values[6] = y
+            values[7] = y + height - 1
+        try:
+            xid = gdk_window.get_xid()
+        except Exception:
+            return
+        encoded = ", ".join(str(int(value)) for value in values)
+        for atom_name in ("_NET_WM_STRUT", "_NET_WM_STRUT_PARTIAL"):
+            try:
+                subprocess.run(
+                    ["xprop", "-id", str(xid), "-f", atom_name, "32c", "-set", atom_name, encoded],
+                    check=False,
+                    capture_output=True,
+                    timeout=1.0,
+                )
+            except Exception:
+                pass
+
+    def destroy_dock(self):
+        if self.dock_window is not None:
+            try:
+                self.dock_window.destroy()
+            except Exception:
+                pass
+            self.dock_window = None
+
     def pump(self, iterations=8):
         for _index in range(iterations):
             while Gtk.events_pending():
@@ -300,9 +436,18 @@ class Renderer:
         self.surface_windows = []
         self.surface_fixed = []
 
+    def destroy_rings(self):
+        for entry in list(self.ring_windows.values()):
+            window = entry.get("window")
+            if window is not None:
+                window.destroy()
+        self.ring_windows = {}
+
     def destroy_windows(self):
         self.destroy_cards()
         self.destroy_surfaces()
+        self.destroy_rings()
+        self.destroy_dock()
         self.draw_ready = set()
 
     def target_bounds(self, record):
@@ -852,17 +997,27 @@ class Renderer:
             height = int(natural.height)
         except Exception:
             height = card_content_height(record.get("payload") or {})
-        width = CARD_WIDTH
-        area = self.workarea()
+        area = self.layout_area()
         if area is None:
             return
-        height = max(64, min(height, area.height - 2 * CARD_MARGIN, MAX_CARD_HEIGHT))
+        dock = self.dock_geometry()
         payload = record.get("payload") or {}
+        if dock is not None:
+            width = max(240, min(int(self.visual.get("maxWidth", CARD_WIDTH)), dock[2] - 2 * CARD_MARGIN))
+        else:
+            width = max(240, min(int(self.visual.get("maxWidth", CARD_WIDTH)), area.width - 2 * CARD_MARGIN))
+        height = max(64, min(height, area.height - 2 * CARD_MARGIN, MAX_CARD_HEIGHT))
+        card["frame"].set_size_request(width, -1)
         target = payload.get("target") if isinstance(payload, dict) else {}
         bounds = target.get("bounds") if isinstance(target, dict) else None
         point = target.get("point") if isinstance(target, dict) else None
         user_position = card.get("user_position")
-        if isinstance(user_position, tuple) and not isinstance(bounds, dict) and not isinstance(point, dict):
+        if dock is not None:
+            x = area.x + CARD_MARGIN
+            placement = payload.get("placement", "top_right")
+            at_top = str(record.get("overlayId", "")).startswith("agenthost-action-") or placement.startswith("top")
+            y = area.y + CARD_MARGIN if at_top else area.y + area.height - height - CARD_MARGIN
+        elif isinstance(user_position, tuple) and not isinstance(bounds, dict) and not isinstance(point, dict):
             x, y = float(user_position[0]), float(user_position[1])
         elif isinstance(bounds, dict):
             try:
@@ -958,9 +1113,14 @@ class Renderer:
             for record in self.records.values():
                 if not self.is_surface_record(record):
                     continue
-                bounds = self.target_bounds(record)
+                payload = record.get("payload") or {}
+                if payload.get("type") == "frame":
+                    bounds = (geometry[0], geometry[1], geometry[2], geometry[3])
+                else:
+                    bounds = self.target_bounds(record)
                 widget = self.surface_widget(record)
                 root.put(widget, int(bounds[0] - ox), int(bounds[1] - oy))
+                widget.set_size_request(int(bounds[2]), int(bounds[3]))
                 widget.show_all()
             root.show_all()
 
@@ -982,8 +1142,10 @@ class Renderer:
         for record in list(self.records.values()):
             if not self.is_surface_record(record):
                 continue
-            policy = (record.get("payload") or {}).get("displayPolicy", "primary")
-            if policy != "all" and monitor_index != 0:
+            payload = record.get("payload") or {}
+            policy = payload.get("displayPolicy", "primary")
+            kind = payload.get("type", "widget")
+            if kind != "frame" and policy != "all" and monitor_index != 0:
                 continue
             self.draw_record(cr, record, ox, oy, monitor_width, monitor_height)
         self.draw_ready.add("surface:%d" % monitor_index)
@@ -991,9 +1153,144 @@ class Renderer:
 
     def draw_record(self, cr, record, ox, oy, monitor_width=1920, monitor_height=1080):
         payload = record.get("payload") or {}
+        kind = payload.get("type", "widget")
+        if kind == "frame":
+            self.draw_frame(cr, payload, monitor_width, monitor_height)
+            return
         bounds = self.target_bounds(record)
         x, y, width, height = bounds[0] - ox, bounds[1] - oy, bounds[2], bounds[3]
         self.draw_primitive(cr, payload, x, y, width, height)
+
+    def draw_frame(self, cr, payload, width, height):
+        style = payload.get("style") if isinstance(payload.get("style"), dict) else {}
+        color = color_for(style, 0.86)
+        alpha = color[3]
+        animation = payload.get("animation") if isinstance(payload.get("animation"), dict) else {}
+        if animation.get("kind") == "pulse" and animation.get("reducedMotion") not in {"instant", "none"}:
+            alpha = 0.45 + 0.35 * (0.5 + 0.5 * math.sin(time.monotonic() * math.pi * 1.1))
+        cr.set_source_rgba(color[0], color[1], color[2], alpha)
+        cr.set_line_width(3)
+        cr.rectangle(1.5, 1.5, max(1, width - 3), max(1, height - 3))
+        cr.stroke()
+        cr.set_line_width(1)
+        cr.set_source_rgba(color[0], color[1], color[2], min(1.0, alpha * 0.45))
+        cr.rectangle(6.5, 6.5, max(1, width - 13), max(1, height - 13))
+        cr.stroke()
+
+    def frame_tick(self):
+        if not any(self.is_frame_record(record) and self.frame_animated(record) for record in self.records.values()):
+            self.frame_tick_source = None
+            return False
+        self.redraw_surfaces()
+        return True
+
+    def ensure_frame_ticker(self):
+        if self.frame_tick_source is not None:
+            return
+        if any(self.is_frame_record(record) and self.frame_animated(record) for record in self.records.values()):
+            self.frame_tick_source = GLib.timeout_add(250, self.frame_tick)
+
+    def is_frame_record(self, record):
+        payload = record.get("payload") if isinstance(record, dict) else {}
+        return isinstance(payload, dict) and payload.get("type") == "frame"
+
+    def frame_animated(self, record):
+        payload = record.get("payload") or {}
+        animation = payload.get("animation") if isinstance(payload.get("animation"), dict) else {}
+        return animation.get("kind") == "pulse" and animation.get("reducedMotion") not in {"instant", "none"}
+
+    def ring_duration(self, record):
+        payload = record.get("payload") or {}
+        animation = payload.get("animation") if isinstance(payload.get("animation"), dict) else {}
+        value = animation.get("durationMs", 600)
+        return max(200, min(2000, int(value))) / 1000.0 if isinstance(value, (int, float)) else 0.6
+
+    def render_ring(self, record):
+        overlay_id = record.get("overlayId")
+        self.dismiss_ring(overlay_id)
+        bounds = self.target_bounds(record)
+        pad = 28
+        x = int(bounds[0] - pad)
+        y = int(bounds[1] - pad)
+        width = max(64, int(bounds[2] + 2 * pad))
+        height = max(64, int(bounds[3] + 2 * pad))
+        window = self.new_popup(False, click_through=True)
+        if CAIRO_FOREIGN_AVAILABLE:
+            area = Gtk.DrawingArea()
+            area.set_app_paintable(True)
+            area.connect("draw", self.draw_ring, record)
+        else:
+            area = Gtk.EventBox()
+            area.get_style_context().add_class("ah-highlight")
+        window.add(area)
+        window.move(x, y)
+        window.set_default_size(width, height)
+        window.show_all()
+        gdk_window = window.get_window()
+        if gdk_window is not None:
+            self.make_click_through(gdk_window)
+        self.ring_windows[overlay_id] = {"window": window, "area": area, "record": record, "started": time.monotonic()}
+        GLib.timeout_add(33, self.ring_tick, overlay_id)
+        self.draw_ready.add(overlay_id)
+
+    def draw_ring(self, _area, cr, record):
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        entry = self.ring_windows.get(record.get("overlayId"))
+        if entry is None:
+            return False
+        bounds = self.target_bounds(record)
+        duration = self.ring_duration(record)
+        elapsed = max(0.0, time.monotonic() - entry["started"])
+        progress = min(1.0, elapsed / duration) if duration > 0 else 1.0
+        animation = (record.get("payload") or {}).get("animation") if isinstance(record.get("payload"), dict) else {}
+        reduced = isinstance(animation, dict) and animation.get("reducedMotion") in {"instant", "none"}
+        if reduced:
+            alpha = 0.92
+            radius = max(18.0, min(bounds[2], bounds[3]) / 2 + 4)
+        else:
+            alpha = 0.92 * (1.0 - progress) + 0.28
+            radius = max(18.0, min(bounds[2], bounds[3]) / 2 + 4 + 10 * progress)
+        style = (record.get("payload") or {}).get("style") if isinstance((record.get("payload") or {}).get("style"), dict) else {}
+        color = color_for(style, alpha)
+        cx = bounds[2] / 2 + 28
+        cy = bounds[3] / 2 + 28
+        cr.set_source_rgba(*color)
+        cr.set_line_width(3)
+        cr.arc(cx, cy, radius, 0, math.pi * 2)
+        cr.stroke()
+        cr.set_line_width(1)
+        cr.set_source_rgba(color[0], color[1], color[2], min(1.0, alpha * 0.55))
+        cr.arc(cx, cy, radius + 6, 0, math.pi * 2)
+        cr.stroke()
+        cr.set_source_rgba(color[0], color[1], color[2], min(1.0, alpha + 0.08))
+        cr.arc(cx, cy, 3.5, 0, math.pi * 2)
+        cr.fill()
+        return False
+
+    def ring_tick(self, overlay_id):
+        entry = self.ring_windows.get(overlay_id)
+        if entry is None:
+            return False
+        if time.monotonic() - entry["started"] < self.ring_duration(entry["record"]):
+            area = entry.get("area")
+            if area is not None and hasattr(area, "queue_draw"):
+                area.queue_draw()
+            return True
+        self.dismiss_ring(overlay_id)
+        self.records.pop(overlay_id, None)
+        self.draw_ready.discard(overlay_id)
+        return False
+
+    def dismiss_ring(self, overlay_id):
+        entry = self.ring_windows.pop(overlay_id, None)
+        if entry is not None:
+            window = entry.get("window")
+            if window is not None:
+                window.destroy()
+        self.draw_ready.discard(overlay_id)
 
     def draw_primitive(self, cr, payload, x, y, width, height):
         if not isinstance(payload, dict):
@@ -1001,6 +1298,9 @@ class Renderer:
         kind = payload.get("type", "widget")
         style = payload.get("style") if isinstance(payload.get("style"), dict) else {}
         color = color_for(style, 0.88)
+        if kind == "frame":
+            self.draw_frame(cr, payload, max(1, int(width)), max(1, int(height)))
+            return
         if kind in {"highlight", "spotlight"}:
             cr.set_source_rgba(*color)
             cr.set_line_width(3)
@@ -1042,6 +1342,11 @@ class Renderer:
             gdk_window = window.get_window()
             if gdk_window is not None and (not hasattr(gdk_window, "get_mapped") or gdk_window.get_mapped()):
                 visible += 1
+        for entry in self.ring_windows.values():
+            window = entry.get("window")
+            gdk_window = window.get_window() if window is not None else None
+            if gdk_window is not None and (not hasattr(gdk_window, "get_mapped") or gdk_window.get_mapped()):
+                visible += 1
         interactive = sum(1 for card in self.cards.values() if self.is_interactive(self.records.get(card.get("overlayId"), {})))
         transparent = visible
         return visible, interactive, transparent
@@ -1073,6 +1378,7 @@ class Renderer:
         previous = self.records.get(record["overlayId"])
         self.records[record["overlayId"]] = record
         self.emergency_hidden = False
+        self.ensure_dock()
         try:
             self.render_record(record)
         except Exception:
@@ -1094,10 +1400,15 @@ class Renderer:
     def render_record(self, record):
         payload = record.get("payload") or {}
         kind = payload.get("type", record.get("type", "widget")) if isinstance(payload, dict) else record.get("type", "widget")
+        if kind in RING_TYPES:
+            self.dismiss_card(record.get("overlayId"), animate=False)
+            self.render_ring(record)
+            return
         if kind in SURFACE_TYPES:
             self.dismiss_card(record.get("overlayId"), animate=False)
             self.ensure_surfaces()
             self.redraw_surfaces()
+            self.ensure_frame_ticker()
             self.draw_ready.add(record.get("overlayId"))
             return
         self.render_card(record)
@@ -1131,6 +1442,7 @@ class Renderer:
     def dismiss(self, overlay_id):
         self.records.pop(overlay_id, None)
         self.dismiss_card(overlay_id)
+        self.dismiss_ring(overlay_id)
         if not self.needs_surfaces():
             self.destroy_surfaces()
         else:
@@ -1141,6 +1453,7 @@ class Renderer:
         self.records.clear()
         self.destroy_cards()
         self.destroy_surfaces()
+        self.destroy_rings()
         self.draw_ready = set()
         return {"ok": True, **self.operation_ack("clear", "cleared", reason="gtk3_overlays_cleared")}
 
@@ -1148,6 +1461,8 @@ class Renderer:
         self.records.clear()
         self.destroy_cards()
         self.destroy_surfaces()
+        self.destroy_rings()
+        self.destroy_dock()
         self.draw_ready = set()
         self.emergency_hidden = True
         return {"ok": True, **self.operation_ack("emergency_hide", "emergency_hidden", reason="gtk3_emergency_hide_complete")}
@@ -1252,6 +1567,7 @@ def handle_request(request):
                 reply(request["id"], False, error="renderer_epoch_required")
                 return
             renderer.renderer_epoch = hello_payload["rendererEpoch"]
+            renderer.apply_visual_config(hello_payload.get("visual"))
             reply(request["id"], True, {"protocolVersion": VERSION, "rendererEpoch": renderer.renderer_epoch, "capabilities": renderer.capability()})
         elif command == "capabilities":
             reply(request["id"], True, renderer.capability())

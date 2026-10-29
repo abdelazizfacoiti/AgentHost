@@ -1,12 +1,22 @@
 import type { OverlayManager } from "@agenthost/app-overlay";
-import type { OverlayPlacement, OverlayWidget, OverlayWidgetComponent, RiskLevel, ToolResult } from "@agenthost/core";
+import type { OverlayPlacement, OverlayTargetBinding, OverlayWidget, OverlayWidgetComponent, RiskLevel, ToolResult } from "@agenthost/core";
 
 export type ToolActionPhase = "running" | "paused" | "waiting_approval" | "preview" | "done" | "halted" | "error";
+
+export interface ToolActionTarget {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
 
 export interface ToolActionInput {
   tool: string;
   summary: string;
   riskLevel: RiskLevel;
+  target?: ToolActionTarget;
+  step?: { index: number; total: number };
+  dryRun?: boolean;
 }
 
 export interface ToolActionStatus {
@@ -29,6 +39,11 @@ export interface ToolActionOverlayOptions {
   eventPollMs?: number;
   showTimeoutMs?: number;
   minDisplayMs?: number;
+  compact?: boolean;
+  frame?: boolean;
+  targetRing?: boolean;
+  targetRingLeadMs?: number;
+  targetRingDurationMs?: number;
   now?: () => number;
   onPause?: () => Promise<void> | void;
   onResume?: () => Promise<void> | void;
@@ -42,6 +57,7 @@ interface ActiveAction {
   summary: string;
   riskLevel: RiskLevel;
   startedAt: number;
+  step?: { index: number; total: number };
 }
 
 interface LastAction {
@@ -51,6 +67,7 @@ interface LastAction {
   phase: Exclude<ToolActionPhase, "running">;
   errorCode?: string;
   elapsedMs: number;
+  step?: { index: number; total: number };
 }
 
 const BADGES: Record<ToolActionPhase, { status: "neutral" | "info" | "success" | "warning" | "danger"; text: string }> = {
@@ -109,6 +126,11 @@ export class ToolActionOverlay {
   readonly #showTimeoutMs: number;
   readonly #approvalShowTimeoutMs: number;
   readonly #minDisplayMs: number;
+  readonly #compact: boolean;
+  readonly #frame: boolean;
+  readonly #targetRing: boolean;
+  readonly #targetRingLeadMs: number;
+  readonly #targetRingDurationMs: number;
   readonly #now: () => number;
   readonly #onPause: (() => Promise<void> | void) | undefined;
   readonly #onResume: (() => Promise<void> | void) | undefined;
@@ -132,6 +154,12 @@ export class ToolActionOverlay {
   #polling = false;
   #disposed = false;
   #sequence = 0;
+  #frameStarted = false;
+  #framePhase: ToolActionPhase | undefined;
+  #framePromise: Promise<void> | undefined;
+  #frameGeneration = 0;
+  #ringVisible = false;
+  #ringGeneration = 0;
 
   constructor(manager: OverlayManager, options: ToolActionOverlayOptions = {}) {
     this.#manager = manager;
@@ -144,6 +172,11 @@ export class ToolActionOverlay {
     this.#showTimeoutMs = Math.max(1, options.showTimeoutMs ?? 150);
     this.#approvalShowTimeoutMs = Math.max(this.#showTimeoutMs, 1_500);
     this.#minDisplayMs = Math.max(0, options.minDisplayMs ?? 400);
+    this.#compact = options.compact ?? false;
+    this.#frame = options.frame ?? true;
+    this.#targetRing = options.targetRing ?? true;
+    this.#targetRingLeadMs = Math.max(0, Math.min(600, options.targetRingLeadMs ?? 150));
+    this.#targetRingDurationMs = Math.max(200, Math.min(2_000, options.targetRingDurationMs ?? 600));
     this.#now = options.now ?? (() => Date.now());
     this.#onPause = options.onPause;
     this.#onResume = options.onResume;
@@ -165,11 +198,18 @@ export class ToolActionOverlay {
       tool: safeToolName(input.tool),
       summary: safeDetail(input.summary) ?? "Working",
       riskLevel: input.riskLevel,
-      startedAt: this.#now()
+      startedAt: this.#now(),
+      ...(input.step === undefined ? {} : { step: input.step })
     };
     this.#active.set(action.id, action);
     this.#startHeartbeat();
     this.#startEventPoll();
+    this.#framePhase = undefined;
+    if (this.#frame) void this.#showFrame("info", false);
+    if (this.#targetRing && input.target !== undefined && input.dryRun !== true) {
+      void this.#showTargetRing(input.target);
+      if (this.#targetRingLeadMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, this.#targetRingLeadMs));
+    }
     await this.#renderWithinBudget();
 
     let settled = false;
@@ -186,21 +226,22 @@ export class ToolActionOverlay {
           riskLevel: result.riskLevel,
           phase,
           ...(result.error?.code === undefined ? {} : { errorCode: result.error.code }),
-          elapsedMs: Math.max(0, this.#now() - action.startedAt)
+          elapsedMs: Math.max(0, this.#now() - action.startedAt),
+          ...(action.step === undefined ? {} : { step: action.step })
         };
+        const needsOperator = phase === "waiting_approval" || phase === "halted" || phase === "error";
         if (this.#active.size === 0) {
           this.#stopHeartbeat();
-          const needsOperator = phase === "waiting_approval" || phase === "halted";
           if (!this.#paused && !this.#stopRequested && !needsOperator) this.#scheduleAutoHide();
         } else {
           this.#startHeartbeat();
         }
-        const needsOperator = phase === "waiting_approval" || phase === "halted";
+        void this.#syncFrame(this.#currentPhase());
         if (!needsOperator && this.#visibleSince !== undefined) {
           const remaining = this.#minDisplayMs - (this.#now() - this.#visibleSince);
           if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
         }
-        await this.#renderWithinBudget(needsOperator ? this.#approvalShowTimeoutMs : this.#showTimeoutMs);
+        await this.#renderWithinBudget(phase === "waiting_approval" ? this.#approvalShowTimeoutMs : this.#showTimeoutMs);
         return this.#status();
       }
     };
@@ -267,6 +308,8 @@ export class ToolActionOverlay {
     this.#lastRenderError = undefined;
     this.#showTimedOut = false;
     this.#setVisibility(false);
+    await this.#hideFrame();
+    await this.#hideRing();
     if (!this.#started) return;
     this.#started = false;
     try {
@@ -314,11 +357,13 @@ export class ToolActionOverlay {
     const badge = BADGES[phase];
     const tool = current?.tool ?? this.#last?.tool ?? "action";
     const risk = current?.riskLevel ?? this.#last?.riskLevel ?? "medium";
+    const step = current?.step ?? this.#last?.step;
+    const stepLabel = step === undefined ? undefined : `Step ${Math.min(step.total, step.index + 1)}/${step.total}`;
     const elapsed = current === undefined
       ? (this.#last?.elapsedMs ?? 0)
       : Math.max(...[...this.#active.values()].map((action) => Math.max(0, this.#now() - action.startedAt)));
     const components: OverlayWidgetComponent[] = [
-      { type: "status_badge", status: badge.status, text: badge.text },
+      { type: "status_badge", status: badge.status, text: this.#compact ? `${badge.text} · ${riskLabel(risk)}` : badge.text },
       { type: "text", text: this.#detailText(phase, current) }
     ];
     if (phase === "waiting_approval") components.push({ type: "warning", text: "Approval required. Run: agenthost confirmations" });
@@ -326,8 +371,11 @@ export class ToolActionOverlay {
     if (phase === "halted" && this.#stopRequested) components.push({ type: "warning", text: "Stop is active. Dismiss this card or run: agenthost agent resume --stop" });
     if (this.#controlError !== undefined) components.push({ type: "warning", text: this.#controlError });
     if (this.#active.size > 1) components.push({ type: "key_value", key: "Actions", value: `${this.#active.size} running` });
-    components.push({ type: "key_value", key: "Risk", value: riskLabel(risk) });
-    components.push({ type: "key_value", key: "Elapsed", value: elapsedLabel(elapsed) });
+    if (stepLabel !== undefined && !this.#compact) components.push({ type: "key_value", key: "Step", value: stepLabel.replace("Step ", "") });
+    if (!this.#compact) {
+      components.push({ type: "key_value", key: "Risk", value: riskLabel(risk) });
+      components.push({ type: "key_value", key: "Elapsed", value: elapsedLabel(elapsed) });
+    }
     for (const [label, event] of this.#buttons(phase)) components.push({ type: "button", label, event });
     const title = phase === "waiting_approval"
       ? "AgentHost · Approval required"
@@ -337,7 +385,9 @@ export class ToolActionOverlay {
           ? "AgentHost · Halted"
           : this.#active.size > 1
             ? `AgentHost · ${this.#active.size} actions running`
-            : `AgentHost · ${tool}`;
+            : stepLabel !== undefined
+              ? `AgentHost · ${stepLabel}`
+              : `AgentHost · ${tool}`;
     return {
       widgetId: this.#widgetId,
       title,
@@ -357,6 +407,100 @@ export class ToolActionOverlay {
     if (phase === "running") return [["Pause", "pause"], ["Stop", "emergency_stop_requested"]];
     if (phase === "waiting_approval") return [["Stop", "emergency_stop_requested"], ["Dismiss", "dismissed"]];
     return [["Pause", "pause"], ["Dismiss", "dismissed"]];
+  }
+
+  #frameOverlayId(): string {
+    return `${this.#widgetId}-frame`;
+  }
+
+  #ringOverlayId(): string {
+    return `${this.#widgetId}-ring`;
+  }
+
+  async #showFrame(semantic: "info" | "success" | "warning" | "danger", animated: boolean): Promise<void> {
+    const generation = ++this.#frameGeneration;
+    const promise = (async () => {
+      try {
+        const result = await this.#manager.showPrimitive({
+          overlayId: this.#frameOverlayId(),
+          type: "frame",
+          style: { semantic },
+          ...(animated ? { animation: { kind: "pulse", durationMs: 1_200, repeatCount: 3, reducedMotion: "fade" } } : {}),
+          sensitivity: "public",
+          ttlMs: 300_000
+        });
+        if (generation === this.#frameGeneration) {
+          this.#frameStarted = result.ok;
+        } else if (result.ok) {
+          try { await this.#manager.dismiss(this.#frameOverlayId()); } catch { /* Best effort. */ }
+        }
+      } catch {
+        if (generation === this.#frameGeneration) this.#frameStarted = false;
+      }
+    })();
+    this.#framePromise = promise;
+    await promise;
+  }
+
+  async #syncFrame(phase: ToolActionPhase): Promise<void> {
+    if (!this.#frame) return;
+    if (this.#framePromise !== undefined) await this.#framePromise;
+    if (!this.#frameStarted) return;
+    if (this.#framePhase === phase) return;
+    this.#framePhase = phase;
+    const semantic = phase === "error" ? "danger" : phase === "waiting_approval" || phase === "paused" || phase === "halted" ? "warning" : phase === "done" ? "success" : "info";
+    await this.#showFrame(semantic, phase === "waiting_approval" || phase === "paused" || phase === "halted");
+  }
+
+  async #hideFrame(): Promise<void> {
+    this.#frameGeneration++;
+    this.#framePromise = undefined;
+    this.#framePhase = undefined;
+    this.#frameStarted = false;
+    try {
+      await this.#manager.dismiss(this.#frameOverlayId());
+    } catch {
+      /* Frame dismissal is best effort. */
+    }
+  }
+
+  async #showTargetRing(target: ToolActionTarget): Promise<void> {
+    const generation = ++this.#ringGeneration;
+    const ttl = this.#targetRingDurationMs + this.#targetRingLeadMs + 500;
+    const binding: OverlayTargetBinding = {
+      kind: "screen_point",
+      point: { x: Math.round(target.x), y: Math.round(target.y) },
+      trusted: true,
+      expiresAt: new Date(Date.now() + ttl).toISOString()
+    };
+    try {
+      const result = await this.#manager.showPrimitive({
+        overlayId: this.#ringOverlayId(),
+        type: "target_ring",
+        target: binding,
+        style: { semantic: "info" },
+        animation: { kind: "pulse", durationMs: this.#targetRingDurationMs, repeatCount: 1, reducedMotion: "fade" },
+        sensitivity: "public",
+        ttlMs: ttl
+      });
+      if (generation === this.#ringGeneration) {
+        this.#ringVisible = result.ok;
+      } else if (result.ok) {
+        try { await this.#manager.dismiss(this.#ringOverlayId()); } catch { /* Best effort. */ }
+      }
+    } catch {
+      if (generation === this.#ringGeneration) this.#ringVisible = false;
+    }
+  }
+
+  async #hideRing(): Promise<void> {
+    this.#ringGeneration++;
+    this.#ringVisible = false;
+    try {
+      await this.#manager.dismiss(this.#ringOverlayId());
+    } catch {
+      /* Ring dismissal is best effort. */
+    }
   }
 
   async #renderWithinBudget(timeoutMs = this.#showTimeoutMs): Promise<void> {
@@ -445,6 +589,7 @@ export class ToolActionOverlay {
         if (paused !== this.#paused) {
           this.#paused = paused;
           await this.#render();
+          void this.#syncFrame(this.#currentPhase());
         }
       }
       const events = await this.#manager.pollEvents(this.#widgetId);
@@ -463,17 +608,19 @@ export class ToolActionOverlay {
             this.#controlError = "Pause request failed. State-changing actions may still run.";
           }
           await this.#render();
+          void this.#syncFrame(this.#currentPhase());
           return;
         }
         if (event.event === "resume") {
           if (!this.#paused) continue;
           this.#paused = false;
           this.#controlError = undefined;
-          try { await this.#onResume?.(); } catch {
+          try { await this.#onResume?.();           } catch {
             this.#paused = true;
             this.#controlError = "Resume request failed. The pause may still be active.";
           }
           await this.#render();
+          void this.#syncFrame(this.#currentPhase());
           return;
         }
         if (event.event === "emergency_stop_requested" || event.event === "cancel" || event.event === "cancelled") {
@@ -485,6 +632,7 @@ export class ToolActionOverlay {
             this.#controlError = "Stop request failed. State-changing actions may still run.";
           }
           await this.#render();
+          void this.#syncFrame(this.#currentPhase());
           return;
         }
       }
@@ -504,6 +652,8 @@ export class ToolActionOverlay {
     this.#stopHeartbeat();
     this.#stopEventPoll();
     this.#clearAutoHide();
+    await this.#hideFrame();
+    await this.#hideRing();
     try {
       await this.#manager.dismiss(this.#widgetId);
     } catch {

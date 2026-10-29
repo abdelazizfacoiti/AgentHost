@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { toolFailure, toolSuccess, type OverlayWidget } from "@agenthost/core";
+import { toolFailure, toolSuccess, type OverlayPrimitive, type OverlayWidget } from "@agenthost/core";
 import type { OverlayManager } from "@agenthost/app-overlay";
 import { ToolActionOverlay } from "../action-overlay.js";
 
@@ -7,6 +7,11 @@ function fakeManager(capabilitiesVisible = true) {
   let visible = false;
   const shown: OverlayWidget[] = [];
   const updated: OverlayWidget[] = [];
+  const primitives: OverlayPrimitive[] = [];
+  const showPrimitive = vi.fn(async (primitive: OverlayPrimitive) => {
+    primitives.push(primitive);
+    return { ok: true, errors: [] };
+  });
   const showWidget = vi.fn(async (widget: OverlayWidget) => {
     visible = true;
     shown.push(widget);
@@ -22,12 +27,13 @@ function fakeManager(capabilitiesVisible = true) {
   });
   const manager = {
     showWidget,
+    showPrimitive,
     updateWidget,
     dismiss,
     capabilities: vi.fn(() => ({ visible: capabilitiesVisible, supported: capabilitiesVisible })),
     pollEvents: vi.fn(async () => [])
   } as unknown as OverlayManager;
-  return { manager, shown, updated, dismiss };
+  return { manager, shown, updated, primitives, dismiss };
 }
 
 function badge(widget: OverlayWidget): string | undefined {
@@ -221,6 +227,80 @@ describe("automatic action overlay", () => {
       type: "warning",
       text: "Stop request failed. State-changing actions may still run."
     });
+    await overlay.close();
+    vi.useRealTimers();
+  });
+
+  it("renders a compact step-aware pill without the detailed key-value rows", async () => {
+    const fake = fakeManager();
+    const overlay = new ToolActionOverlay(fake.manager, {
+      widgetId: "action-card",
+      placement: "top_center",
+      compact: true,
+      frame: false,
+      targetRing: false,
+      minDisplayMs: 0
+    });
+    await overlay.begin({
+      tool: "desktop.click",
+      summary: "Click at 10,20",
+      riskLevel: "medium",
+      step: { index: 1, total: 4 }
+    });
+    expect(fake.shown[0]).toMatchObject({ title: "AgentHost · Step 2/4", placement: "top_center" });
+    expect(badge(fake.shown[0]!)).toBe("Running · MEDIUM");
+    expect(fake.shown[0]!.components.some((entry) => entry.type === "key_value" && entry.key === "Risk")).toBe(false);
+    await overlay.close();
+  });
+
+  it("drives the ambient frame and target ring around the exact action target", async () => {
+    const fake = fakeManager();
+    const overlay = new ToolActionOverlay(fake.manager, {
+      widgetId: "action-card",
+      frame: true,
+      targetRing: true,
+      targetRingLeadMs: 0,
+      targetRingDurationMs: 600,
+      minDisplayMs: 0
+    });
+    const handle = await overlay.begin({
+      tool: "desktop.click",
+      summary: "Click at 10,20",
+      riskLevel: "medium",
+      target: { x: 10, y: 20 }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fake.primitives[0]).toMatchObject({ type: "frame", style: { semantic: "info" } });
+    expect(fake.primitives.find((entry) => entry.type === "target_ring")).toMatchObject({
+      target: { kind: "screen_point", point: { x: 10, y: 20 }, trusted: true }
+    });
+    await handle.finish(toolSuccess({ tool: "desktop.click", riskLevel: "medium", data: { clicked: true } }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fake.primitives.filter((entry) => entry.type === "frame").at(-1)).toMatchObject({ style: { semantic: "success" } });
+    await overlay.close();
+  });
+
+  it("keeps failed non-persistent actions visible until the next action", async () => {
+    vi.useFakeTimers();
+    const fake = fakeManager();
+    const overlay = new ToolActionOverlay(fake.manager, {
+      widgetId: "action-card",
+      frame: false,
+      targetRing: false,
+      persistent: false,
+      autoHideMs: 1_000,
+      minDisplayMs: 0,
+      now: () => Date.now()
+    });
+    const handle = await overlay.begin({ tool: "desktop.click", summary: "Click", riskLevel: "medium" });
+    await handle.finish(toolFailure({
+      tool: "desktop.click",
+      riskLevel: "medium",
+      error: { code: "active_window_mismatch", message: "wrong window" },
+      observations: []
+    }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fake.dismiss).not.toHaveBeenCalledWith("action-card");
     await overlay.close();
     vi.useRealTimers();
   });

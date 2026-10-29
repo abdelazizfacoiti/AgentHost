@@ -464,20 +464,37 @@ Computer-action families:
 - `shell.*`
 - optional `browser.*`, `blender.*`, `ssh.*`
 
-### Action card
+### Action card and ambient layers
 
 - Opens before preview/handler work.
+- Compact top-center pill by default, showing state, tool/step, risk, and the
+  summary; approval waits expand with warning text and controls.
 - Shows running, waiting, preview-ready, done, failed, or halted state.
-- Click-through except small control windows.
+- Ambient frame: thin screen-edge border, blue while running, amber while an
+  operator decision is pending, red after failure, green after success.
+- Target ring: for `desktop.click` and `desktop.pointer`, a small ring marks
+  the exact target for roughly 600 ms with a 150 ms pre-action lead. The ring
+  is best-effort and never changes the action.
+- Click-through except small control windows; Pause/Resume/Stop and Dismiss
+  remain interactive.
 - Waits at most 150 ms for first paint in routine work, or 1.5 seconds on
   approval waits, then continues in the background.
 - Holds a fast visible card for at least 400 ms; the handler already finished.
+- Done pills fade after `overlay.pillAutoHideMs` (default 1.5 s). Failed,
+  paused, halted, and approval cards stay visible until the next action or an
+  explicit dismissal.
 - Never blocks execution if rendering fails.
 - Reports `overlay: "unavailable:<reason>"` and sends one rate-limited
   best-effort desktop notification when the card cannot render.
 - Raises on approval waits and sends one best-effort desktop notification.
 - Never displays confirmation-token values.
-- Honors `overlay.persistent` and `overlay.autoHideMs`.
+- Honors `overlay.persistent` and `overlay.autoHideMs` for the full task card.
+- Ambient mode is the default. `overlay.layout: "dock"` reserves a 20% sidebar
+  (left or right) through an X11 `_NET_WM_STRUT_PARTIAL`; other windows use the
+  remaining work area. Dock mode is opt-in because it changes desktop layout
+  and can invalidate coordinates captured before it was enabled. It requires
+  `xprop`; the background is click-through, and screenshot suppression still
+  hides AgentHost cards.
 
 ### Current-task card
 
@@ -705,6 +722,16 @@ Overlay fields include:
 - `preferredPosition`
 - `maxWidth`
 - `multiMonitor`
+- `layout` (`ambient` default, or `dock`)
+- `dockSide` (`left` or `right`)
+- `dockWidthPercent` (10–40; default 20)
+- `dockReserveSpace` (default true)
+- `frame` (default true)
+- `actionPill` (default true)
+- `targetRing` (default true)
+- `targetRingLeadMs` (0–600; default 150)
+- `targetRingDurationMs` (200–2000; default 600)
+- `pillAutoHideMs` (0–30000; default 1500; 0 keeps done pills)
 
 Renderer modes include `auto`, `gtk3-native` (`gtk3-x11` alias), `headless`, and
 `disabled`. `webkit-gtk-react` is diagnostic-only. Wayland and missing GTK3
@@ -852,6 +879,7 @@ Current v2 safeguards include:
 - Tesseract is required for OCR/vision.
 - `xdotool` is needed for desktop input and window control.
 - `xclip` or `xsel` is required for non-ASCII typing.
+- `xprop` is required only for `overlay.layout: "dock"` work-area reservation.
 - Wayland reports limited or unavailable global-overlay features.
 
 ### What is not live in this tree
@@ -910,7 +938,7 @@ At the time of writing, the tree passes:
 
 - `npm run build`
 - `npm run lint`
-- `npm test` — 58 files, 353 tests
+- `npm test` — 58 files, 357 tests
 - `npm run smoke:mcp` — 36 tools, 3 resources
 - `npm run benchmark:agent` — isolated, non-destructive runner overhead benchmark
 - `git diff --check`

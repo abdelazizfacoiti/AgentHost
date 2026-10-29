@@ -1,9 +1,11 @@
 import { redactSensitiveText } from "./safety/redaction.js";
 
-export type OverlayPrimitiveType = "pointer" | "arrow" | "highlight" | "spotlight" | "tooltip" | "instruction_card" | "approval_card" | "warning" | "progress" | "checkpoint_result" | "status_toast" | "comparison" | "cancel_control" | "emergency_stop_control";
+export type OverlayPrimitiveType = "frame" | "target_ring" | "pointer" | "arrow" | "highlight" | "spotlight" | "tooltip" | "instruction_card" | "approval_card" | "warning" | "progress" | "checkpoint_result" | "status_toast" | "comparison" | "cancel_control" | "emergency_stop_control";
 export type OverlayRendererStatus = "available" | "degraded" | "headless" | "unavailable";
 export type OverlayRendererMode = "headless" | "auto" | "gtk3-x11" | "gtk3-native" | "webkit-gtk-react" | "disabled";
 export type OverlayActivityMode = "always" | "on_change" | "off";
+export type OverlayLayout = "ambient" | "dock";
+export type OverlayDockSide = "left" | "right";
 export type OverlaySensitivity = "public" | "private" | "secret";
 export type OverlayTheme = "system" | "light" | "dark";
 export type OverlayDensity = "compact" | "normal";
@@ -23,6 +25,16 @@ export interface OverlayPublicConfig {
   preferredPosition: OverlayPlacement;
   maxWidth: number;
   multiMonitor: "primary" | "all";
+  layout: OverlayLayout;
+  dockSide: OverlayDockSide;
+  dockWidthPercent: number;
+  dockReserveSpace: boolean;
+  frame: boolean;
+  actionPill: boolean;
+  targetRing: boolean;
+  targetRingLeadMs: number;
+  targetRingDurationMs: number;
+  pillAutoHideMs: number;
 }
 export type OverlayAnimationKind = "fade" | "slide" | "scale" | "pulse" | "glow" | "pointer_move" | "progress";
 export type OverlayControlSurfaceAction = "continue" | "pause" | "resume" | "cancel" | "retry_visual_render" | "inspect_diagnostics" | "emergency_hide" | "close_control_surface";

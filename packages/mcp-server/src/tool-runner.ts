@@ -20,7 +20,7 @@ import {
   type ToolTracePhase
 } from "@agenthost/core";
 import type { AgentHostMcpContext } from "./context.js";
-import type { ToolActionHandle } from "./action-overlay.js";
+import type { ToolActionHandle, ToolActionTarget } from "./action-overlay.js";
 import { shouldShowActionCard } from "./activity.js";
 import { createSafetyEvaluationContext } from "./grants.js";
 import { withStateChangingLane } from "./execution-gate.js";
@@ -132,6 +132,21 @@ function inputSummaryForAudit(tool: AnyAgentHostToolDefinition, input: unknown):
   } catch {
     return "Tool input summary unavailable.";
   }
+}
+
+function actionTargetFor(toolName: string, input: unknown): ToolActionTarget | undefined {
+  if (input === null || typeof input !== "object") return undefined;
+  const value = input as Record<string, unknown>;
+  const point = (x: unknown, y: unknown): ToolActionTarget | undefined => (
+    typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y)
+      ? { x, y }
+      : undefined
+  );
+  if (toolName === "desktop.click") return point(value.x, value.y);
+  if (toolName === "desktop.pointer") {
+    return point(value.startX, value.startY) ?? point(value.x, value.y);
+  }
+  return undefined;
 }
 
 function schemaIssues(error: { issues?: Array<{ path?: Array<string | number>; message?: string }> }): Array<{ path: string; message: string }> {
@@ -570,11 +585,15 @@ export async function runTool<Input>(
   let action: ToolActionHandle | undefined;
   if (shouldShowActionCard(tool.name, tool.execution?.executionClass, activityMode) && inputPassesSchema(tool, input)) {
     const overlayStartedAt = Date.now();
+    const target = actionTargetFor(tool.name, input);
     try {
       action = await context.actionOverlay?.begin({
         tool: tool.name,
         summary: inputSummaryForAudit(tool, input),
-        riskLevel: tool.riskLevel
+        riskLevel: tool.riskLevel,
+        ...(target === undefined ? {} : { target }),
+        ...(context.planStep === undefined ? {} : { step: context.planStep }),
+        ...(input !== null && typeof input === "object" && (input as Record<string, unknown>).dryRun === true ? { dryRun: true } : {})
       });
     } catch {
       action = undefined;
@@ -628,7 +647,8 @@ export async function runTool<Input>(
       action = await context.actionOverlay?.begin({
         tool: tool.name,
         summary: audit.inputSummary,
-        riskLevel: result.riskLevel
+        riskLevel: result.riskLevel,
+        ...(context.planStep === undefined ? {} : { step: context.planStep })
       });
     } catch {
       action = undefined;

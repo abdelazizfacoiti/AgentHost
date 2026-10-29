@@ -21,7 +21,17 @@ const overlaySchema = z.object({
   terminalAutoHideMs: z.number().int().min(0).max(300_000).optional(),
   preferredPosition: z.enum(["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"]).optional(),
   maxWidth: z.number().int().min(240).max(1200).optional(),
-  multiMonitor: z.enum(["primary", "all"]).optional()
+  multiMonitor: z.enum(["primary", "all"]).optional(),
+  layout: z.enum(["ambient", "dock"]).optional(),
+  dockSide: z.enum(["left", "right"]).optional(),
+  dockWidthPercent: z.number().int().min(10).max(40).optional(),
+  dockReserveSpace: z.boolean().optional(),
+  frame: z.boolean().optional(),
+  actionPill: z.boolean().optional(),
+  targetRing: z.boolean().optional(),
+  targetRingLeadMs: z.number().int().min(0).max(600).optional(),
+  targetRingDurationMs: z.number().int().min(200).max(2_000).optional(),
+  pillAutoHideMs: z.number().int().min(0).max(30_000).optional()
 }).strict();
 const executionSchema = z.object({ placement: z.enum(["foreground", "background"]).optional() }).strict();
 const speechSchema = z.object({
@@ -289,7 +299,17 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     autoHideMs: fileConfig.overlay?.autoHideMs ?? (fileConfig.overlay?.persistent === false ? 15_000 : 0),
     preferredPosition: fileConfig.overlay?.preferredPosition ?? "top_right",
     maxWidth: fileConfig.overlay?.maxWidth ?? 520,
-    multiMonitor: fileConfig.overlay?.multiMonitor ?? "primary"
+    multiMonitor: fileConfig.overlay?.multiMonitor ?? "primary",
+    layout: fileConfig.overlay?.layout ?? "ambient",
+    dockSide: fileConfig.overlay?.dockSide ?? "right",
+    dockWidthPercent: fileConfig.overlay?.dockWidthPercent ?? 20,
+    dockReserveSpace: fileConfig.overlay?.dockReserveSpace ?? true,
+    frame: fileConfig.overlay?.frame ?? true,
+    actionPill: fileConfig.overlay?.actionPill ?? true,
+    targetRing: fileConfig.overlay?.targetRing ?? true,
+    targetRingLeadMs: fileConfig.overlay?.targetRingLeadMs ?? 150,
+    targetRingDurationMs: fileConfig.overlay?.targetRingDurationMs ?? 600,
+    pillAutoHideMs: fileConfig.overlay?.pillAutoHideMs ?? 1_500
   };
   const grants = (fileConfig.grants ?? []).map((grant) => normalizeGrant(grant));
   const placement = z.enum(["foreground", "background"]).parse(env.AGENTHOST_EXECUTION_PLACEMENT ?? fileConfig.execution?.placement ?? "foreground");

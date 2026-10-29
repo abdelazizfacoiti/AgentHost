@@ -289,13 +289,29 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...(options.sessionGrants === undefined ? {} : { sessionGrants: options.sessionGrants })
   });
   const activityMode = config.overlay?.mode ?? "always";
-  const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", { sessionId }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? false });
+  const actionPill = config.overlay?.actionPill ?? true;
+  const pillAutoHideMs = config.overlay?.pillAutoHideMs ?? 1_500;
+  const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", {
+    sessionId,
+    visual: {
+      layout: config.overlay?.layout ?? "ambient",
+      dockSide: config.overlay?.dockSide ?? "right",
+      dockWidthPercent: config.overlay?.dockWidthPercent ?? 20,
+      dockReserveSpace: config.overlay?.dockReserveSpace ?? true,
+      maxWidth: config.overlay?.maxWidth ?? 520
+    }
+  }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? false });
   let taskActivity: TaskActivityOverlay | undefined;
   const actionOverlay = new ToolActionOverlay(overlay, {
     widgetId: `agenthost-action-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`,
-    placement: config.overlay?.preferredPosition ?? "top_right",
-    persistent: config.overlay?.persistent ?? true,
-    autoHideMs: config.overlay?.autoHideMs ?? 15_000,
+    placement: actionPill ? "top_center" : config.overlay?.preferredPosition ?? "top_right",
+    persistent: actionPill ? pillAutoHideMs <= 0 : config.overlay?.persistent ?? true,
+    autoHideMs: actionPill ? pillAutoHideMs : config.overlay?.autoHideMs ?? 15_000,
+    compact: actionPill,
+    frame: config.overlay?.frame ?? true,
+    targetRing: config.overlay?.targetRing ?? true,
+    targetRingLeadMs: config.overlay?.targetRingLeadMs ?? 150,
+    targetRingDurationMs: config.overlay?.targetRingDurationMs ?? 600,
     onPause: async () => { await requestPause(config.agentHostDir, ACTION_PAUSE_REASON); },
     onResume: async () => {
       const state = await readRunState(config.agentHostDir);

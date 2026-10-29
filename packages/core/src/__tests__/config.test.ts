@@ -16,7 +16,23 @@ describe("loadAgentHostConfig", () => {
     expect(config.policy.requireConfirmationForStateChanging).toBe(false);
     expect(config.forgeRuntimeSandboxMode).toBe("auto");
     expect(config.overlayRendererMode).toBe("auto");
-    expect(config.overlay).toEqual(expect.objectContaining({ mode: "always", persistent: true, autoHideMs: 0, preferredPosition: "top_right", reducedMotion: false }));
+    expect(config.overlay).toEqual(expect.objectContaining({
+      mode: "always",
+      persistent: true,
+      autoHideMs: 0,
+      preferredPosition: "top_right",
+      reducedMotion: false,
+      layout: "ambient",
+      dockSide: "right",
+      dockWidthPercent: 20,
+      dockReserveSpace: true,
+      frame: true,
+      actionPill: true,
+      targetRing: true,
+      targetRingLeadMs: 150,
+      targetRingDurationMs: 600,
+      pillAutoHideMs: 1_500
+    }));
     expect((config as unknown as Record<string, unknown>).runtimeActivityOverlay).toBeUndefined();
     expect((config as unknown as Record<string, unknown>).browserBridge).toBeUndefined();
     expect((config as unknown as Record<string, unknown>).controlRoom).toBeUndefined();
@@ -248,6 +264,17 @@ describe("loadAgentHostConfig", () => {
       expect((await loadAgentHostConfig({ env: {}, homeDir, configPath })).overlay?.mode).toBe(mode);
     }
     await writeFile(configPath, JSON.stringify({ overlay: { mode: "sometimes" } }), "utf8");
+    await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
+  });
+
+  it("bounds ambient overlay and optional dock settings", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "agenthost-config-overlay-layout-"));
+    const agentHostDir = path.join(homeDir, ".agenthost");
+    await mkdir(agentHostDir, { recursive: true });
+    const configPath = path.join(agentHostDir, "config.json");
+    await writeFile(configPath, JSON.stringify({ overlay: { layout: "dock", dockSide: "left", dockWidthPercent: 25, dockReserveSpace: false, frame: false, actionPill: false, targetRing: false, targetRingLeadMs: 200, targetRingDurationMs: 900, pillAutoHideMs: 2000 } }), "utf8");
+    expect((await loadAgentHostConfig({ env: {}, homeDir, configPath })).overlay).toMatchObject({ layout: "dock", dockSide: "left", dockWidthPercent: 25, dockReserveSpace: false, frame: false, actionPill: false, targetRing: false, targetRingLeadMs: 200, targetRingDurationMs: 900, pillAutoHideMs: 2000 });
+    await writeFile(configPath, JSON.stringify({ overlay: { dockWidthPercent: 60 } }), "utf8");
     await expect(loadAgentHostConfig({ env: {}, homeDir, configPath })).rejects.toThrow();
   });
 
