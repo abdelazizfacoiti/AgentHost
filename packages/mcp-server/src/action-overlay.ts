@@ -8,6 +8,7 @@ export interface ToolActionTarget {
   y: number;
   width?: number;
   height?: number;
+  windowId?: string;
 }
 
 export interface ToolActionInput {
@@ -58,6 +59,7 @@ interface ActiveAction {
   riskLevel: RiskLevel;
   startedAt: number;
   step?: { index: number; total: number };
+  target?: ToolActionTarget;
 }
 
 interface LastAction {
@@ -68,6 +70,7 @@ interface LastAction {
   errorCode?: string;
   elapsedMs: number;
   step?: { index: number; total: number };
+  target?: ToolActionTarget;
 }
 
 const BADGES: Record<ToolActionPhase, { status: "neutral" | "info" | "success" | "warning" | "danger"; text: string }> = {
@@ -199,18 +202,27 @@ export class ToolActionOverlay {
       summary: safeDetail(input.summary) ?? "Working",
       riskLevel: input.riskLevel,
       startedAt: this.#now(),
-      ...(input.step === undefined ? {} : { step: input.step })
+      ...(input.step === undefined ? {} : { step: input.step }),
+      ...(input.target === undefined ? {} : { target: input.target })
     };
     this.#active.set(action.id, action);
     this.#startHeartbeat();
     this.#startEventPoll();
     this.#framePhase = undefined;
+    // Paint the card first. Frame/ring are visual hints and must not consume
+    // the bounded first-paint budget on a cold GTK renderer. The ring request
+    // is still issued before begin() returns, so the governed handler cannot
+    // run before the target hint has had its lead interval.
+    const cardPaint = this.#renderWithinBudget();
+    await cardPaint;
     if (this.#frame) void this.#showFrame("info", false);
-    if (this.#targetRing && input.target !== undefined && input.dryRun !== true) {
-      void this.#showTargetRing(input.target);
-      if (this.#targetRingLeadMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, this.#targetRingLeadMs));
+    const ringPaint = this.#targetRing && input.target !== undefined && input.dryRun !== true
+      ? this.#showTargetRing(input.target)
+      : Promise.resolve();
+    if (this.#targetRing && input.target !== undefined && input.dryRun !== true && this.#targetRingLeadMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, this.#targetRingLeadMs));
     }
-    await this.#renderWithinBudget();
+    await ringPaint.catch(() => undefined);
 
     let settled = false;
     return {
@@ -227,7 +239,8 @@ export class ToolActionOverlay {
           phase,
           ...(result.error?.code === undefined ? {} : { errorCode: result.error.code }),
           elapsedMs: Math.max(0, this.#now() - action.startedAt),
-          ...(action.step === undefined ? {} : { step: action.step })
+          ...(action.step === undefined ? {} : { step: action.step }),
+          ...(action.target === undefined ? {} : { target: action.target })
         };
         const needsOperator = phase === "waiting_approval" || phase === "halted" || phase === "error";
         if (this.#active.size === 0) {
@@ -398,7 +411,15 @@ export class ToolActionOverlay {
       sensitivity: "public",
       ttlMs: 300_000,
       ...(this.#persistent ? { persistent: true } : {})
+      ,...(current?.target === undefined && this.#last?.target === undefined ? {} : {
+        target: this.#targetBinding(current?.target ?? this.#last?.target!)
+      })
     };
+  }
+
+  #targetBinding(target: ToolActionTarget): OverlayTargetBinding {
+    const expiresAt = new Date(Date.now() + this.#targetRingDurationMs + this.#targetRingLeadMs + 1_000).toISOString();
+    return { kind: "screen_point", point: { x: Math.round(target.x), y: Math.round(target.y) }, trusted: true, expiresAt };
   }
 
   #buttons(phase: ToolActionPhase): Array<[string, "pause" | "resume" | "emergency_stop_requested" | "dismissed"]> {
@@ -467,12 +488,10 @@ export class ToolActionOverlay {
   async #showTargetRing(target: ToolActionTarget): Promise<void> {
     const generation = ++this.#ringGeneration;
     const ttl = this.#targetRingDurationMs + this.#targetRingLeadMs + 500;
-    const binding: OverlayTargetBinding = {
-      kind: "screen_point",
-      point: { x: Math.round(target.x), y: Math.round(target.y) },
-      trusted: true,
-      expiresAt: new Date(Date.now() + ttl).toISOString()
-    };
+    const expiresAt = new Date(Date.now() + ttl).toISOString();
+    const binding: OverlayTargetBinding = target.width !== undefined && target.height !== undefined && target.windowId !== undefined
+      ? { kind: "window_region", windowId: target.windowId, bounds: { x: Math.round(target.x), y: Math.round(target.y), width: Math.max(1, Math.round(target.width)), height: Math.max(1, Math.round(target.height)) }, expiresAt }
+      : { kind: "screen_point", point: { x: Math.round(target.x), y: Math.round(target.y) }, trusted: true, expiresAt };
     try {
       const result = await this.#manager.showPrimitive({
         overlayId: this.#ringOverlayId(),

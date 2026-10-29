@@ -1040,6 +1040,43 @@ class Renderer:
             else:
                 x = area.x + area.width - width - CARD_MARGIN
             y = area.y + area.height - height - CARD_MARGIN if placement in {"bottom_left", "bottom_center", "bottom_right"} else area.y + CARD_MARGIN
+
+        # A target ring is transient but must remain legible. If the preferred
+        # placement intersects the target, choose the nearest free corner and
+        # then apply the normal monitor/work-area clamp below.
+        avoid = None
+        if isinstance(bounds, dict):
+            try:
+                avoid = (float(bounds.get("x", 0)) - 28, float(bounds.get("y", 0)) - 28,
+                         float(bounds.get("width", 1)) + 56, float(bounds.get("height", 1)) + 56)
+            except Exception:
+                avoid = None
+        elif isinstance(point, dict):
+            try:
+                avoid = (float(point.get("x", 0)) - 52, float(point.get("y", 0)) - 52, 104, 104)
+            except Exception:
+                avoid = None
+        if avoid is not None:
+            ax, ay, aw, ah = avoid
+            def overlaps(px, py):
+                return px < ax + aw and px + width > ax and py < ay + ah and py + height > ay
+            placement = payload.get("placement", "top_right")
+            corners = [
+                (area.x + CARD_MARGIN, area.y + CARD_MARGIN),
+                (area.x + area.width - width - CARD_MARGIN, area.y + CARD_MARGIN),
+                (area.x + CARD_MARGIN, area.y + area.height - height - CARD_MARGIN),
+                (area.x + area.width - width - CARD_MARGIN, area.y + area.height - height - CARD_MARGIN),
+            ]
+            if placement in {"top_left", "bottom_left"}:
+                corners = [corners[0], corners[2], corners[1], corners[3]]
+            elif placement in {"top_right", "bottom_right"}:
+                corners = [corners[1], corners[3], corners[0], corners[2]]
+            elif placement == "bottom_center":
+                corners = [corners[2], corners[3], corners[0], corners[1]]
+            for candidate_x, candidate_y in [(x, y), *corners]:
+                if not overlaps(candidate_x, candidate_y):
+                    x, y = candidate_x, candidate_y
+                    break
         x = min(max(x, area.x + CARD_MARGIN), area.x + area.width - width - CARD_MARGIN)
         y = min(max(y, area.y + CARD_MARGIN), area.y + area.height - height - CARD_MARGIN)
         card["last_position"] = (int(x), int(y), width, height)
@@ -1210,10 +1247,19 @@ class Renderer:
         self.dismiss_ring(overlay_id)
         bounds = self.target_bounds(record)
         pad = 28
-        x = int(bounds[0] - pad)
-        y = int(bounds[1] - pad)
         width = max(64, int(bounds[2] + 2 * pad))
         height = max(64, int(bounds[3] + 2 * pad))
+        geometries = self.monitor_geometries()
+        monitor = geometries[0] if geometries else (0, 0, 1920, 1080, 1)
+        center_x = bounds[0] + bounds[2] / 2
+        center_y = bounds[1] + bounds[3] / 2
+        for candidate in geometries:
+            if candidate[0] <= center_x < candidate[0] + candidate[2] and candidate[1] <= center_y < candidate[1] + candidate[3]:
+                monitor = candidate
+                break
+        mx, my, mw, mh, _scale = monitor
+        x = min(max(int(bounds[0] - pad), int(mx)), int(mx + mw - width))
+        y = min(max(int(bounds[1] - pad), int(my)), int(my + mh - height))
         window = self.new_popup(False, click_through=True)
         if CAIRO_FOREIGN_AVAILABLE:
             area = Gtk.DrawingArea()

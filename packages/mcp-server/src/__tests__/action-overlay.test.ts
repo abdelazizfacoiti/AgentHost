@@ -8,11 +8,14 @@ function fakeManager(capabilitiesVisible = true) {
   const shown: OverlayWidget[] = [];
   const updated: OverlayWidget[] = [];
   const primitives: OverlayPrimitive[] = [];
+  const calls: string[] = [];
   const showPrimitive = vi.fn(async (primitive: OverlayPrimitive) => {
+    calls.push(`primitive:${primitive.type}`);
     primitives.push(primitive);
     return { ok: true, errors: [] };
   });
   const showWidget = vi.fn(async (widget: OverlayWidget) => {
+    calls.push("widget");
     visible = true;
     shown.push(widget);
     return { ok: true, errors: [] };
@@ -33,7 +36,7 @@ function fakeManager(capabilitiesVisible = true) {
     capabilities: vi.fn(() => ({ visible: capabilitiesVisible, supported: capabilitiesVisible })),
     pollEvents: vi.fn(async () => [])
   } as unknown as OverlayManager;
-  return { manager, shown, updated, primitives, dismiss };
+  return { manager, shown, updated, primitives, calls, dismiss };
 }
 
 function badge(widget: OverlayWidget): string | undefined {
@@ -277,6 +280,18 @@ describe("automatic action overlay", () => {
     await handle.finish(toolSuccess({ tool: "desktop.click", riskLevel: "medium", data: { clicked: true } }));
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(fake.primitives.filter((entry) => entry.type === "frame").at(-1)).toMatchObject({ style: { semantic: "success" } });
+    await overlay.close();
+  });
+
+  it("paints the card before auxiliary frame/ring work consumes the renderer queue", async () => {
+    const fake = fakeManager();
+    const overlay = new ToolActionOverlay(fake.manager, {
+      widgetId: "action-card",
+      targetRingLeadMs: 0,
+      minDisplayMs: 0
+    });
+    await overlay.begin({ tool: "desktop.click", summary: "Click", riskLevel: "medium", target: { x: 5, y: 5 } });
+    expect(fake.calls.slice(0, 3)).toEqual(["widget", "primitive:frame", "primitive:target_ring"]);
     await overlay.close();
   });
 
