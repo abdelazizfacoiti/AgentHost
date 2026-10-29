@@ -15,7 +15,7 @@ const TOOL_EXECUTION_DECLARATIONS: Record<string, ToolExecutionMetadata> = {};
 const declare = (names: string[], metadata: ToolExecutionMetadata): void => { for (const name of names) TOOL_EXECUTION_DECLARATIONS[name] = metadata; };
 
 declare([
-  "adapter.list", "adapter.get", "computer.observe_state", "computer.wait_for", "file.exists", "file.list", "file.read", "system.get_info", "system.list_capabilities", "vision.analyze_image", "vision.find_target", "vision.find_text", "window.list"
+  "adapter.list", "adapter.get", "computer.observe_state", "computer.wait_for", "file.exists", "file.list", "file.read", "file.read_many", "file.search", "system.get_info", "system.list_capabilities", "vision.analyze_image", "vision.find_target", "vision.find_text", "window.list"
 ], readOnly());
 declare(["system.check_dependency"], diagnostic());
 declare(["agent.status"], readOnly());

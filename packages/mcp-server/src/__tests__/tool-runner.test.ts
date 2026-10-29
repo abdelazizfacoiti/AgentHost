@@ -246,6 +246,28 @@ describe("governed tool runner", () => {
     expect(bounded.data).toEqual(expect.objectContaining({ content: "he", truncated: true }));
   });
 
+  it("reads batches and performs bounded recursive file search through governed tools", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const batchDir = path.join(home, "batch");
+    await mkdir(path.join(batchDir, "nested"), { recursive: true });
+    await writeFile(path.join(batchDir, "one.txt"), "alpha\nneedle\n");
+    await writeFile(path.join(batchDir, "nested", "two.txt"), "needle again\n");
+    const tools = applyProductionExecutionMetadata(createFileTools());
+    const readMany = tools.find((tool) => tool.name === "file.read_many")!;
+    const batch = await runTool(readMany, { paths: [path.join(batchDir, "one.txt"), path.join(batchDir, "nested", "two.txt")] }, context);
+    expect(batch.ok).toBe(true);
+    expect((batch.data as { files: Array<{ content: string }> }).files.map((file) => file.content)).toEqual(["alpha\nneedle\n", "needle again\n"]);
+
+    const search = tools.find((tool) => tool.name === "file.search")!;
+    const found = await runTool(search, { path: batchDir, query: "needle", recursive: true }, context);
+    expect(found.ok).toBe(true);
+    expect((found.data as { matches: Array<{ path: string; line: number }> }).matches).toEqual(expect.arrayContaining([
+      { path: path.join(batchDir, "one.txt"), line: 2 },
+      { path: path.join(batchDir, "nested", "two.txt"), line: 1 }
+    ]));
+  });
+
   it("blocks shell commands whose cwd would enter the AgentHost control plane", async () => {
     const home = await tempHome();
     const context = makeContext(home, []);

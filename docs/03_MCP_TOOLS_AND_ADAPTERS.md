@@ -1,7 +1,7 @@
 # AgentHost MCP Tools and Adapter Specification
 
 All callable tools return `ToolResult`. MCP transport is stdio. The current
-minimal-v2 server exposes 36 base tools. This number is generated from the
+minimal-v2 server exposes 38 base tools. This number is generated from the
 loaded set at startup; treat `system.list_capabilities` and
 `agenthost://capabilities` as authoritative instead of hard-coding counts.
 
@@ -30,7 +30,9 @@ screen-change hint. Missing backend data is omitted rather than guessed.
 | `computer.wait_for` | observe | read_only |
 | `window.list` | low | read_only |
 | `file.read` | low | read_only |
+| `file.read_many` | low | read_only |
 | `file.list` | low | read_only |
+| `file.search` | low | read_only |
 | `file.exists` | observe | read_only |
 | `vision.analyze_image` | low | read_only |
 | `vision.find_text` | low | read_only |
@@ -142,7 +144,7 @@ the MCP process is owned by the client.
 
 ## Files and shell
 
-Read-only: `file.read`, `file.list`, `file.exists`. Routine state-changing:
+Read-only: `file.read`, `file.read_many`, `file.list`, `file.search`, `file.exists`. `file.list` supports bounded recursion; `file.search` returns matching paths and line numbers without file contents. Routine state-changing:
 `file.write`, `file.ensure_dir`, `file.copy`, `file.move`. `file.delete`
 requires an exact confirmation. `file.delete` is file-only; recursive
 directory deletion is not exposed over MCP and a directory target returns

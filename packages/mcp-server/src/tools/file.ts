@@ -28,7 +28,24 @@ const writeInput = baseSchema.extend({
 }).strict();
 
 const listInput = baseSchema.extend({
-  limit: z.number().int().min(1).max(10000).optional()
+  limit: z.number().int().min(1).max(10000).optional(),
+  recursive: z.boolean().optional(),
+  maxDepth: z.number().int().min(0).max(8).optional()
+}).strict();
+
+const readManyInput = z.object({
+  paths: z.array(z.string().trim().min(1).max(1000)).min(1).max(50),
+  encoding: z.enum(["utf8", "base64"]).optional(),
+  maxBytes: z.number().int().min(1).max(1024 * 1024).optional()
+}).strict();
+
+const searchInput = baseSchema.extend({
+  query: z.string().min(1).max(500),
+  recursive: z.boolean().optional(),
+  maxDepth: z.number().int().min(0).max(8).optional(),
+  maxMatches: z.number().int().min(1).max(200).optional(),
+  maxBytesPerFile: z.number().int().min(1).max(1024 * 1024).optional(),
+  caseSensitive: z.boolean().optional()
 }).strict();
 
 const existsInput = baseSchema.strict();
@@ -88,6 +105,23 @@ function failure(tool: string, safety: ReturnType<typeof evaluateSafety>): ToolR
   });
 }
 
+async function walkFiles(root: string, recursive: boolean, maxDepth: number, limit: number): Promise<Array<{ path: string; name: string; type: "file" | "directory" | "other"; depth: number }>> {
+  const results: Array<{ path: string; name: string; type: "file" | "directory" | "other"; depth: number }> = [];
+  const visit = async (directory: string, depth: number): Promise<void> => {
+    if (results.length >= limit) return;
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (results.length >= limit) break;
+      const entryPath = path.join(directory, entry.name);
+      const type = entry.isFile() ? "file" : entry.isDirectory() ? "directory" : "other";
+      results.push({ path: entryPath, name: entry.name, type, depth });
+      if (recursive && type === "directory" && depth < maxDepth) await visit(entryPath, depth + 1);
+    }
+  };
+  await visit(root, 0);
+  return results;
+}
+
 const executionMcpProperties = {
   dryRun: { type: "boolean" },
   confirmationToken: { type: "string", minLength: 8, maxLength: 120 }
@@ -120,6 +154,37 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
       } catch (e) {
         return toolFailure({ tool: "file.read", riskLevel: "low", error: { code: "read_failed", message: e instanceof Error ? e.message : "Read failed" } });
       }
+    }
+  };
+
+  const readMany: AgentHostToolDefinition<z.infer<typeof readManyInput>, unknown, AgentHostMcpContext> = {
+    name: "file.read_many",
+    description: "Reads a bounded batch of approved files without requiring one tool call per file.",
+    riskLevel: "low",
+    inputSchema: readManyInput,
+    mcpInputSchema: { type: "object", properties: { paths: { type: "array", minItems: 1, maxItems: 50, items: { type: "string" } }, encoding: { type: "string", enum: ["utf8", "base64"] }, maxBytes: { type: "integer", minimum: 1, maximum: 1048576 } }, required: ["paths"], additionalProperties: false },
+    inputSummary: "Read multiple files",
+    safety: { actionType: "file_read", getInput: (i) => ({ filePath: i.paths[0] }) },
+    async handler(input, context) {
+      const paths = input.paths.map((value) => resolvedPath(value, context));
+      const safeties = paths.map((filePath) => safetyCheck("file.read_many", "file_read", filePath, context));
+      const denied = safeties.find((entry) => !entry.allowed);
+      if (denied !== undefined) return failure("file.read_many", denied);
+      const maxBytes = input.maxBytes ?? 64 * 1024;
+      const results: Array<{ path: string; content?: string; bytesRead: number; truncated?: boolean; error?: string }> = [];
+      let totalBytes = 0;
+      for (const filePath of paths) {
+        if (totalBytes >= 2 * 1024 * 1024) break;
+        try {
+          const raw = await readFile(filePath);
+          const bytes = raw.subarray(0, Math.min(maxBytes, 2 * 1024 * 1024 - totalBytes));
+          totalBytes += bytes.byteLength;
+          results.push({ path: filePath, content: input.encoding === "base64" ? bytes.toString("base64") : bytes.toString("utf8"), bytesRead: bytes.byteLength, truncated: raw.byteLength > bytes.byteLength });
+        } catch (error) {
+          results.push({ path: filePath, bytesRead: 0, error: error instanceof Error ? error.message : "Read failed" });
+        }
+      }
+      return toolSuccess({ tool: "file.read_many", riskLevel: "low", data: { files: results, truncated: results.length < paths.length || totalBytes >= 2 * 1024 * 1024 }, observations: ["Read bounded file batch."] });
     }
   };
 
@@ -188,15 +253,47 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
       const safety = safetyCheck("file.list", "file_read", fp, context);
       if (!safety.allowed) return failure("file.list", safety);
       try {
-        const entries = await readdir(fp, { withFileTypes: true });
-        const files = entries.slice(0, input.limit ?? 1000).map(e => ({
-          name: e.name,
-          isDirectory: e.isDirectory(),
-          isFile: e.isFile()
-        }));
-        return toolSuccess({ tool: "file.list", riskLevel: "low", data: { path: fp, files, truncated: entries.length > (input.limit ?? 1000) }, observations: ["Listed directory."] });
+        const limit = input.limit ?? 1000;
+        const files = await walkFiles(fp, input.recursive === true, input.maxDepth ?? 3, limit);
+        return toolSuccess({ tool: "file.list", riskLevel: "low", data: { path: fp, files: files.map((entry) => ({ name: entry.name, path: entry.path, depth: entry.depth, isDirectory: entry.type === "directory", isFile: entry.type === "file" })), truncated: files.length >= limit }, observations: [input.recursive === true ? "Listed directory recursively within bounds." : "Listed directory."] });
       } catch (e) {
         return toolFailure({ tool: "file.list", riskLevel: "low", error: { code: "list_failed", message: e instanceof Error ? e.message : "List failed" } });
+      }
+    }
+  };
+
+  const search: AgentHostToolDefinition<z.infer<typeof searchInput>, unknown, AgentHostMcpContext> = {
+    name: "file.search",
+    description: "Searches bounded local text files under an approved directory; returns paths and line numbers only.",
+    riskLevel: "low",
+    inputSchema: searchInput,
+    mcpInputSchema: { type: "object", properties: { path: { type: "string" }, query: { type: "string" }, recursive: { type: "boolean" }, maxDepth: { type: "integer", minimum: 0, maximum: 8 }, maxMatches: { type: "integer", minimum: 1, maximum: 200 }, maxBytesPerFile: { type: "integer", minimum: 1, maximum: 1048576 }, caseSensitive: { type: "boolean" } }, required: ["path", "query"], additionalProperties: false },
+    inputSummary: "Search files",
+    safety: { actionType: "file_read", getInput: (i) => ({ filePath: i.path }) },
+    async handler(input, context) {
+      const root = resolvedPath(input.path, context);
+      const safety = safetyCheck("file.search", "file_read", root, context);
+      if (!safety.allowed) return failure("file.search", safety);
+      try {
+        const entries = await walkFiles(root, input.recursive === true, input.maxDepth ?? 3, 5000);
+        const needle = input.caseSensitive === true ? input.query : input.query.toLowerCase();
+        const matches: Array<{ path: string; line: number }> = [];
+        for (const entry of entries) {
+          if (matches.length >= (input.maxMatches ?? 100) || entry.type !== "file") continue;
+          const childSafety = safetyCheck("file.search", "file_read", entry.path, context);
+          if (!childSafety.allowed) continue;
+          const raw = await readFile(entry.path).catch(() => undefined);
+          if (raw === undefined) continue;
+          const text = raw.subarray(0, input.maxBytesPerFile ?? 256 * 1024).toString("utf8");
+          const lines = text.split(/\r?\n/);
+          for (let index = 0; index < lines.length && matches.length < (input.maxMatches ?? 100); index += 1) {
+            const haystack = input.caseSensitive === true ? lines[index]! : lines[index]!.toLowerCase();
+            if (haystack.includes(needle)) matches.push({ path: entry.path, line: index + 1 });
+          }
+        }
+        return toolSuccess({ tool: "file.search", riskLevel: "low", data: { matches, truncated: matches.length >= (input.maxMatches ?? 100) }, observations: ["Search returned paths and line numbers; file contents were not returned."] });
+      } catch (error) {
+        return toolFailure({ tool: "file.search", riskLevel: "low", error: { code: "search_failed", message: error instanceof Error ? error.message : "Search failed" } });
       }
     }
   };
@@ -346,5 +443,5 @@ export function createFileTools(): AnyAgentHostToolDefinition<AgentHostMcpContex
     }
   };
 
-  return [read, write, list, exists, ensureDir, copy, move, delete_];
+  return [read, readMany, write, list, search, exists, ensureDir, copy, move, delete_];
 }

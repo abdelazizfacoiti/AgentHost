@@ -88,7 +88,7 @@ coding tools directly.
 | Click / move pointer | `desktop.click`, `desktop.pointer` |
 | Type text / shortcuts | `desktop.type_text`, `desktop.hotkey` |
 | Windows | `window.list`, `window.focus` |
-| Files | `file.read`, `file.write`, `file.list`, `file.copy`, `file.move`, `file.delete`, `file.exists`, `file.ensure_dir` |
+| Files | `file.read`, `file.read_many`, `file.write`, `file.list`, `file.search`, `file.copy`, `file.move`, `file.delete`, `file.exists`, `file.ensure_dir` |
 | Shell | `shell.run` |
 | Vision / OCR | `vision.find_text`, `vision.find_target`, `vision.analyze_image` |
 | Tasks / progress | `task.create`, `task.status`, `task.update`, `task.add_event`, `task.list` |
@@ -121,7 +121,7 @@ There is one autonomous policy. Do the task; do not ask for routine clicks.
 
 **Edit files or run local commands**
 
-- `file.read`, `file.list`, `file.write`, `file.copy`, `file.move`,
+- `file.read`, `file.read_many`, `file.list`, `file.search`, `file.write`, `file.copy`, `file.move`,
   `file.ensure_dir`, and `shell.run` run directly inside allowed roots.
 - `file.delete`, destructive shell commands, and protected/control-plane paths
   stay gated or blocked. Use the preview/confirm flow for a permitted delete.
