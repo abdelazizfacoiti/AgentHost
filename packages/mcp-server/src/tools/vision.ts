@@ -1,4 +1,5 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { classifyAppSensitivity, evaluateSafety, rankVisionTargets, toolFailure, toolSuccess, type DesktopWindowContext, type VisionGroundingResult } from "@agenthost/core";
 import { z } from "zod";
@@ -10,6 +11,7 @@ const base = { imagePath: z.string().trim().min(1).max(1000), activeWindow: acti
 const analyzeInput = z.object({ ...base, maxItems: z.number().int().min(1).max(1000).optional(), redactionMode: z.enum(["standard", "strict"]).optional() }).strict();
 const findInput = z.object({ ...base, query: z.string().trim().min(1).max(500), match: z.enum(["exact", "contains", "fuzzy"]).optional(), limit: z.number().int().min(1).max(100).optional() }).strict();
 const targetInput = z.object({ ...base, query: z.string().trim().min(1).max(500), targetType: z.enum(["text", "button", "input", "region"]).optional(), limit: z.number().int().min(1).max(20).optional() }).strict();
+const screenTextInput = z.object({ query: z.string().trim().min(1).max(500), match: z.enum(["exact", "contains"]).optional(), activeWindow: activeWindow.optional(), limit: z.number().int().min(1).max(100).optional() }).strict();
 type Base = z.infer<typeof analyzeInput>;
 
 function visionSafetyInput(input: Base): { filePath: string; appName?: string; dataSensitivity?: "sensitive" } {
@@ -182,5 +184,35 @@ export function createVisionTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     }
   };
 
-  return [analyzeTool, findText, findTarget];
+  const findTextOnScreen: AgentHostToolDefinition<z.infer<typeof screenTextInput>, unknown, AgentHostMcpContext> = {
+    name: "vision.find_text_on_screen",
+    description: "Captures a fresh full-screen image and returns OCR suggestions in absolute screen coordinates; never clicks or types.",
+    riskLevel: "low",
+    inputSchema: screenTextInput,
+    mcpInputSchema: { type: "object", properties: { query: { type: "string" }, match: { type: "string", enum: ["exact", "contains"] }, activeWindow: { type: "object" }, limit: { type: "integer", minimum: 1, maximum: 100 } }, required: ["query"], additionalProperties: false },
+    inputSummary: "Find text on screen",
+    auditInputSummary: () => "Fresh screen OCR; query omitted.",
+    auditOutputSummary: (result) => result.ok ? "Fresh screen OCR suggestions returned without logging OCR text." : result.error?.code ?? "Screen OCR failed.",
+    safety: { actionType: "file_read", getInput: (input) => ({ ...(input.activeWindow?.appName === undefined ? {} : { appName: input.activeWindow.appName }), ...(input.activeWindow?.appName !== undefined && classifyAppSensitivity({ appName: input.activeWindow.appName }) === "communication" ? { dataSensitivity: "sensitive" as const } : {}) }) },
+    async handler(input, context) {
+      const current = await context.linux.getActiveWindow();
+      if (!current.supported || current.activeWindow === undefined) return failure("vision.find_text_on_screen", failResult("active_window_unavailable"));
+      const screenshotPath = path.join(context.config.agentHostDir, "screenshots", `screen-ocr-${context.sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}-${randomUUID()}.png`);
+      const captureFn = () => context.linux.screenshot({ path: screenshotPath, format: "png" });
+      const capture = context.overlayScreenshotSuppression === undefined
+        ? await captureFn()
+        : await context.overlayScreenshotSuppression(captureFn);
+      if (capture.supported !== true || capture.path === undefined) return toolFailure({ tool: "vision.find_text_on_screen", riskLevel: "low", error: { code: "screen_capture_failed", message: capture.reason }, observations: [capture.reason] });
+      const data = await analyze({ imagePath: capture.path, activeWindow: current.activeWindow }, context);
+      if (!data.supported) return failure("vision.find_text_on_screen", data);
+      const query = input.query.toLowerCase();
+      const matches = data.textItems
+        .filter((item) => input.match === "exact" ? item.text.toLowerCase() === query : item.text.toLowerCase().includes(query))
+        .slice(0, input.limit ?? 20)
+        .map((item) => ({ ...item, screenBounds: item.bounds, screenCenter: item.center, coordinateSpace: "screen" as const }));
+      return toolSuccess({ tool: "vision.find_text_on_screen", riskLevel: "low", data: { activeWindow: current.activeWindow, matches, warnings: [...data.warnings, "Coordinates are absolute screen suggestions only; revalidate active-window context before any click."], truncated: data.truncated }, observations: ["Captured fresh local OCR suggestions; no click occurred."] });
+    }
+  };
+
+  return [analyzeTool, findText, findTarget, findTextOnScreen];
 }

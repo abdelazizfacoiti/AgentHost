@@ -73,7 +73,7 @@ this tree. Browser work uses ordinary desktop automation when policy allows.
 
 ## 3. Live surface
 
-The current server exposes **38 base MCP tools** and **3 resources**.
+The current server exposes **39 base MCP tools** and **3 resources**.
 
 Tool counts are generated from the loaded set at startup. The authoritative
 source is always:
@@ -95,7 +95,7 @@ source is always:
 | Desktop | `desktop.screenshot`, `desktop.click`, `desktop.pointer`, `desktop.hotkey`, `desktop.type_text` | Screenshot, click, pointer movement/scroll/drag, key chords, typing |
 | Files | `file.read`, `file.read_many`, `file.list`, `file.search`, `file.exists`, `file.write`, `file.ensure_dir`, `file.copy`, `file.move`, `file.delete` | Bounded local file operations; recursive listing/search are bounded; file-only deletion |
 | Shell | `shell.run` | Governed argv execution without an implicit shell |
-| Vision | `vision.analyze_image`, `vision.find_text`, `vision.find_target` | Local OCR and image-relative target suggestions |
+| Vision | `vision.analyze_image`, `vision.find_text`, `vision.find_target`, `vision.find_text_on_screen` | Local OCR; fresh screen OCR returns absolute-coordinate suggestions |
 | Tasks | `task.create`, `task.status`, `task.list`, `task.update`, `task.update_status`, `task.add_event` | Persistent task state and definition-of-done tracking |
 | Agent control | `agent.status`, `agent.stop`, `agent.takeover_begin` | Runtime flags and emergency controls |
 
@@ -194,6 +194,7 @@ Capabilities:
 
 - `vision.analyze_image`: bounded redacted OCR text boxes.
 - `vision.find_text`: locate OCR text.
+- `vision.find_text_on_screen`: fresh OCR with absolute screen-coordinate suggestions; never clicks.
 - `vision.find_target`: rank target suggestions with image-relative
   coordinates.
 
@@ -946,7 +947,7 @@ At the time of writing, the tree passes:
 - `npm run build`
 - `npm run lint`
 - `npm test` — 58 files, 357 tests
-- `npm run smoke:mcp` — 38 tools, 3 resources
+- `npm run smoke:mcp` — 39 tools, 3 resources
 - `npm run benchmark:agent` — isolated, non-destructive runner overhead benchmark
 - `git diff --check`
 

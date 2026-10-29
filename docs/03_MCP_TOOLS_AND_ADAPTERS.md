@@ -1,7 +1,7 @@
 # AgentHost MCP Tools and Adapter Specification
 
 All callable tools return `ToolResult`. MCP transport is stdio. The current
-minimal-v2 server exposes 38 base tools. This number is generated from the
+minimal-v2 server exposes 39 base tools. This number is generated from the
 loaded set at startup; treat `system.list_capabilities` and
 `agenthost://capabilities` as authoritative instead of hard-coding counts.
 
@@ -36,6 +36,7 @@ screen-change hint. Missing backend data is omitted rather than guessed.
 | `file.exists` | observe | read_only |
 | `vision.analyze_image` | low | read_only |
 | `vision.find_text` | low | read_only |
+| `vision.find_text_on_screen` | low | read_only |
 | `vision.find_target` | low | read_only |
 
 ### State-changing desktop and filesystem tools
@@ -196,8 +197,10 @@ schema, updates the active task, and appends a redacted progress/observation/
 error event. It never auto-completes a task or changes definition-of-done
 verification rules.
 
-`vision.analyze_image`, `vision.find_text`, and `vision.find_target` use local
-Tesseract when available and return bounded, redacted suggestions. They never
+`vision.analyze_image`, `vision.find_text`, `vision.find_target`, and
+`vision.find_text_on_screen` use local Tesseract when available and return
+bounded, redacted suggestions. The screen variant captures a fresh full-screen
+image and returns absolute screen coordinates as suggestions only. They never
 click or type. `desktop.screenshot` writes under
 `~/.agenthost/screenshots/` unless `outputDir` is supplied, so it follows the
 routine direct-execution path; high-risk or consequential effects still use

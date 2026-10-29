@@ -90,7 +90,7 @@ coding tools directly.
 | Windows | `window.list`, `window.focus` |
 | Files | `file.read`, `file.read_many`, `file.write`, `file.list`, `file.search`, `file.copy`, `file.move`, `file.delete`, `file.exists`, `file.ensure_dir` |
 | Shell | `shell.run` |
-| Vision / OCR | `vision.find_text`, `vision.find_target`, `vision.analyze_image` |
+| Vision / OCR | `vision.find_text`, `vision.find_target`, `vision.analyze_image`, `vision.find_text_on_screen` |
 | Tasks / progress | `task.create`, `task.status`, `task.update`, `task.add_event`, `task.list` |
 | Apps / adapters | `adapter.list`, `adapter.get` |
 | Safety / system | `system.get_info`, `system.list_capabilities`, `system.check_dependency` |
@@ -112,7 +112,7 @@ There is one autonomous policy. Do the task; do not ask for routine clicks.
 
 **Read an app or web page, then act**
 
-1. `desktop.screenshot` plus `vision.find_text`/`vision.find_target` for
+1. `desktop.screenshot` plus `vision.find_text`/`vision.find_target`/`vision.find_text_on_screen` for
    coordinates; never click blind.
 2. If the app is private-data (mail, messages, documents), a read may return
    `confirmation_required`. Show the token command and wait.
