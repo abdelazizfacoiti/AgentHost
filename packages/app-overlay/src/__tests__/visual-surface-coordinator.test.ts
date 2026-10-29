@@ -62,4 +62,11 @@ describe("visual surface coordinator", () => {
     expect(coordinator.surfaceSnapshot()).toHaveLength(0);
     await coordinator.close();
   });
+  it("enforces reduced-motion validation for direct primitive calls", async () => {
+    const coordinator = new VisualSurfaceCoordinator(new HeadlessOverlayRenderer(), { sessionId: "surface-owner" }, { reducedMotion: true });
+    const result = await coordinator.showPrimitive({ type: "frame", sensitivity: "public", animation: { kind: "pulse", durationMs: 500, repeatCount: 1 } });
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("overlay_reduced_motion_policy_missing");
+    await coordinator.close();
+  });
 });

@@ -100,7 +100,7 @@ export class VisualSurfaceCoordinator extends BaseOverlayManager {
   }
 
   /** Compatibility projection for legacy stores that still call OverlayManager methods directly. */
-  override async showPrimitive(input: OverlayPrimitive, resolver?: OverlayTargetResolver, reducedMotion = false) {
+  override async showPrimitive(input: OverlayPrimitive, resolver?: OverlayTargetResolver, reducedMotion = this.#options.reducedMotion) {
     const result = await super.showPrimitive(input, resolver, reducedMotion);
     if (result.ok && result.overlay !== undefined) {
       this.#surfaces.set(result.overlay.overlayId, compatibilitySurface(input, result.overlay.overlayId, result.overlay.expiresAt, this.rendererEpoch(), this.ownerSessionId()));
@@ -109,7 +109,7 @@ export class VisualSurfaceCoordinator extends BaseOverlayManager {
   }
 
   /** Compatibility projection for legacy stores that still call OverlayManager methods directly. */
-  override async showWidget(input: OverlayWidget, resolver?: OverlayTargetResolver, reducedMotion = false) {
+  override async showWidget(input: OverlayWidget, resolver?: OverlayTargetResolver, reducedMotion = this.#options.reducedMotion) {
     if (this.#suppressed) return { ok: false, errors: ["visual_surface_suppressed"] };
     const result = await super.showWidget(input, resolver, reducedMotion);
     if (result.ok && result.overlay !== undefined) {
@@ -118,7 +118,7 @@ export class VisualSurfaceCoordinator extends BaseOverlayManager {
     return result;
   }
 
-  override async updateWidget(input: OverlayWidget, reducedMotion = false): Promise<OverlayOperationResult> {
+  override async updateWidget(input: OverlayWidget, reducedMotion = this.#options.reducedMotion): Promise<OverlayOperationResult> {
     if (this.#suppressed) return { ok: false, reason: "visual_surface_suppressed" };
     const result = await super.updateWidget(input, reducedMotion);
     if (result.ok && input.widgetId !== undefined) {

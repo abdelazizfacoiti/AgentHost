@@ -219,7 +219,7 @@ describe("Linux desktop helpers", () => {
   it("restores the clipboard after layout-safe paste", async () => {
     const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-bin-restore-"));
     await writeFile(bin + "/xdotool", "#!/bin/sh\nif [ \"$1\" = \"getactivewindow\" ]; then echo 99999; fi\nexit 0\n", "utf8");
-    await writeFile(bin + "/xclip", "#!/bin/sh\nSTATE=\"$(dirname \"$0\")/clipboard\"\nif [ \"$3\" = \"-o\" ]; then cat \"$STATE\"; else cat > \"$STATE\"; fi\nexit 0\n", "utf8");
+    await writeFile(bin + "/xclip", "#!/bin/sh\nSTATE=\"$(/usr/bin/dirname \"$0\")/clipboard\"\nif [ \"$3\" = \"-o\" ]; then /usr/bin/cat \"$STATE\"; else /usr/bin/cat > \"$STATE\"; fi\nexit 0\n", "utf8");
     await writeFile(bin + "/clipboard", "previous\n", "utf8");
     await chmod(bin + "/xdotool", 0o700);
     await chmod(bin + "/xclip", 0o700);

@@ -11,6 +11,7 @@ import {
   getDefaultPolicy,
   requestPause,
   requestStop,
+  toolFailure,
   toolSuccess,
   type AuditLogEntry,
   type OverlayWidget,
@@ -614,6 +615,23 @@ describe("governed tool runner", () => {
     expect(result.state).toMatchObject({ activeWindow: { windowId: "after" }, windowChanged: true });
   });
 
+  it("passes window.focus geometry to the target ring before the handler", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const begin = vi.fn(async () => ({ finish: async () => ({ started: true, visible: true, hidden: false }) }));
+    context.actionOverlay = { begin } as never;
+    (context as unknown as { linux: unknown }).linux = {
+      listWindows: async () => ({ supported: true, backend: "test", windows: [{ windowId: "22", appName: "Editor", title: "Draft", bounds: { x: 10, y: 20, width: 300, height: 200 } }], truncated: false, reason: "ok" }),
+      focusWindow: async () => ({ supported: true, backend: "test", focused: true, previousWindow: { windowId: "11" }, reason: "focused" }),
+      getActiveWindow: async () => ({ supported: true, backend: "test", activeWindow: { windowId: "22", appName: "Editor", title: "Draft" }, reason: "ok" }),
+      getScreenGeometry: async () => ({ supported: true, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, reason: "ok" })
+    };
+    const focus = applyProductionExecutionMetadata(createWindowTools()).find((entry) => entry.name === "window.focus")!;
+    const result = await runTool(focus, { target: { windowId: "22" } }, context);
+    expect(result.ok).toBe(true);
+    expect(begin).toHaveBeenCalledWith(expect.objectContaining({ tool: "window.focus", target: { x: 10, y: 20, width: 300, height: 200, windowId: "22" } }));
+  });
+
   it("updates the active task from bounded routine task metadata", async () => {
     const home = await tempHome();
     const task = await createTask(home, "Bookkeeping test");
@@ -717,6 +735,52 @@ describe("governed tool runner", () => {
 
     const unknown = await runTool(runSteps, { steps: [{ tool: "missing.tool" }], dryRun: true }, context);
     expect(unknown.error?.code).toBe("safety_blocked");
+  });
+
+  it("warns when an identical failing run_steps plan repeats", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const runSteps = createRunStepsTool();
+    context.tools = new Map([[runSteps.name, runSteps]]);
+    const plan = { steps: [{ tool: "missing.tool" }] };
+    const results = [];
+    for (let index = 0; index < 3; index += 1) results.push(await runTool(runSteps, plan, context));
+    expect(results[2]?.error?.code).toBe("safety_blocked");
+    expect(results[2]?.observations?.join(" ")).toContain("run 3 times");
+  });
+
+  it("stops a governed batch at the first failed expectation", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const runSteps = createRunStepsTool();
+    const second = vi.fn(async () => toolSuccess({ tool: "test.second", riskLevel: "observe", data: { ran: true } }));
+    const fail: AgentHostToolDefinition<Record<string, never>, unknown> = {
+      name: "test.fail",
+      description: "Test failure",
+      riskLevel: "observe",
+      inputSchema: z.object({}).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Fail",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: async () => toolFailure({ tool: "test.fail", riskLevel: "observe", error: { code: "expectation_failed", message: "Expected state was not reached." }, observations: [] })
+    };
+    const next: AgentHostToolDefinition<Record<string, never>, unknown> = {
+      name: "test.second",
+      description: "Test second",
+      riskLevel: "observe",
+      inputSchema: z.object({}).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Second",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: second
+    };
+    context.tools = new Map([[runSteps.name, runSteps], [fail.name, fail], [next.name, next]]);
+    const result = await runTool(runSteps, { steps: [{ tool: fail.name }, { tool: next.name }] }, context);
+    expect(result.ok).toBe(false);
+    expect(result.data).toMatchObject({ steps: [{ tool: "test.fail" }] });
+    expect(second).not.toHaveBeenCalled();
   });
 
   it("serializes state-changing handlers while allowing read-only concurrency", async () => {
