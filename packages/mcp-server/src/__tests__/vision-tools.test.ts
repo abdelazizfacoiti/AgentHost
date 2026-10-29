@@ -7,6 +7,7 @@ import type { AgentHostMcpContext } from "../context.js";
 import { runTool } from "../tool-runner.js";
 import { applyProductionExecutionMetadata } from "../tool-metadata.js";
 import { createVisionTools } from "../tools/vision.js";
+import { createDesktopTools } from "../tools/desktop.js";
 
 const roots: string[] = [];
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
@@ -32,6 +33,7 @@ describe("screen vision tool", () => {
         analyzeImage: async () => ({ supported: true, backend: "tesseract", mode: "ocr", image: { width: 1920, height: 1080, source: "agenthost_screenshot", basename: "fresh.png", pathRedacted: true }, textItems: [{ id: "text_001", text: "Save", redactedText: "Save", bounds: { x: 100, y: 200, width: 40, height: 20 }, center: { x: 120, y: 210 }, confidence: 0.99, kind: "text", page: 1, block: 1, paragraph: 1, line: 1, redacted: false }], groups: [], targetCandidates: [], warnings: [], redactionCounts: {}, truncated: false, reason: "ok" })
       }
     } as unknown as AgentHostMcpContext;
+    context.tools = new Map(applyProductionExecutionMetadata([...createDesktopTools(), ...createVisionTools()]).map((tool) => [tool.name, tool]));
     const tool = applyProductionExecutionMetadata(createVisionTools()).find((entry) => entry.name === "vision.find_text_on_screen")!;
     const result = await runTool(tool, { query: "Save" }, context);
     expect(result.ok).toBe(true);

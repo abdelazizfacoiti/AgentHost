@@ -4,7 +4,7 @@ import path from "node:path";
 import { classifyAppSensitivity, evaluateSafety, rankVisionTargets, toolFailure, toolSuccess, type DesktopWindowContext, type VisionGroundingResult } from "@agenthost/core";
 import { z } from "zod";
 import type { AgentHostMcpContext } from "../context.js";
-import type { AgentHostToolDefinition, AnyAgentHostToolDefinition } from "../tool-runner.js";
+import { runTool, type AgentHostToolDefinition, type AnyAgentHostToolDefinition } from "../tool-runner.js";
 
 const activeWindow = z.object({ windowId: z.string().trim().min(1).max(200).optional(), appName: z.string().trim().min(1).max(200).optional(), title: z.string().trim().min(1).max(500).optional(), pid: z.number().int().min(1).optional() }).strict();
 const base = { imagePath: z.string().trim().min(1).max(1000), activeWindow: activeWindow.optional() };
@@ -197,13 +197,24 @@ export function createVisionTools(): AnyAgentHostToolDefinition<AgentHostMcpCont
     async handler(input, context) {
       const current = await context.linux.getActiveWindow();
       if (!current.supported || current.activeWindow === undefined) return failure("vision.find_text_on_screen", failResult("active_window_unavailable"));
-      const screenshotPath = path.join(context.config.agentHostDir, "screenshots", `screen-ocr-${context.sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}-${randomUUID()}.png`);
-      const captureFn = () => context.linux.screenshot({ path: screenshotPath, format: "png" });
-      const capture = context.overlayScreenshotSuppression === undefined
-        ? await captureFn()
-        : await context.overlayScreenshotSuppression(captureFn);
-      if (capture.supported !== true || capture.path === undefined) return toolFailure({ tool: "vision.find_text_on_screen", riskLevel: "low", error: { code: "screen_capture_failed", message: capture.reason }, observations: [capture.reason] });
-      const data = await analyze({ imagePath: capture.path, activeWindow: current.activeWindow }, context);
+      const filename = `screen-ocr-${context.sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}-${randomUUID()}.png`;
+      const screenshotTool = context.tools?.get("desktop.screenshot");
+      let capturePath: string | undefined;
+      if (screenshotTool !== undefined) {
+        const captureResult = await runTool(screenshotTool, { outputDir: path.join(context.config.agentHostDir, "screenshots"), filename, format: "png" }, context);
+        const captureData = captureResult.data as { path?: unknown } | null;
+        if (!captureResult.ok || typeof captureData?.path !== "string") return toolFailure({ tool: "vision.find_text_on_screen", riskLevel: "low", error: { code: "screen_capture_failed", message: captureResult.error?.message ?? "Fresh screen capture failed." }, observations: [captureResult.error?.code ?? "screen_capture_failed"] });
+        capturePath = captureData.path;
+      } else {
+        const screenshotPath = path.join(context.config.agentHostDir, "screenshots", filename);
+        const captureFn = () => context.linux.screenshot({ path: screenshotPath, format: "png" });
+        const capture = context.overlayScreenshotSuppression === undefined
+          ? await captureFn()
+          : await context.overlayScreenshotSuppression(captureFn);
+        if (capture.supported !== true || capture.path === undefined) return toolFailure({ tool: "vision.find_text_on_screen", riskLevel: "low", error: { code: "screen_capture_failed", message: capture.reason }, observations: [capture.reason] });
+        capturePath = capture.path;
+      }
+      const data = await analyze({ imagePath: capturePath, activeWindow: current.activeWindow }, context);
       if (!data.supported) return failure("vision.find_text_on_screen", data);
       const query = input.query.toLowerCase();
       const matches = data.textItems

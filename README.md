@@ -103,7 +103,7 @@ gates, preview, handler, audit) for observation, filesystem, and a governed
 
 `npm run benchmark:tasks` runs 20 reproducible non-destructive scenarios in an
 isolated home. The latest run completed 20/20 scenarios with 22 governed tool
-calls in 953.7 ms total; desktop-input and OCR scenarios use mocked backends so
+calls in 839.4 ms total; desktop-input and OCR scenarios use mocked backends so
 the benchmark never types or clicks in the user’s desktop.
 
 Historical-to-current desktop comparison from the same X11 workstation:
