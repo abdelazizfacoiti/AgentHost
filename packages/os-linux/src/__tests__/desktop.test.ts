@@ -179,6 +179,11 @@ describe("Linux desktop helpers", () => {
     expect(describeTypingStrategy("café :/")).toBe("clipboard");
   });
 
+  it("uses clipboard for large ASCII payloads to avoid per-character overhead", () => {
+    expect(describeTypingStrategy("a".repeat(511))).toBe("direct");
+    expect(describeTypingStrategy("a".repeat(512))).toBe("clipboard");
+  });
+
   it("types ASCII directly and reports the previous window on focus", async () => {
     const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-bin-"));
     // Emulates real xdotool: getactivewindow prints the wid on its own, while

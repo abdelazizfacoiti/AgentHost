@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -380,6 +380,21 @@ async function detectGuiInputSupport(context: LinuxDesktopContext = {}): Promise
 
 const capabilitiesCacheTtlMs = 30_000;
 const capabilitiesCache = new Map<string, { at: number; result: DesktopCapabilitiesResult }>();
+const screenshotHashes = new Map<string, string>();
+
+async function markScreenshotUnchanged(result: DesktopScreenshotResult, outputPath: string, key: string): Promise<DesktopScreenshotResult> {
+  if (result.supported !== true || result.bytesWritten === undefined || result.bytesWritten <= 0) return result;
+  try {
+    const digest = createHash("sha256").update(await readFile(outputPath)).digest("hex");
+    const unchanged = screenshotHashes.get(key) === digest;
+    screenshotHashes.delete(key);
+    screenshotHashes.set(key, digest);
+    while (screenshotHashes.size > 32) screenshotHashes.delete(screenshotHashes.keys().next().value!);
+    return { ...result, unchanged };
+  } catch {
+    return result;
+  }
+}
 
 export function clearDesktopCapabilitiesCache(): void {
   capabilitiesCache.clear();
@@ -669,7 +684,7 @@ export async function captureLinuxScreenshot(
   }
 
   if (!transformNeeded) {
-    return captured;
+    return markScreenshotUnchanged(captured, outputPath, `${outputPath}:${format}:${input.includeActiveWindowOnly === true ? "window" : "screen"}:${JSON.stringify(input.region ?? null)}:${input.scale ?? 1}`);
   }
 
   const filters: string[] = [];
@@ -693,13 +708,13 @@ export async function captureLinuxScreenshot(
   if (transform.exitCode !== 0 || bytesWritten === undefined || bytesWritten === 0) {
     return unsupportedResult(`${backend}+ffmpeg`, "Screenshot post-processing failed.", {});
   }
-  return {
+  return markScreenshotUnchanged({
     ...captured,
     backend: `${backend}+ffmpeg`,
     path: outputPath,
     bytesWritten,
     reason: "Captured and post-processed a desktop screenshot locally."
-  };
+  }, outputPath, `${outputPath}:${format}:${input.includeActiveWindowOnly === true ? "window" : "screen"}:${JSON.stringify(input.region ?? null)}:${input.scale ?? 1}`);
 }
 
 function xdotoolButton(button: DesktopMouseButton): string {
@@ -768,7 +783,7 @@ export type TypingMethod = "direct" | "clipboard";
  * which is layout-independent.
  */
 export function describeTypingStrategy(text: string): TypingMethod {
-  return /^[A-Za-z0-9 ]*$/.test(text) ? "direct" : "clipboard";
+  return /^[A-Za-z0-9 ]*$/.test(text) && text.length < 512 ? "direct" : "clipboard";
 }
 
 async function feedClipboard(command: string, args: string[], text: string, context: LinuxDesktopContext): Promise<boolean> {
@@ -946,7 +961,7 @@ export async function typeLinuxText(
     };
   }
 
-  const result = await runDesktopCommand(verification.xdotoolPath, ["type", "--delay", "1", "--", input.text], context);
+  const result = await runDesktopCommand(verification.xdotoolPath, ["type", "--delay", "0", "--", input.text], context);
 
   return {
     supported: result.exitCode === 0,

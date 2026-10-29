@@ -181,6 +181,12 @@ through `xdotool type` and other text through clipboard paste; install
 `previousWindow` so focus can be restored and accepts the same `target`
 selector.
 
+ASCII text shorter than 512 characters uses a zero-delay `xdotool type`; longer
+or layout-unsafe text uses clipboard paste and fails explicitly when neither
+`xclip` nor `xsel` is available. Screenshot results include bounded
+`unchanged: true` when the requested output frame hash matches the prior frame
+for the same capture key.
+
 Any tool may carry bounded routine bookkeeping metadata as
 `task: { phase?, currentAction? }`. The runner removes it before the handler
 schema, updates the active task, and appends a redacted progress/observation/

@@ -1129,6 +1129,7 @@ export interface DesktopScreenshotResult {
   backend: string;
   path?: string;
   bytesWritten?: number;
+  unchanged?: boolean;
   activeWindow?: DesktopWindowContext;
   screenshotMetadata?: {
     screenshotId: string;
