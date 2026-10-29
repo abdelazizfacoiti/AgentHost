@@ -125,6 +125,8 @@ There is one autonomous policy. Do the task; do not ask for routine clicks.
   `file.ensure_dir`, and `shell.run` run directly inside allowed roots.
 - `file.delete`, destructive shell commands, and protected/control-plane paths
   stay gated or blocked. Use the preview/confirm flow for a permitted delete.
+- Large or layout-unsafe text uses clipboard paste and restores the prior
+  clipboard contents when supported.
 
 **Send, upload, submit, purchase, or delete**
 

@@ -158,6 +158,8 @@ Typing behavior:
 
 - ASCII letters, digits, and spaces use `xdotool type`.
 - Other text uses clipboard paste.
+- Clipboard paste saves and restores the prior clipboard contents when the
+  selected backend supports both operations.
 - Missing clipboard tooling produces an explicit failure instead of mistyped
   input.
 

@@ -179,7 +179,8 @@ selector (`windowId`, `appName`, `title`, or `pid`). A target is focused,
 verified immediately before execution, and returns `focus_failed` if focus or
 verification fails. `desktop.type_text` routes ASCII letters/digits/space
 through `xdotool type` and other text through clipboard paste; install
-`xclip` or `xsel` for non-ASCII input. `window.focus` returns
+`xclip` or `xsel` for non-ASCII input; clipboard paste saves and restores the
+prior clipboard contents when the backend permits it. `window.focus` returns
 `previousWindow` so focus can be restored and accepts the same `target`
 selector.
 

@@ -216,6 +216,22 @@ describe("Linux desktop helpers", () => {
     expect(result.reason).toContain("xclip");
   });
 
+  it("restores the clipboard after layout-safe paste", async () => {
+    const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-bin-restore-"));
+    await writeFile(bin + "/xdotool", "#!/bin/sh\nif [ \"$1\" = \"getactivewindow\" ]; then echo 99999; fi\nexit 0\n", "utf8");
+    await writeFile(bin + "/xclip", "#!/bin/sh\nSTATE=\"$(dirname \"$0\")/clipboard\"\nif [ \"$3\" = \"-o\" ]; then cat \"$STATE\"; else cat > \"$STATE\"; fi\nexit 0\n", "utf8");
+    await writeFile(bin + "/clipboard", "previous\n", "utf8");
+    await chmod(bin + "/xdotool", 0o700);
+    await chmod(bin + "/xclip", 0o700);
+    const result = await typeLinuxText(
+      { text: "a:b/c", activeWindow: { windowId: "99999" } },
+      { env: { PATH: bin, DISPLAY: ":0", XDG_SESSION_TYPE: "x11" } }
+    );
+    expect(result).toMatchObject({ supported: true, typed: true, method: "clipboard" });
+    expect(result.reason).toContain("restored");
+    expect(await readFile(bin + "/clipboard", "utf8")).toBe("previous\n");
+  });
+
   it("reads wid/pid/title from separate spawns and normalizes wmctrl hex ids", async () => {
     const bin = await mkdtemp(path.join(os.tmpdir(), "agenthost-desktop-ids-"));
     await writeFile(

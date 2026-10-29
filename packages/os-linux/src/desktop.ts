@@ -807,6 +807,7 @@ async function feedClipboard(command: string, args: string[], text: string, cont
         resolve(false);
         return;
       }
+      child.stdin.on("error", () => { clearTimeout(timer); resolve(false); });
       child.stdin.write(text);
       child.stdin.end();
     } catch {
@@ -814,6 +815,11 @@ async function feedClipboard(command: string, args: string[], text: string, cont
       resolve(false);
     }
   });
+}
+
+async function readClipboard(command: string, args: string[], context: LinuxDesktopContext): Promise<string | undefined> {
+  const result = await runDesktopCommand(command, args, context);
+  return result.exitCode === 0 ? result.stdout : undefined;
 }
 
 async function pasteViaClipboard(
@@ -826,14 +832,22 @@ async function pasteViaClipboard(
   if (xclip === undefined && xsel === undefined) {
     return { ok: false, reason: "Layout-unsafe characters require a clipboard backend; install xclip or xsel for non-ASCII typing." };
   }
+  const clipboardCommand = xclip ?? xsel!;
+  const readArgs = xclip !== undefined ? ["-selection", "clipboard", "-o"] : ["--clipboard", "--output"];
+  const writeArgs = xclip !== undefined ? ["-selection", "clipboard", "-i"] : ["--clipboard", "--input"];
+  const previousClipboard = await readClipboard(clipboardCommand, readArgs, context);
   const fed = xclip !== undefined
     ? await feedClipboard(xclip, ["-selection", "clipboard", "-i"], text, context)
     : await feedClipboard(xsel!, ["--clipboard", "--input"], text, context);
   if (!fed) return { ok: false, reason: "The clipboard backend did not accept the text." };
   const paste = await runDesktopCommand(xdotoolPath, ["key", "ctrl+v"], context);
-  return paste.exitCode === 0
-    ? { ok: true, reason: "Pasted text via the clipboard (layout-independent); window clipboard now holds the typed text." }
-    : { ok: false, reason: "The clipboard paste hotkey did not complete successfully." };
+  if (paste.exitCode !== 0) return { ok: false, reason: "The clipboard paste hotkey did not complete successfully." };
+  const restored = previousClipboard === undefined
+    ? false
+    : await feedClipboard(clipboardCommand, writeArgs, previousClipboard, context);
+  return restored
+    ? { ok: true, reason: "Pasted text via the clipboard (layout-independent) and restored the prior clipboard contents." }
+    : { ok: true, reason: "Pasted text via the clipboard (layout-independent); prior clipboard contents could not be restored." };
 }
 
 /** Best-effort read of the currently active window id for verification and focus restoration. */
