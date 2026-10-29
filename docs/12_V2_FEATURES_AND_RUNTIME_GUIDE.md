@@ -946,9 +946,10 @@ At the time of writing, the tree passes:
 
 - `npm run build`
 - `npm run lint`
-- `npm test` — 58 files, 357 tests
+- `npm test` — 59 files, 369 tests
 - `npm run smoke:mcp` — 39 tools, 3 resources
 - `npm run benchmark:agent` — isolated, non-destructive runner overhead benchmark
+- `npm run benchmark:tasks` — 20 isolated scenarios, 22 governed calls in the latest run; desktop-input/OCR scenarios use mocked backends
 - `git diff --check`
 
 Real X11 screenshot capture was also verified with `scrot` at 386,291 bytes.

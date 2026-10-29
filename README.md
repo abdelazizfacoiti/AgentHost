@@ -101,6 +101,22 @@ surface honestly instead of pretending an action succeeded.
 gates, preview, handler, audit) for observation, filesystem, and a governed
 `computer.run_steps` plan in an isolated home with overlays off.
 
+`npm run benchmark:tasks` runs 20 reproducible non-destructive scenarios in an
+isolated home. The latest run completed 20/20 scenarios with 22 governed tool
+calls in 953.7 ms total; desktop-input and OCR scenarios use mocked backends so
+the benchmark never types or clicks in the user’s desktop.
+
+Historical-to-current desktop comparison from the same X11 workstation:
+
+| operation | historical median / p95 | current median / p95 |
+|---|---:|---:|
+| active window | 20.7 / 27.7 ms | 12.9 / 21.6 ms |
+| cold window list | 17.1 / 24.5 ms | 14.9 / 20.7 ms |
+| screenshot | 278.4 / 305.8 ms | 192.4 / 206.6 ms |
+
+These are local runs, not portability claims; compositor, display, and backend
+availability change the numbers.
+
 No external benchmark claims — run it yourself and compare.
 
 ## How it compares

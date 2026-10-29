@@ -1,0 +1,22 @@
+[
+  { "id": "system_info", "description": "Read system information" },
+  { "id": "capabilities", "description": "Read live capability inventory" },
+  { "id": "observe_state", "description": "Observe bounded computer state" },
+  { "id": "window_list", "description": "List visible windows" },
+  { "id": "directory_create", "description": "Create an isolated output directory" },
+  { "id": "file_create", "description": "Create an isolated file" },
+  { "id": "file_edit", "description": "Edit the isolated file" },
+  { "id": "file_verify", "description": "Read and verify the isolated file" },
+  { "id": "file_exists", "description": "Verify file existence" },
+  { "id": "file_list", "description": "List the isolated directory" },
+  { "id": "file_read_many", "description": "Read a bounded file batch" },
+  { "id": "file_search", "description": "Search isolated text files" },
+  { "id": "file_recursive_list", "description": "Recursively list within a depth bound" },
+  { "id": "wait_for_file", "description": "Wait for an isolated file condition" },
+  { "id": "governed_plan", "description": "Run a bounded governed file plan" },
+  { "id": "terminal_command", "description": "Run a bounded local command" },
+  { "id": "focus_type_verify", "description": "Focus, type, and verify through a mocked desktop backend" },
+  { "id": "ocr_click_verify", "description": "Fresh OCR followed by a mocked governed click" },
+  { "id": "multi_window_switch", "description": "Switch between mocked windows and verify focus" },
+  { "id": "overlay_sequence", "description": "Verify card, frame, ring, and finish ordering with a mocked overlay" }
+]

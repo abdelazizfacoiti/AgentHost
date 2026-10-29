@@ -25,6 +25,7 @@
     "release:verify": "node scripts/verify-release.mjs",
     "benchmark:desktop": "node scripts/benchmark-desktop.mjs",
     "benchmark:agent": "node scripts/benchmark-agent.mjs",
+    "benchmark:tasks": "node scripts/benchmark-tasks.mjs",
     "analyze:audit": "node scripts/analyze-audit.mjs",
     "release:install": "node scripts/install-release.mjs",
     "agenthost": "node packages/agenthost-cli/dist/index.js",
