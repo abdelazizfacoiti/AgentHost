@@ -89,4 +89,16 @@ describe("action timeline", () => {
     await instance.close();
     await manager.close();
   });
+  it("releases the dock after idle time and does not claim space for an empty card", async () => {
+    const manager = new VisualSurfaceCoordinator(new HeadlessOverlayRenderer(), { sessionId: "idle-session" });
+    const instance = new ActionTimeline(manager, { sessionId: "idle-session", idleHideMs: 40, alertPollMs: 10, readAlerts: async () => ({ stopped: false, paused: false }) });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(instance.visible).toBe(false);
+    await instance.begin("desktop.click", { x: 1, y: 1 })(toolSuccess({ tool: "desktop.click", riskLevel: "medium", data: {} }));
+    expect(instance.visible).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(instance.visible).toBe(false);
+    await instance.close();
+    await manager.close();
+  });
 });

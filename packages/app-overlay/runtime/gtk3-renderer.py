@@ -54,6 +54,7 @@ TIMELINE_VISIBLE = 18
 TIMELINE_ID_PREFIX = "agenthost-timeline-"
 CONTROL_EVENTS = {"pause", "resume", "emergency_stop_requested", "cancel", "cancelled"}
 INPUT_GUARD_SECONDS = 1.0
+DOCK_RELEASE_GRACE_MS = 1500
 STATUS_CAIRO = {
     "neutral": (0.30, 0.36, 0.48, 0.95),
     "info": (0.11, 0.37, 0.75, 0.95),
@@ -233,6 +234,7 @@ class Renderer:
         self.queue_scheduled = False
         self.dock_window = None
         self.dock_concealed = False
+        self.dock_release_source = None
         self.input_guard_path = None
         self.frame_tick_source = None
         self.visual = {
@@ -1266,16 +1268,17 @@ class Renderer:
         payload = record.get("payload") or {}
         style = payload.get("style") if isinstance(payload.get("style"), dict) else {}
         r, g, b, alpha = color_for(style, self.frame_alpha(payload))
-        css = ".ah-frame { border-width: 3px; border-style: solid; border-color: rgba(%d,%d,%d,%.3f); border-radius: 10px; background-color: rgba(0,0,0,0); }" % (
+        css = ".ah-frame { border-width: 6px; border-style: solid; border-color: rgba(%d,%d,%d,%.3f); border-radius: 0px; background-color: rgba(0,0,0,0); }" % (
             int(r * 255), int(g * 255), int(b * 255), alpha
         )
         provider.load_from_data(css.encode("utf-8"), -1)
 
     def frame_alpha(self, payload):
         animation = payload.get("animation") if isinstance(payload.get("animation"), dict) else {}
+        # The edge must read as a status light, not a hint: never drop below 0.85.
         if animation.get("kind") == "pulse" and animation.get("reducedMotion") not in {"instant", "none"}:
-            return 0.45 + 0.35 * (0.5 + 0.5 * math.sin(time.monotonic() * math.pi * 1.1))
-        return 0.86
+            return 0.85 + 0.15 * (0.5 + 0.5 * math.sin(time.monotonic() * math.pi * 1.1))
+        return 0.95
 
     def draw_surface(self, _area, cr, geometry):
         cr.set_operator(cairo.OPERATOR_SOURCE)
@@ -1310,12 +1313,12 @@ class Renderer:
         alpha = self.frame_alpha(payload)
         color = color_for(style, alpha)
         cr.set_source_rgba(color[0], color[1], color[2], alpha)
-        cr.set_line_width(3)
-        cr.rectangle(1.5, 1.5, max(1, width - 3), max(1, height - 3))
+        cr.set_line_width(6)
+        cr.rectangle(3, 3, max(1, width - 6), max(1, height - 6))
         cr.stroke()
-        cr.set_line_width(1)
-        cr.set_source_rgba(color[0], color[1], color[2], min(1.0, alpha * 0.45))
-        cr.rectangle(6.5, 6.5, max(1, width - 13), max(1, height - 13))
+        cr.set_line_width(2)
+        cr.set_source_rgba(color[0], color[1], color[2], min(1.0, alpha * 0.5))
+        cr.rectangle(9, 9, max(1, width - 18), max(1, height - 18))
         cr.stroke()
 
     def frame_tick(self):
@@ -1545,7 +1548,10 @@ class Renderer:
         previous = self.records.get(record["overlayId"])
         self.records[record["overlayId"]] = record
         self.emergency_hidden = False
-        self.ensure_dock()
+        # Only cards that live in the dock reserve screen space; frames, rings
+        # and the floating pill must never shrink the user's work area.
+        if self.is_dock_record(record):
+            self.ensure_dock()
         try:
             self.render_record(record)
         except Exception:
@@ -1614,7 +1620,28 @@ class Renderer:
             self.destroy_surfaces()
         else:
             self.redraw_surfaces()
+        self.schedule_dock_release()
         return {"ok": True, **self.operation_ack("dismiss", "dismissed", overlay_id, "gtk3_overlay_dismissed")}
+
+    def is_dock_record(self, record):
+        if self.visual.get("layout") != "dock" or record.get("type", "widget") not in CARD_TYPES:
+            return False
+        payload = record.get("payload") or {}
+        return str(record.get("overlayId", "")).startswith(TIMELINE_ID_PREFIX) or str(payload.get("placement", "top_right")).startswith("bottom")
+
+    def schedule_dock_release(self):
+        # Give the reserved strut back once no dock card remains. The grace
+        # period covers screenshot suppression (clear, capture, restore) so
+        # app windows do not resize back and forth around every capture.
+        if self.dock_window is None or self.dock_release_source is not None:
+            return
+        self.dock_release_source = GLib.timeout_add(DOCK_RELEASE_GRACE_MS, self.release_dock_if_unused)
+
+    def release_dock_if_unused(self):
+        self.dock_release_source = None
+        if not any(self.is_dock_record(record) for record in self.records.values()):
+            self.destroy_dock()
+        return False
 
     def conceal_dock(self):
         # The dock keeps its reserved strut so app layout does not jump; it only
@@ -1645,6 +1672,7 @@ class Renderer:
         self.destroy_surfaces()
         self.destroy_rings()
         self.conceal_dock()
+        self.schedule_dock_release()
         self.draw_ready = set()
         self.settle_display()
         return {"ok": True, **self.operation_ack("clear", "cleared", reason="gtk3_overlays_cleared")}

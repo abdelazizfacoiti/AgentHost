@@ -19,6 +19,10 @@ export interface ActionTimelineOptions {
   sessionId: string;
   maxEntries?: number;
   alertPollMs?: number;
+  /** Hide the dock (and release its reserved space) this long after the last action; 0 keeps it. */
+  idleHideMs?: number;
+  /** After the user closes the timeline, a new burst of activity this long after the last one reopens it. */
+  reopenAfterMs?: number;
   now?: () => number;
   /** Clock label for entries; injectable so tests do not depend on the local timezone. */
   clock?: (epochMs: number) => string;
@@ -131,6 +135,10 @@ export class ActionTimeline {
   #renderQueue: Promise<void> = Promise.resolve();
   #retryTimer: ReturnType<typeof setTimeout> | undefined;
   #alertTimer: ReturnType<typeof setInterval> | undefined;
+  readonly #idleHideMs: number;
+  readonly #reopenAfterMs: number;
+  #dismissedByUser = false;
+  #lastActivityAt = 0;
 
   constructor(manager: OverlayManager, options: ActionTimelineOptions) {
     this.#manager = manager;
@@ -139,23 +147,29 @@ export class ActionTimeline {
     this.#now = options.now ?? Date.now;
     this.#clock = options.clock ?? defaultClock;
     this.#readAlerts = options.readAlerts;
-    if (this.#readAlerts !== undefined) {
-      this.#alertTimer = setInterval(() => { void this.#refreshAlerts(); }, options.alertPollMs ?? 1_000);
-      const timer = this.#alertTimer as unknown as { unref?: () => void };
-      timer.unref?.();
-    }
+    this.#idleHideMs = options.idleHideMs ?? 20_000;
+    this.#reopenAfterMs = options.reopenAfterMs ?? 60_000;
+    this.#alertTimer = setInterval(() => { void this.#tick(); }, options.alertPollMs ?? 1_000);
+    const timer = this.#alertTimer as unknown as { unref?: () => void };
+    timer.unref?.();
   }
+
+  /** True while the timeline card is on screen. */
+  get visible(): boolean { return this.#started; }
 
   get widgetId(): string { return this.#widgetId; }
 
   begin(tool: string, input: unknown): (result: ToolResult) => Promise<void> {
     const entry: Entry = { id: ++this.#sequence, label: describeAction(tool, input), state: "running", startedAt: this.#now() };
+    if (this.#dismissedByUser && entry.startedAt - this.#lastActivityAt >= this.#reopenAfterMs) this.#dismissedByUser = false;
+    this.#lastActivityAt = entry.startedAt;
     this.#entries.unshift(entry);
     this.#entries.length = Math.min(this.#entries.length, this.#max);
     void this.#render();
     return async (result: ToolResult) => {
       entry.state = outcomeState(result);
       entry.finishedAt = this.#now();
+      this.#lastActivityAt = entry.finishedAt;
       const seconds = (entry.finishedAt - entry.startedAt) / 1000;
       entry.detail = entry.state === "done"
         ? `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`
@@ -197,7 +211,7 @@ export class ActionTimeline {
       components,
       placement: "top_right",
       style: { semantic: alerts.attention !== undefined || alerts.paused ? "warning" : alerts.stopped ? "danger" : "info", elevation: "low" },
-      interaction: { interactive: false, focus: "never", dismissible: false, allowedEvents: [] },
+      interaction: { interactive: true, focus: "never", dismissible: true, allowedEvents: ["dismissed"] },
       sensitivity: "public",
       ttlMs: 300_000,
       persistent: true
@@ -211,11 +225,32 @@ export class ActionTimeline {
     await this.#renderQueue.catch(() => undefined);
   }
 
+  async #tick(): Promise<void> {
+    if (this.#disposed) return;
+    await this.#pollClose();
+    await this.#refreshAlerts();
+    await this.#hideWhenIdle();
+  }
+
+  async #pollClose(): Promise<void> {
+    if (!this.#started) return;
+    try {
+      const events = await this.#manager.pollEvents(this.#widgetId);
+      if (!events.some((event) => event.event === "dismissed" || event.event === "hide")) return;
+      this.#dismissedByUser = true;
+      await this.#hide();
+    } catch {
+      /* Event polling is best effort. */
+    }
+  }
+
   async #refreshAlerts(): Promise<void> {
-    if (this.#disposed || this.#readAlerts === undefined) return;
+    if (this.#readAlerts === undefined) return;
     try {
       const next = await this.#readAlerts();
       if (JSON.stringify(next) === JSON.stringify(this.#alerts)) return;
+      // A new approval wait is important enough to override a closed timeline.
+      if (next.attention !== undefined && this.#alerts.attention === undefined) this.#dismissedByUser = false;
       this.#alerts = next;
       // Surface stop/approval state even before the first action of a session.
       await this.#render();
@@ -224,9 +259,31 @@ export class ActionTimeline {
     }
   }
 
+  async #hideWhenIdle(): Promise<void> {
+    if (!this.#started || this.#idleHideMs <= 0) return;
+    const alerts = this.#alerts;
+    if (alerts.attention !== undefined || alerts.stopped || alerts.paused) return;
+    if (this.#entries.some((entry) => entry.state === "running" || entry.state === "waiting")) return;
+    if (this.#now() - this.#lastActivityAt < this.#idleHideMs) return;
+    await this.#hide();
+  }
+
+  async #hide(): Promise<void> {
+    this.#renderQueue = this.#renderQueue.catch(() => undefined).then(async () => {
+      if (!this.#started) return;
+      this.#started = false;
+      // Dismissing the last dock card lets the renderer release the reserved screen space.
+      await this.#manager.dismiss(this.#widgetId).catch(() => undefined);
+    });
+    await this.#renderQueue;
+  }
+
   async #render(): Promise<void> {
     this.#renderQueue = this.#renderQueue.catch(() => undefined).then(async () => {
-      if (this.#disposed) return;
+      if (this.#disposed || this.#dismissedByUser) return;
+      // Nothing to show yet and nobody waiting: do not claim dock space for an empty card.
+      const alerts = this.#alerts;
+      if (this.#entries.length === 0 && alerts.attention === undefined && !alerts.stopped && !alerts.paused) return;
       const widget = this.widget();
       const result = this.#started ? await this.#manager.updateWidget(widget) : await this.#manager.showWidget(widget);
       if (result.ok) {
