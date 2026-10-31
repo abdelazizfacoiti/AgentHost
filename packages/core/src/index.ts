@@ -6,6 +6,7 @@ export * from "./capabilities.js";
 export * from "./config.js";
 export * from "./activity-status.js";
 export * from "./attention.js";
+export * from "./requirements.js";
 export * from "./confirmations.js";
 export * from "./run-state.js";
 export * from "./tasks.js";

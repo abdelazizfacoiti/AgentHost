@@ -60,6 +60,8 @@ import {
   openLinuxApp,
   openLinuxUrl,
   clearWindowListCache,
+  getLinuxClipboard,
+  setLinuxClipboard,
   readLinuxFile,
   probeLinuxSandboxSupport,
   runSafeLinuxCommand,
@@ -76,6 +78,7 @@ import { createAdapterTools } from "./tools/adapter.js";
 import { createDesktopTools } from "./tools/desktop.js";
 import { createAppTools } from "./tools/app.js";
 import { createUiTools } from "./tools/ui.js";
+import { createClipboardTools } from "./tools/clipboard.js";
 import { createComputerTools } from "./tools/computer.js";
 import { createFileTools } from "./tools/file.js";
 import { createShellTools } from "./tools/shell.js";
@@ -89,6 +92,8 @@ import { listResourceEntries, readResource } from "./resources.js";
 import { runTool, type AnyAgentHostToolDefinition } from "./tool-runner.js";
 import { ToolActionOverlay } from "./action-overlay.js";
 import { HostAttention } from "./host-attention.js";
+import { inputGuardPath } from "./input-guard.js";
+import { bootstrapRequirements } from "./requirements-bootstrap.js";
 import { ActionTimeline } from "./action-timeline.js";
 import { TaskActivityOverlay } from "./task-overlay.js";
 import { shouldShowActionCard, shouldShowActivityCard } from "./activity.js";
@@ -300,6 +305,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const pillAutoHideMs = config.overlay?.pillAutoHideMs ?? 1_500;
   const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", {
     sessionId,
+    inputGuardPath: inputGuardPath(config.agentHostDir),
     visual: {
       layout: config.overlay?.layout ?? "dock",
       dockSide: config.overlay?.dockSide ?? "right",
@@ -311,6 +317,9 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   let taskActivity: TaskActivityOverlay | undefined;
   // Injected Linux automation means a test or embedded host; never drive the real desktop then.
   const hostAttention = options.linux === undefined ? new HostAttention(config.agentHostDir) : undefined;
+  if (options.linux === undefined && process.env.NODE_ENV !== "test") {
+    void bootstrapRequirements(config.agentHostDir, config.autoInstallDependencies !== false).catch(() => undefined);
+  }
   const actionOverlay = new ToolActionOverlay(overlay, {
     widgetId: `agenthost-action-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`,
     placement: actionPill ? "top_center" : config.overlay?.preferredPosition ?? "top_right",
@@ -384,6 +393,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       screenshot: (input) => captureLinuxScreenshot(input, { agentHostDir: config.agentHostDir }),
       listWindows: (input) => listLinuxWindows(input, { agentHostDir: config.agentHostDir }),
       invalidateWindowCache: () => clearWindowListCache(),
+      setClipboard: (input) => setLinuxClipboard(input.text, { agentHostDir: config.agentHostDir }),
+      getClipboard: () => getLinuxClipboard({ agentHostDir: config.agentHostDir }),
       focusWindow: (input) => focusLinuxWindow(input, { agentHostDir: config.agentHostDir }),
       hotkey: (input) => sendLinuxHotkey(input, { agentHostDir: config.agentHostDir }),
       typeText: (input) => typeLinuxText(input, { agentHostDir: config.agentHostDir }),
@@ -443,7 +454,8 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createTaskTools(),
     ...createAgentTools(),
     ...createWindowTools(),
-    ...createUiTools()
+    ...createUiTools(),
+    ...createClipboardTools()
   ];
 
   const loadedTools = materializeToolDefinitions(applyProductionExecutionMetadata(tools));

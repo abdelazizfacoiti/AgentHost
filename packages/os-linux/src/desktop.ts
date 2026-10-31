@@ -755,7 +755,14 @@ async function verifyX11ActionContext(
   }
 
   if (!contextMatches(current.activeWindow, expected)) {
-    return { ok: false, backend: "xdotool", reason: "The active window no longer matches the required context." };
+    // Focus often drifts back to the agent's terminal between calls. When the
+    // caller pinned an exact window, bring that window back once and re-verify
+    // instead of failing; input still only ever goes to the requested window.
+    const refocused = await refocusExpectedWindow(expected, xdotoolPath, context);
+    if (refocused === undefined) {
+      return { ok: false, backend: "xdotool", reason: "The active window no longer matches the required context." };
+    }
+    return { ok: true, backend: "xdotool", xdotoolPath, activeWindow: refocused };
   }
 
   return {
@@ -764,6 +771,21 @@ async function verifyX11ActionContext(
     xdotoolPath,
     activeWindow: current.activeWindow
   };
+}
+
+async function refocusExpectedWindow(
+  expected: DesktopWindowContext,
+  xdotoolPath: string,
+  context: LinuxDesktopContext
+): Promise<DesktopWindowContext | undefined> {
+  const windowId = normalizeWindowId(expected.windowId);
+  if (windowId === undefined) return undefined;
+  const wmctrlPath = await findCommandPath("wmctrl", context);
+  if (wmctrlPath === undefined) return undefined;
+  const activation = await activateWindowById(windowId, wmctrlPath, xdotoolPath, context);
+  if (!activation.focused) return undefined;
+  const after = await activeWindowViaXdotool(xdotoolPath, context);
+  return after.activeWindow !== undefined && contextMatches(after.activeWindow, expected) ? after.activeWindow : undefined;
 }
 
 /**
@@ -847,6 +869,44 @@ async function pasteViaClipboard(
   return restored
     ? { ok: true, reason: "Pasted text via the clipboard (layout-independent) and restored the prior clipboard contents." }
     : { ok: true, reason: "Pasted text via the clipboard (layout-independent); prior clipboard contents could not be restored." };
+}
+
+export interface LinuxClipboardResult {
+  supported: boolean;
+  backend: "xclip" | "xsel" | "gtk" | "unavailable";
+  text?: string;
+  reason: string;
+}
+
+/** Puts text on the CLIPBOARD so the user or agent can paste it anywhere. */
+export async function setLinuxClipboard(text: string, context: LinuxDesktopContext = {}): Promise<LinuxClipboardResult> {
+  const xclip = await findCommandPath("xclip", context);
+  const xsel = xclip === undefined ? await findCommandPath("xsel", context) : undefined;
+  if (xclip !== undefined || xsel !== undefined) {
+    // xclip/xsel fork a background owner that keeps serving the selection.
+    const fed = xclip !== undefined
+      ? await feedClipboard(xclip, ["-selection", "clipboard", "-i"], text, context)
+      : await feedClipboard(xsel!, ["--clipboard", "--input"], text, context);
+    return { supported: fed, backend: xclip !== undefined ? "xclip" : "xsel", reason: fed ? "Set the clipboard." : "The clipboard backend did not accept the text." };
+  }
+  const held = await restoreGtkClipboard(text, context);
+  return held
+    ? { supported: true, backend: "gtk", reason: "Set the clipboard through the built-in GTK helper." }
+    : { supported: false, backend: "unavailable", reason: "No clipboard backend: install xclip or python3-gi." };
+}
+
+export async function getLinuxClipboard(context: LinuxDesktopContext = {}): Promise<LinuxClipboardResult> {
+  const xclip = await findCommandPath("xclip", context);
+  const xsel = xclip === undefined ? await findCommandPath("xsel", context) : undefined;
+  const text = xclip !== undefined
+    ? await readClipboard(xclip, ["-selection", "clipboard", "-o"], context)
+    : xsel !== undefined
+      ? await readClipboard(xsel, ["--clipboard", "--output"], context)
+      : await readGtkClipboard(context);
+  const backend = xclip !== undefined ? "xclip" : xsel !== undefined ? "xsel" : "gtk";
+  return text === undefined
+    ? { supported: false, backend, reason: "The clipboard is empty or holds no text." }
+    : { supported: true, backend, text, reason: "Read the clipboard text." };
 }
 
 async function pasteViaGtkClipboard(

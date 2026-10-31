@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, acceptConfirmation, beginTakeover, clearActiveTaskApproval, clearPause, clearStop, defaultAgentHostHome, defaultPublicConfigPath, endTakeover, legacyConfigPath, listConfirmations, loadAgentHostConfig, normalizeSha256, readActiveTaskApproval, readActivityStatus, readRunState, readSha256Sidecar, redactLocalPath, rejectConfirmation, requestPause, requestStop, sha256File, transitionTask } from "@agenthost/core";
 import { renderTaskHtml, renderTaskMarkdown } from "./task-export.js";
 import { attentionClear, attentionRequest, attentionStatus } from "./attention.js";
+import { checkLinuxRequirements, missingAptPackages, planAptInstall } from "@agenthost/os-linux";
 import { claudeHooksAdd, claudeHooksRemove, claudeHooksStatus } from "./hooks.js";
 import { INTEGRATION_TARGETS, integrationAdd, integrationRemove, integrationStatus, publicIntegrationReport, type IntegrationAction, type IntegrationPaths, type IntegrationTarget } from "./integrations.js";
 
@@ -482,25 +483,26 @@ async function overlayCommand(sub: string | undefined, flags: ReturnType<typeof 
   }
   return await doctor();
 }
-function onPath(command: string): boolean { return spawnSync("sh", ["-c", `command -v ${command}`], { stdio: "ignore" }).status === 0; }
-// Ordered by how much an agent loses without them; never installed automatically.
-const DESKTOP_DEPENDENCIES: Array<{ name: string; aptPackage: string; impact: string; present: () => boolean }> = [
-  { name: "xdotool", aptPackage: "xdotool", impact: "required: clicks, typing, hotkeys", present: () => onPath("xdotool") },
-  { name: "wmctrl", aptPackage: "wmctrl", impact: "required: window list and focus", present: () => onPath("wmctrl") },
-  { name: "xwininfo", aptPackage: "x11-utils", impact: "accurate window coordinates", present: () => onPath("xwininfo") },
-  { name: "scrot", aptPackage: "scrot", impact: "screenshots", present: () => onPath("scrot") },
-  { name: "pyatspi", aptPackage: "python3-pyatspi", impact: "ui.* accessibility tools (read UIs as text)", present: () => pythonModuleExists("import pyatspi") },
-  { name: "tesseract", aptPackage: "tesseract-ocr", impact: "OCR (vision.find_text*)", present: () => onPath("tesseract") },
-  { name: "ffmpeg", aptPackage: "ffmpeg", impact: "JPEG, scaled, and cropped screenshots", present: () => onPath("ffmpeg") },
-  { name: "xclip", aptPackage: "xclip", impact: "faster paste (built-in GTK fallback otherwise)", present: () => onPath("xclip") || onPath("xsel") }
-];
+async function setupDeps(args: ReturnType<typeof parseFlags>): Promise<Output> {
+  const statuses = await checkLinuxRequirements();
+  const missing = missingAptPackages(statuses);
+  const data = { requirements: statuses, missingPackages: missing };
+  if (missing.length === 0) return { ok: true, command: "setup deps", data: { ...data, installed: false, reason: "All desktop requirements are present." } };
+  const plan = await planAptInstall(missing, process.stdin.isTTY === true);
+  if (!args.flags.has("apply")) return { ok: true, command: "setup deps", data: { ...data, preview: true, run: "agenthost setup deps --apply", elevation: plan?.elevation ?? "manual" } };
+  if (plan === undefined) return fail("setup deps", `no apt-get with sudo/pkexec available; install manually: ${missing.join(" ")}`);
+  // sudo prompts in this terminal; pkexec opens the desktop password dialog.
+  const result = spawnSync(plan.command[0]!, plan.command.slice(1), { stdio: "inherit" });
+  const after = await checkLinuxRequirements();
+  return { ok: result.status === 0, command: "setup deps", data: { installed: result.status === 0, elevation: plan.elevation, stillMissing: missingAptPackages(after) }, ...(result.status === 0 ? {} : { error: "apt_install_failed_or_cancelled" }) };
+}
 async function doctor(): Promise<Output> {
   const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: pythonModuleExists("import gi; from gi.repository import Gtk"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
   const warnings = [!checks.architecture ? "x86_64 is the public RC target." : "", !checks.python ? "Install Python 3 for overlay diagnostics." : "", !checks.x11 ? "X11 DISPLAY is unavailable; visible overlay is unsupported." : ""].filter(Boolean);
   if (!mcp.handshake) warnings.push(mcp.reason ?? "mcp_handshake_unavailable");
-  const desktopDependencies = DESKTOP_DEPENDENCIES.map((dependency) => ({ name: dependency.name, impact: dependency.impact, installed: dependency.present(), aptPackage: dependency.aptPackage }));
-  const missing = desktopDependencies.filter((dependency) => !dependency.installed);
-  if (missing.length > 0) warnings.push(`Missing desktop tools (${missing.map((dependency) => dependency.name).join(", ")}). Install with: sudo apt install ${[...new Set(missing.map((dependency) => dependency.aptPackage))].join(" ")}`);
+  const desktopDependencies = await checkLinuxRequirements();
+  const missingPackages = missingAptPackages(desktopDependencies);
+  if (missingPackages.length > 0) warnings.push(`Missing desktop tools (${desktopDependencies.filter((dependency) => !dependency.installed).map((dependency) => dependency.name).join(", ")}). Run: agenthost setup deps --apply (or sudo apt install ${missingPackages.join(" ")})`);
   return { ok: config.ok, command: "doctor", data: { version: AGENTHOST_VERSION, checks, desktopDependencies, config: config.ok ? "valid" : config.error, mcp, process: await status(), activity: (await readActivityStatus(agentHome)) ?? null, paths: { agentHostHome: "[agenthost-home]", config: "[config]", mcpEntry: "[installed-mcp-runtime]" } }, warnings };
 }
 async function integrationsCommand(targetArg: string | undefined, args: ReturnType<typeof parseFlags>): Promise<Output> {
@@ -566,7 +568,7 @@ async function main(): Promise<number> {
     if (top === undefined || top === "help") result = { ok: true, command: "help", data: "agenthost version|doctor|setup|start|stop|status|task|confirmations|confirm|deny|agent|attention|capabilities|permissions|sessions|overlay|integrations|config|update|uninstall" };
     else if (top === "version") result = { ok: true, command: "version", data: { version: AGENTHOST_VERSION, platform: process.platform, architecture: process.arch } };
     else if (top === "doctor") result = await doctor();
-    else if (top === "setup") result = await setup(args);
+    else if (top === "setup") result = sub === "deps" ? await setupDeps(args) : await setup(args);
     else if (top === "start") result = await start(args);
     else if (top === "stop") result = await stop();
     else if (top === "status") result = await status();

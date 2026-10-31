@@ -157,6 +157,7 @@ const configFileSchema = z
     overlayRendererMode: overlayRendererModeSchema.optional(),
     overlay: overlaySchema.optional(),
     execution: executionSchema.optional(),
+    autoInstallDependencies: z.boolean().optional(),
     speech: speechSchema.optional(),
     optionalAdapters: z.record(z.object({ enabled: z.boolean() }).strict()).optional(),
     grants: z.array(capabilityGrantSchema).max(500).optional()
@@ -341,6 +342,7 @@ export async function loadAgentHostConfig(options: LoadConfigOptions = {}): Prom
     overlayRendererMode,
     overlay,
     execution,
+    autoInstallDependencies: fileConfig.autoInstallDependencies ?? true,
     speech,
     optionalAdapters: fileConfig.optionalAdapters ?? {},
     policy: getDefaultPolicy({ grants })

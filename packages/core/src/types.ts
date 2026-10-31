@@ -685,6 +685,8 @@ export interface AgentHostConfig {
   forgeRuntimeSandboxMode?: ForgeRuntimeSandboxMode;
   overlayRendererMode?: import("./overlay.js").OverlayRendererMode;
   overlay?: import("./overlay.js").OverlayPublicConfig;
+  /** On first start, offer a password-prompted apt install of missing desktop packages (default true). */
+  autoInstallDependencies?: boolean;
   speech?: SpeechConfig;
   optionalAdapters?: Record<string, { enabled: boolean }>;
   policy: RuntimePolicy;

@@ -43,6 +43,7 @@ for (const packageName of ["core", "mcp-server", "os-linux", "app-overlay", "app
 }
 await copy(path.join(root, "packages", "app-overlay", "runtime"), path.join(stage, "packages", "app-overlay", "runtime"));
 await copy(path.join(root, "README.md"), path.join(stage, "README.md"));
+await copy(path.join(root, "requirements-linux.txt"), path.join(stage, "requirements-linux.txt"));
 await copy(path.join(root, "CHANGELOG.md"), path.join(stage, "CHANGELOG.md"));
 await copy(path.join(root, "CONTRIBUTING.md"), path.join(stage, "CONTRIBUTING.md"));
 for (const communityFile of ["CODE_OF_CONDUCT.md", "SECURITY.md", "SUPPORT.md"]) {

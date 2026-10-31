@@ -73,7 +73,7 @@ this tree. Browser work uses ordinary desktop automation when policy allows.
 
 ## 3. Live surface
 
-The current server exposes **46 base MCP tools** and **3 resources**.
+The current server exposes **48 base MCP tools** and **3 resources**.
 
 Tool counts are generated from the loaded set at startup. The authoritative
 source is always:
@@ -949,7 +949,7 @@ At the time of writing, the tree passes:
 - `npm run build`
 - `npm run lint`
 - `npm test` — 60 files, 371 tests
-- `npm run smoke:mcp` — 46 tools, 3 resources
+- `npm run smoke:mcp` — 48 tools, 3 resources
 - `npm run benchmark:agent` — isolated, non-destructive runner overhead benchmark
 - `npm run benchmark:tasks` — 20 isolated scenarios, 22 governed calls in the latest run; desktop-input/OCR scenarios use mocked backends
 - `git diff --check`

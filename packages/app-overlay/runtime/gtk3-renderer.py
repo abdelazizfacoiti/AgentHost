@@ -53,6 +53,7 @@ TIMELINE_STYLE = {"done": "ah-success", "failed": "ah-failed", "waiting": "ah-wa
 TIMELINE_VISIBLE = 18
 TIMELINE_ID_PREFIX = "agenthost-timeline-"
 CONTROL_EVENTS = {"pause", "resume", "emergency_stop_requested", "cancel", "cancelled"}
+INPUT_GUARD_SECONDS = 1.0
 STATUS_CAIRO = {
     "neutral": (0.30, 0.36, 0.48, 0.95),
     "info": (0.11, 0.37, 0.75, 0.95),
@@ -232,6 +233,7 @@ class Renderer:
         self.queue_scheduled = False
         self.dock_window = None
         self.dock_concealed = False
+        self.input_guard_path = None
         self.frame_tick_source = None
         self.visual = {
             "layout": "ambient",
@@ -523,9 +525,20 @@ class Renderer:
         # Keyboard activation (a stray Space/Enter typed by an agent into a
         # card that happened to hold focus) and accessibility "click" actions
         # are ignored, so automation cannot pause or stop by accident.
-        if event in CONTROL_EVENTS and not pointer_activated():
+        if event in CONTROL_EVENTS and (not pointer_activated() or self.agent_input_active()):
             return
         self.emit_operator_event(record, event)
+
+    def agent_input_active(self):
+        # A synthetic XTEST click from the agent is indistinguishable from a
+        # human one, so AgentHost marks its own input injection; a control
+        # press during that window came from the agent, not the operator.
+        if self.input_guard_path is None:
+            return False
+        try:
+            return time.time() - os.stat(self.input_guard_path).st_mtime < INPUT_GUARD_SECONDS
+        except OSError:
+            return False
 
     def emit_operator_event(self, record, event):
         # Emit before removing so a dead parent still leaves no stale card:
@@ -1747,6 +1760,9 @@ def handle_request(request):
                 return
             renderer.renderer_epoch = hello_payload["rendererEpoch"]
             renderer.apply_visual_config(hello_payload.get("visual"))
+            guard = hello_payload.get("inputGuardPath")
+            if isinstance(guard, str) and os.path.isabs(guard) and len(guard) < 4096:
+                renderer.input_guard_path = guard
             reply(request["id"], True, {"protocolVersion": VERSION, "rendererEpoch": renderer.renderer_epoch, "capabilities": renderer.capability()})
         elif command == "capabilities":
             reply(request["id"], True, renderer.capability())

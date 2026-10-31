@@ -1,7 +1,7 @@
 # AgentHost MCP Tools and Adapter Specification
 
 All callable tools return `ToolResult`. MCP transport is stdio. The current
-minimal-v2 server exposes 46 base tools. This number is generated from the
+minimal-v2 server exposes 48 base tools. This number is generated from the
 loaded set at startup; treat `system.list_capabilities` and
 `agenthost://capabilities` as authoritative instead of hard-coding counts.
 
@@ -32,6 +32,7 @@ present before the call. Missing backend data is omitted rather than guessed.
 | `computer.wait` | observe | read_only (fixed 50-10000 ms settle delay) |
 | `ui.tree` | low | read_only (AT-SPI tree of an app or the active window) |
 | `ui.find` | low | read_only (elements by name/role with screen bounds) |
+| `clipboard.get` | medium | read_only + exact confirmation (clipboard may hold secrets) |
 | `window.list` | low | read_only |
 | `file.read` | low | read_only |
 | `file.read_many` | low | read_only |
@@ -58,6 +59,7 @@ present before the call. Missing backend data is omitted rather than guessed.
 | `app.open_url` | low | state_changing (routine; http/https/file, optional browser new tab) |
 | `ui.activate` | medium | state_changing (routine; accessibility action) |
 | `ui.set_text` | medium | state_changing (routine; layout-independent text) |
+| `clipboard.set` | low | state_changing (routine) |
 | `file.write` | medium | state_changing (routine) |
 | `file.ensure_dir` | medium | state_changing (routine) |
 | `file.copy` | medium | state_changing (routine) |

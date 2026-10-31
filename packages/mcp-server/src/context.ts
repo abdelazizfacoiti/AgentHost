@@ -39,7 +39,7 @@ import type {
   ,VisionGroundingResult, VisionMode
 } from "@agenthost/core";
 import type { OverlayManager } from "@agenthost/app-overlay";
-import type { RunSafeCommandInput, UrlOpenBrowser, UrlOpenResult } from "@agenthost/os-linux";
+import type { LinuxClipboardResult, RunSafeCommandInput, UrlOpenBrowser, UrlOpenResult } from "@agenthost/os-linux";
 import type { GrantStore } from "./grants.js";
 import type { AnyAgentHostToolDefinition } from "./tool-runner.js";
 import type { ToolActionOverlay } from "./action-overlay.js";
@@ -80,6 +80,8 @@ export interface LinuxAutomation {
   listWindows(input: { limit?: number; includeTitles?: boolean }): Promise<WindowListResult>;
   /** Drops the short-lived window-list cache so the next listing reflects a just-performed action. */
   invalidateWindowCache?(): void;
+  setClipboard?(input: { text: string }): Promise<LinuxClipboardResult>;
+  getClipboard?(): Promise<LinuxClipboardResult>;
   focusWindow(input: { windowId?: string; appName?: string; title?: string; pid?: number }): Promise<WindowFocusResult>;
   hotkey(input: { keys: string[]; activeWindow: DesktopWindowContext }): Promise<DesktopHotkeyResult>;
   typeText(input: { text: string; activeWindow: DesktopWindowContext }): Promise<DesktopTypeTextResult>;

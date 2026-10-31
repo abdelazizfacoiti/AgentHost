@@ -85,6 +85,7 @@ const BADGES: Record<ToolActionPhase, { status: "neutral" | "info" | "success" |
 
 const HALT_CODES = new Set(["emergency_stop_requested", "human_takeover_active", "pause_requested", "safety_blocked"]);
 const SCREEN_CAPTURE_TOOLS = new Set(["desktop.screenshot", "vision.find_text_on_screen"]);
+const POINTER_TOOLS = new Set(["desktop.click", "desktop.pointer"]);
 
 function elapsedLabel(milliseconds: number): string {
   const total = Math.max(0, Math.floor(milliseconds / 1000));
@@ -253,6 +254,11 @@ export class ToolActionOverlay {
           this.#startHeartbeat();
         }
         void this.#syncFrame(this.#currentPhase());
+        // A green pulse where the pointer action landed confirms it happened
+        // there; the blue ring before the handler only announced the target.
+        if (phase === "done" && this.#targetRing && action.target !== undefined && POINTER_TOOLS.has(action.tool)) {
+          void this.#showTargetRing(action.target, "success");
+        }
         if (!needsOperator && this.#visibleSince !== undefined) {
           const remaining = this.#minDisplayMs - (this.#now() - this.#visibleSince);
           if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
@@ -488,7 +494,7 @@ export class ToolActionOverlay {
     }
   }
 
-  async #showTargetRing(target: ToolActionTarget): Promise<void> {
+  async #showTargetRing(target: ToolActionTarget, semantic: "info" | "success" = "info"): Promise<void> {
     const generation = ++this.#ringGeneration;
     const ttl = this.#targetRingDurationMs + this.#targetRingLeadMs + 500;
     const expiresAt = new Date(Date.now() + ttl).toISOString();
@@ -500,7 +506,7 @@ export class ToolActionOverlay {
         overlayId: this.#ringOverlayId(),
         type: "target_ring",
         target: binding,
-        style: { semantic: "info" },
+        style: { semantic },
         animation: { kind: "pulse", durationMs: this.#targetRingDurationMs, repeatCount: 1, reducedMotion: "fade" },
         sensitivity: "public",
         ttlMs: ttl

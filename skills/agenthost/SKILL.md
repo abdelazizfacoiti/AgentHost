@@ -93,6 +93,7 @@ coding tools directly.
 | Wait for a condition | `computer.wait_for` (window/title/file/screen conditions); `computer.wait` for a fixed settle delay |
 | Open apps and pages | `app.open`, `app.open_url` (http/https/file, optional `browser` for a new tab in the logged-in profile) |
 | Read/drive UI by accessibility | `ui.tree`, `ui.find`, `ui.activate`, `ui.set_text` (default target: active window) |
+| Clipboard | `clipboard.set`; `clipboard.get` needs an operator confirmation |
 | Run a bounded governed plan | `computer.run_steps` |
 | Click / move pointer | `desktop.click`, `desktop.pointer` (`action`: scroll at x,y, double_click, right_click, drag) |
 | Type text / shortcuts | `desktop.type_text`, `desktop.hotkey` |

@@ -28,6 +28,8 @@ import type { ToolActionHandle, ToolActionTarget } from "./action-overlay.js";
 import { shouldShowActionCard } from "./activity.js";
 import { createSafetyEvaluationContext } from "./grants.js";
 import { withStateChangingLane } from "./execution-gate.js";
+import { injectsInput, markAgentInput } from "./input-guard.js";
+import { describeAction } from "./action-timeline.js";
 
 export interface ToolPreviewEffect {
   summary?: string;
@@ -727,7 +729,8 @@ export async function runTool<Input>(
     try {
       action = await context.actionOverlay?.begin({
         tool: tool.name,
-        summary: inputSummaryForAudit(tool, input),
+        // The pill shows the same safe label as the dock timeline ("Keys ctrl+t · firefox").
+        summary: describeAction(tool.name, input) === tool.name ? inputSummaryForAudit(tool, input) : describeAction(tool.name, input),
         riskLevel: tool.riskLevel,
         ...(target === undefined ? {} : { target }),
         ...(context.planStep === undefined ? {} : { step: context.planStep }),
@@ -744,6 +747,8 @@ export async function runTool<Input>(
   let result: ToolResult;
   const stateBefore = needsStateResult(tool) ? await captureToolState(context).catch(() => undefined) : undefined;
 
+  const guardInput = injectsInput(tool.name) && options.previewOnly !== true;
+  if (guardInput) await markAgentInput(context.config.agentHostDir);
   try {
     result = await executeGoverned(tool, input, context, audit, startedAt, options.previewOnly === true);
   } catch (error) {
@@ -774,6 +779,7 @@ export async function runTool<Input>(
     }
   }
 
+  if (guardInput) await markAgentInput(context.config.agentHostDir);
   if (needsStateResult(tool)) {
     context.linux?.invalidateWindowCache?.();
     const stateAfter = await captureToolState(context).catch(() => undefined);

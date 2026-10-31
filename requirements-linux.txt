@@ -1,0 +1,13 @@
+# Linux desktop packages used by AgentHost (Debian/Ubuntu apt names).
+# Install all:  sudo apt install $(grep -v '^#' requirements-linux.txt)
+# Or let AgentHost do it with a password prompt:  agenthost setup deps --apply
+xdotool
+wmctrl
+python3-gi
+x11-utils
+scrot
+python3-pyatspi
+tesseract-ocr
+ffmpeg
+xclip
+libnotify-bin
