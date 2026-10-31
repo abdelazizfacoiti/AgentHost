@@ -344,8 +344,9 @@ class Renderer:
         max_width = value.get("maxWidth")
         if isinstance(max_width, (int, float)) and 240 <= max_width <= 1200:
             self.visual["maxWidth"] = int(max_width)
+        # Config only. The dock is created by the first dock-resident card, so a
+        # session that shows nothing never reserves screen space.
         self.destroy_dock()
-        self.ensure_dock()
 
     def dock_geometry(self):
         if self.visual.get("layout") != "dock":
