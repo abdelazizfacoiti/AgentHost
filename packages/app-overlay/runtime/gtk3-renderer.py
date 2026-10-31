@@ -15,6 +15,8 @@ import sys
 import time
 import uuid
 
+from overlay_geometry import card_position, ring_placement
+
 try:
     import gi
     gi.require_version("Gtk", "3.0")
@@ -200,6 +202,8 @@ class Renderer:
         self.cards = {}
         self.surface_windows = []
         self.surface_fixed = []
+        self.surface_providers = {}
+        self.surface_records = {}
         self.ring_windows = {}
         self.records = {}
         self.events = []
@@ -266,7 +270,7 @@ class Renderer:
             "drawingBackend": "cairo" if CAIRO_FOREIGN_AVAILABLE else "gtk3-widgets",
             "cairoCallbacks": CAIRO_FOREIGN_AVAILABLE,
             "reason": reason,
-            "limitations": limitations + ([] if CAIRO_FOREIGN_AVAILABLE else ["PyGObject Cairo foreign bindings are unavailable; pointer primitives use GTK widgets with X11 input shaping."]),
+            "limitations": limitations + ([] if CAIRO_FOREIGN_AVAILABLE else ["PyGObject Cairo foreign bindings are unavailable; pointer primitives use GTK widgets and frame/ring animation uses GTK CSS fallbacks."]),
         }
 
     def monitor_geometries(self):
@@ -435,6 +439,8 @@ class Renderer:
             window.destroy()
         self.surface_windows = []
         self.surface_fixed = []
+        self.surface_providers = {}
+        self.surface_records = {}
 
     def destroy_rings(self):
         for entry in list(self.ring_windows.values()):
@@ -1012,73 +1018,22 @@ class Renderer:
         bounds = target.get("bounds") if isinstance(target, dict) else None
         point = target.get("point") if isinstance(target, dict) else None
         user_position = card.get("user_position")
+        placement = payload.get("placement", "top_right")
         if dock is not None:
             x = area.x + CARD_MARGIN
-            placement = payload.get("placement", "top_right")
             at_top = str(record.get("overlayId", "")).startswith("agenthost-action-") or placement.startswith("top")
             y = area.y + CARD_MARGIN if at_top else area.y + area.height - height - CARD_MARGIN
-        elif isinstance(user_position, tuple) and not isinstance(bounds, dict) and not isinstance(point, dict):
-            x, y = float(user_position[0]), float(user_position[1])
-        elif isinstance(bounds, dict):
-            try:
-                x = float(bounds.get("x", 0)) + float(bounds.get("width", 1)) + 12
-                y = float(bounds.get("y", 0))
-            except Exception:
-                x, y = area.x + CARD_MARGIN, area.y + CARD_MARGIN
-        elif isinstance(point, dict):
-            try:
-                x = float(point.get("x", 0)) + 20
-                y = float(point.get("y", 0)) + 20
-            except Exception:
-                x, y = area.x + CARD_MARGIN, area.y + CARD_MARGIN
         else:
-            placement = payload.get("placement", "top_right")
-            if placement in {"top_center", "bottom_center"}:
-                x = area.x + (area.width - width) / 2
-            elif placement in {"top_left", "bottom_left"}:
-                x = area.x + CARD_MARGIN
-            else:
-                x = area.x + area.width - width - CARD_MARGIN
-            y = area.y + area.height - height - CARD_MARGIN if placement in {"bottom_left", "bottom_center", "bottom_right"} else area.y + CARD_MARGIN
-
-        # A target ring is transient but must remain legible. If the preferred
-        # placement intersects the target, choose the nearest free corner and
-        # then apply the normal monitor/work-area clamp below.
-        avoid = None
-        if isinstance(bounds, dict):
-            try:
-                avoid = (float(bounds.get("x", 0)) - 28, float(bounds.get("y", 0)) - 28,
-                         float(bounds.get("width", 1)) + 56, float(bounds.get("height", 1)) + 56)
-            except Exception:
-                avoid = None
-        elif isinstance(point, dict):
-            try:
-                avoid = (float(point.get("x", 0)) - 52, float(point.get("y", 0)) - 52, 104, 104)
-            except Exception:
-                avoid = None
-        if avoid is not None:
-            ax, ay, aw, ah = avoid
-            def overlaps(px, py):
-                return px < ax + aw and px + width > ax and py < ay + ah and py + height > ay
-            placement = payload.get("placement", "top_right")
-            corners = [
-                (area.x + CARD_MARGIN, area.y + CARD_MARGIN),
-                (area.x + area.width - width - CARD_MARGIN, area.y + CARD_MARGIN),
-                (area.x + CARD_MARGIN, area.y + area.height - height - CARD_MARGIN),
-                (area.x + area.width - width - CARD_MARGIN, area.y + area.height - height - CARD_MARGIN),
-            ]
-            if placement in {"top_left", "bottom_left"}:
-                corners = [corners[0], corners[2], corners[1], corners[3]]
-            elif placement in {"top_right", "bottom_right"}:
-                corners = [corners[1], corners[3], corners[0], corners[2]]
-            elif placement == "bottom_center":
-                corners = [corners[2], corners[3], corners[0], corners[1]]
-            for candidate_x, candidate_y in [(x, y), *corners]:
-                if not overlaps(candidate_x, candidate_y):
-                    x, y = candidate_x, candidate_y
-                    break
-        x = min(max(x, area.x + CARD_MARGIN), area.x + area.width - width - CARD_MARGIN)
-        y = min(max(y, area.y + CARD_MARGIN), area.y + area.height - height - CARD_MARGIN)
+            x, y = card_position(
+                (area.x, area.y, area.width, area.height),
+                width,
+                height,
+                placement=placement,
+                bounds=bounds if isinstance(bounds, dict) else None,
+                point=point if isinstance(point, dict) else None,
+                user_position=user_position if isinstance(user_position, tuple) else None,
+                margin=CARD_MARGIN,
+            )
         card["last_position"] = (int(x), int(y), width, height)
         window.resize(width, height)
         window.move(int(x), int(y))
@@ -1141,6 +1096,8 @@ class Renderer:
                 if child is not None:
                     child.queue_draw()
             return
+        self.surface_providers = {}
+        self.surface_records = {}
         for index, root in enumerate(self.surface_fixed):
             for child in root.get_children():
                 root.remove(child)
@@ -1167,8 +1124,35 @@ class Renderer:
         if kind in {"pointer", "arrow"}:
             return self.label("➤", "ah-active", 4)
         frame = Gtk.EventBox()
-        frame.get_style_context().add_class("ah-highlight")
+        context = frame.get_style_context()
+        if CAIRO_FOREIGN_AVAILABLE or kind != "frame":
+            context.add_class("ah-highlight")
+        else:
+            context.add_class("ah-frame")
+            provider = Gtk.CssProvider()
+            context.add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            self.surface_providers[frame] = provider
+            self.surface_records[frame] = record
+            self.apply_frame_style(frame, record)
         return frame
+
+    def apply_frame_style(self, widget, record):
+        provider = self.surface_providers.get(widget)
+        if provider is None:
+            return
+        payload = record.get("payload") or {}
+        style = payload.get("style") if isinstance(payload.get("style"), dict) else {}
+        r, g, b, alpha = color_for(style, self.frame_alpha(payload))
+        css = ".ah-frame { border-width: 3px; border-style: solid; border-color: rgba(%d,%d,%d,%.3f); border-radius: 10px; background-color: rgba(0,0,0,0); }" % (
+            int(r * 255), int(g * 255), int(b * 255), alpha
+        )
+        provider.load_from_data(css.encode("utf-8"), -1)
+
+    def frame_alpha(self, payload):
+        animation = payload.get("animation") if isinstance(payload.get("animation"), dict) else {}
+        if animation.get("kind") == "pulse" and animation.get("reducedMotion") not in {"instant", "none"}:
+            return 0.45 + 0.35 * (0.5 + 0.5 * math.sin(time.monotonic() * math.pi * 1.1))
+        return 0.86
 
     def draw_surface(self, _area, cr, geometry):
         cr.set_operator(cairo.OPERATOR_SOURCE)
@@ -1200,11 +1184,8 @@ class Renderer:
 
     def draw_frame(self, cr, payload, width, height):
         style = payload.get("style") if isinstance(payload.get("style"), dict) else {}
-        color = color_for(style, 0.86)
-        alpha = color[3]
-        animation = payload.get("animation") if isinstance(payload.get("animation"), dict) else {}
-        if animation.get("kind") == "pulse" and animation.get("reducedMotion") not in {"instant", "none"}:
-            alpha = 0.45 + 0.35 * (0.5 + 0.5 * math.sin(time.monotonic() * math.pi * 1.1))
+        alpha = self.frame_alpha(payload)
+        color = color_for(style, alpha)
         cr.set_source_rgba(color[0], color[1], color[2], alpha)
         cr.set_line_width(3)
         cr.rectangle(1.5, 1.5, max(1, width - 3), max(1, height - 3))
@@ -1218,14 +1199,19 @@ class Renderer:
         if not any(self.is_frame_record(record) and self.frame_animated(record) for record in self.records.values()):
             self.frame_tick_source = None
             return False
-        self.redraw_surfaces()
+        if CAIRO_FOREIGN_AVAILABLE:
+            self.redraw_surfaces()
+        else:
+            for widget, record in list(self.surface_records.items()):
+                if self.is_frame_record(record):
+                    self.apply_frame_style(widget, record)
         return True
 
     def ensure_frame_ticker(self):
         if self.frame_tick_source is not None:
             return
         if any(self.is_frame_record(record) and self.frame_animated(record) for record in self.records.values()):
-            self.frame_tick_source = GLib.timeout_add(250, self.frame_tick)
+            self.frame_tick_source = GLib.timeout_add(50 if not CAIRO_FOREIGN_AVAILABLE else 250, self.frame_tick)
 
     def is_frame_record(self, record):
         payload = record.get("payload") if isinstance(record, dict) else {}
@@ -1242,24 +1228,27 @@ class Renderer:
         value = animation.get("durationMs", 600)
         return max(200, min(2000, int(value))) / 1000.0 if isinstance(value, (int, float)) else 0.6
 
+    def ring_visual(self, record, progress):
+        bounds = self.target_bounds(record)
+        animation = (record.get("payload") or {}).get("animation") if isinstance(record.get("payload"), dict) else {}
+        reduced = isinstance(animation, dict) and animation.get("reducedMotion") in {"instant", "none"}
+        if reduced:
+            return 0.92, max(18.0, min(bounds[2], bounds[3]) / 2 + 4)
+        return 0.92 * (1.0 - progress) + 0.28, max(18.0, min(bounds[2], bounds[3]) / 2 + 4 + 10 * progress)
+
+    def apply_ring_style(self, provider, record, alpha, radius):
+        style = (record.get("payload") or {}).get("style") if isinstance((record.get("payload") or {}).get("style"), dict) else {}
+        r, g, b, _alpha = color_for(style, alpha)
+        css = ".ah-ring { border-width: 3px; border-style: solid; border-color: rgba(%d,%d,%d,%.3f); border-radius: %dpx; background-color: rgba(0,0,0,0); }" % (
+            int(r * 255), int(g * 255), int(b * 255), alpha, max(1, int(radius))
+        )
+        provider.load_from_data(css.encode("utf-8"), -1)
+
     def render_ring(self, record):
         overlay_id = record.get("overlayId")
         self.dismiss_ring(overlay_id)
         bounds = self.target_bounds(record)
-        pad = 28
-        width = max(64, int(bounds[2] + 2 * pad))
-        height = max(64, int(bounds[3] + 2 * pad))
-        geometries = self.monitor_geometries()
-        monitor = geometries[0] if geometries else (0, 0, 1920, 1080, 1)
-        center_x = bounds[0] + bounds[2] / 2
-        center_y = bounds[1] + bounds[3] / 2
-        for candidate in geometries:
-            if candidate[0] <= center_x < candidate[0] + candidate[2] and candidate[1] <= center_y < candidate[1] + candidate[3]:
-                monitor = candidate
-                break
-        mx, my, mw, mh, _scale = monitor
-        x = min(max(int(bounds[0] - pad), int(mx)), int(mx + mw - width))
-        y = min(max(int(bounds[1] - pad), int(my)), int(my + mh - height))
+        x, y, width, height = ring_placement(self.monitor_geometries(), bounds, 28)
         window = self.new_popup(False, click_through=True)
         if CAIRO_FOREIGN_AVAILABLE:
             area = Gtk.DrawingArea()
@@ -1267,7 +1256,11 @@ class Renderer:
             area.connect("draw", self.draw_ring, record)
         else:
             area = Gtk.EventBox()
-            area.get_style_context().add_class("ah-highlight")
+            area.get_style_context().add_class("ah-ring")
+            provider = Gtk.CssProvider()
+            area.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            alpha, radius = self.ring_visual(record, 0.0)
+            self.apply_ring_style(provider, record, alpha, radius)
         window.add(area)
         window.move(x, y)
         window.set_default_size(width, height)
@@ -1275,7 +1268,10 @@ class Renderer:
         gdk_window = window.get_window()
         if gdk_window is not None:
             self.make_click_through(gdk_window)
-        self.ring_windows[overlay_id] = {"window": window, "area": area, "record": record, "started": time.monotonic()}
+        entry = {"window": window, "area": area, "record": record, "started": time.monotonic()}
+        if not CAIRO_FOREIGN_AVAILABLE:
+            entry["provider"] = provider
+        self.ring_windows[overlay_id] = entry
         GLib.timeout_add(33, self.ring_tick, overlay_id)
         self.draw_ready.add(overlay_id)
 
@@ -1291,14 +1287,7 @@ class Renderer:
         duration = self.ring_duration(record)
         elapsed = max(0.0, time.monotonic() - entry["started"])
         progress = min(1.0, elapsed / duration) if duration > 0 else 1.0
-        animation = (record.get("payload") or {}).get("animation") if isinstance(record.get("payload"), dict) else {}
-        reduced = isinstance(animation, dict) and animation.get("reducedMotion") in {"instant", "none"}
-        if reduced:
-            alpha = 0.92
-            radius = max(18.0, min(bounds[2], bounds[3]) / 2 + 4)
-        else:
-            alpha = 0.92 * (1.0 - progress) + 0.28
-            radius = max(18.0, min(bounds[2], bounds[3]) / 2 + 4 + 10 * progress)
+        alpha, radius = self.ring_visual(record, progress)
         style = (record.get("payload") or {}).get("style") if isinstance((record.get("payload") or {}).get("style"), dict) else {}
         color = color_for(style, alpha)
         cx = bounds[2] / 2 + 28
@@ -1320,10 +1309,19 @@ class Renderer:
         entry = self.ring_windows.get(overlay_id)
         if entry is None:
             return False
-        if time.monotonic() - entry["started"] < self.ring_duration(entry["record"]):
+        duration = self.ring_duration(entry["record"])
+        elapsed = time.monotonic() - entry["started"]
+        if elapsed < duration:
             area = entry.get("area")
-            if area is not None and hasattr(area, "queue_draw"):
-                area.queue_draw()
+            if CAIRO_FOREIGN_AVAILABLE:
+                if area is not None and hasattr(area, "queue_draw"):
+                    area.queue_draw()
+            else:
+                provider = entry.get("provider")
+                if area is not None and provider is not None:
+                    progress = min(1.0, elapsed / duration) if duration > 0 else 1.0
+                    alpha, radius = self.ring_visual(entry["record"], progress)
+                    self.apply_ring_style(provider, entry["record"], alpha, radius)
             return True
         self.dismiss_ring(overlay_id)
         self.records.pop(overlay_id, None)
