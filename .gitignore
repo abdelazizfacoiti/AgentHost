@@ -15,6 +15,12 @@ __pycache__/
 .env
 .env.*
 
+session-*.md
+*.xlsx
+*.xls
+*.ods
+.~lock.*
+
 .agenthost/
 .agenthost-git/
 skills-lock.json
