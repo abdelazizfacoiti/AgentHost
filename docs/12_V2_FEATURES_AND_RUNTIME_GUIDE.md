@@ -480,6 +480,8 @@ Computer-action families:
 - Target ring: for `desktop.click` and `desktop.pointer`, a small ring marks
   the exact target for roughly 600 ms with a 150 ms pre-action lead. The ring
   is best-effort and never changes the action.
+- Frame and ring motion use Cairo when available and GTK CSS fallbacks
+  otherwise; `reducedMotion` keeps both static.
 - Click-through except small control windows; Pause/Resume/Stop and Dismiss
   remain interactive.
 - Waits at most 150 ms for first paint in routine work, or 1.5 seconds on
@@ -946,7 +948,7 @@ At the time of writing, the tree passes:
 
 - `npm run build`
 - `npm run lint`
-- `npm test` — 59 files, 369 tests
+- `npm test` — 60 files, 371 tests
 - `npm run smoke:mcp` — 39 tools, 3 resources
 - `npm run benchmark:agent` — isolated, non-destructive runner overhead benchmark
 - `npm run benchmark:tasks` — 20 isolated scenarios, 22 governed calls in the latest run; desktop-input/OCR scenarios use mocked backends

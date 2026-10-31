@@ -82,7 +82,9 @@ Other raw measurements:
 - Disabled-overlay `file.write`: 9.5-12.1 ms.
 - GTK overlay `file.write`: 362.8 ms first, then 13.3-14.9 ms.
 - OCR attempt failed in 2.7 ms with `ocr_backend_unavailable`; cold OCR could not be
-  measured because Tesseract is not installed.
+  measured because Tesseract is not installed. A persistent Tesseract worker was
+  not added: the CLI backend reads one image and exits, so a real worker needs
+  libtesseract or a different engine. No persistent worker is claimed.
 
 Not measured: MCP transport round trip, model/provider turn time, operator approval
 time, and real terminal text verification after OCR. Model turn time is outside the

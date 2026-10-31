@@ -2,7 +2,7 @@
 
 ## Resume audit — 2026-10-29
 
-Baseline is green: build, lint, 357 tests in 58 files, MCP smoke, and diff
+Baseline is green: build, lint, 371 tests in 60 files, MCP smoke, and diff
 whitespace checks pass.
 
 ### Why the card could appear only when requested
@@ -32,6 +32,8 @@ issue: `activity.test.ts` covers every registered computer-action family, and
 - Schema-invalid calls do not begin a card because the runner avoids rendering
   before it can validate the input.
 
-The GTK runtime on this machine lacks `gi._gi_cairo`; frame/ring animation is
-therefore not claimed. Static GTK fallbacks remain the manual verification
-path.
+The GTK runtime on this machine lacks `gi._gi_cairo`; frame and target-ring
+animation therefore use per-widget GTK CSS providers rather than Cairo. The
+fallback was verified on the real display by capturing the ambient frame at two
+points in its pulse and observing the border pixel change. Static primitives
+still render when reduced motion is requested.
