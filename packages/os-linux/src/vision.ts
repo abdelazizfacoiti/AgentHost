@@ -20,8 +20,9 @@ export function parseTesseractTsv(tsv: string, maxItems = 500): { width: number;
 // OCR cache: analyze -> find_text -> find_target on the same screenshot must
 // not spawn Tesseract three times. Entries are keyed by path + size + mtime
 // + mode + maxItems, verified cheaply with one stat() (far cheaper than an
-// OCR spawn), bounded to 8 entries with a 30s TTL. Same bytes always yield
-// the same redacted result, so caching is safety-neutral.
+// OCR spawn), bounded to 8 entries with a 30s TTL. Region/scale captures
+// write a new file revision, so the same path cannot reuse stale OCR results.
+// Same bytes always yield the same redacted result, so caching is safety-neutral.
 const OCR_CACHE_TTL_MS = 30_000;
 const OCR_CACHE_MAX = 8;
 const ocrCache = new Map<string, { at: number; result: VisionGroundingResult }>();
