@@ -101,6 +101,8 @@ export class VisualSurfaceCoordinator extends BaseOverlayManager {
 
   /** Compatibility projection for legacy stores that still call OverlayManager methods directly. */
   override async showPrimitive(input: OverlayPrimitive, resolver?: OverlayTargetResolver, reducedMotion = this.#options.reducedMotion) {
+    // Frames and target rings are full-screen surfaces; painting one mid-capture would leak into the screenshot.
+    if (this.#suppressed) return { ok: false, errors: ["visual_surface_suppressed"] };
     const result = await super.showPrimitive(input, resolver, reducedMotion);
     if (result.ok && result.overlay !== undefined) {
       this.#surfaces.set(result.overlay.overlayId, compatibilitySurface(input, result.overlay.overlayId, result.overlay.expiresAt, this.rendererEpoch(), this.ownerSessionId()));

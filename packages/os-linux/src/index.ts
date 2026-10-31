@@ -1,6 +1,7 @@
 export * from "./apps.js";
 export * from "./accessibility.js";
 export * from "./desktop.js";
+export * from "./gtk-clipboard.js";
 export * from "./dependencies.js";
 export * from "./files.js";
 export * from "./shell.js";
@@ -9,3 +10,4 @@ export * from "./system-info.js";
 export * from "./vision.js";
 export * from "./browser-inventory.js";
 export * from "./speech.js";
+export * from "./host-window.js";

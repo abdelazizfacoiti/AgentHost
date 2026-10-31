@@ -39,10 +39,11 @@ import type {
   ,VisionGroundingResult, VisionMode
 } from "@agenthost/core";
 import type { OverlayManager } from "@agenthost/app-overlay";
-import type { RunSafeCommandInput } from "@agenthost/os-linux";
+import type { RunSafeCommandInput, UrlOpenBrowser, UrlOpenResult } from "@agenthost/os-linux";
 import type { GrantStore } from "./grants.js";
 import type { AnyAgentHostToolDefinition } from "./tool-runner.js";
 import type { ToolActionOverlay } from "./action-overlay.js";
+import type { ActionTimeline } from "./action-timeline.js";
 
 export interface LinuxAutomation {
   getSystemInfo(): Promise<SystemInfo> | SystemInfo;
@@ -50,6 +51,7 @@ export interface LinuxAutomation {
   detectApp(input: { appName: string }): Promise<AppDetectionResult>;
   listInstalledApps(input: { query?: string; limit?: number }): Promise<{ apps: InstalledAppSummary[]; truncated: boolean }>;
   openApp(input: { appName: string }): Promise<AppOpenResult>;
+  openUrl?(input: { url: string; browser?: UrlOpenBrowser }): Promise<UrlOpenResult>;
   getAppStrategy(input: { appName: string; taskType?: AppStrategyTaskType }): Promise<AppStrategyResult>;
   runSafeCommand(input: RunSafeCommandInput): Promise<ShellRunResult>;
   writeFile(input: {
@@ -76,6 +78,8 @@ export interface LinuxAutomation {
     region?: { x: number; y: number; width: number; height: number };
   }): Promise<DesktopScreenshotResult>;
   listWindows(input: { limit?: number; includeTitles?: boolean }): Promise<WindowListResult>;
+  /** Drops the short-lived window-list cache so the next listing reflects a just-performed action. */
+  invalidateWindowCache?(): void;
   focusWindow(input: { windowId?: string; appName?: string; title?: string; pid?: number }): Promise<WindowFocusResult>;
   hotkey(input: { keys: string[]; activeWindow: DesktopWindowContext }): Promise<DesktopHotkeyResult>;
   typeText(input: { text: string; activeWindow: DesktopWindowContext }): Promise<DesktopTypeTextResult>;
@@ -169,6 +173,7 @@ export interface AgentHostMcpContext {
   grants: GrantStore;
   overlay?: OverlayManager;
   actionOverlay?: ToolActionOverlay;
+  actionTimeline?: ActionTimeline;
   /** Captures a screenshot with all visual surfaces temporarily removed. */
   overlayScreenshotSuppression?: <T>(capture: () => Promise<T>) => Promise<T>;
   /** Live tool definitions for governed nested execution (plan executor). */

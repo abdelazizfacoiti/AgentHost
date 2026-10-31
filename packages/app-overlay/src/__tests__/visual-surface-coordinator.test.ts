@@ -40,6 +40,15 @@ describe("visual surface coordinator", () => {
     });
     await coordinator.close();
   });
+  it("blocks frame and ring primitives during screenshot suppression", async () => {
+    const coordinator = new VisualSurfaceCoordinator(new HeadlessOverlayRenderer(), { sessionId: "surface-owner" });
+    await coordinator.withScreenshotSuppressed(async () => {
+      const shown = await coordinator.showPrimitive({ overlayId: "frame-during-capture", type: "frame", style: { semantic: "info" }, sensitivity: "public", ttlMs: 30_000 });
+      expect(shown.ok).toBe(false);
+      expect((await coordinator.state()).overlays).toHaveLength(0);
+    });
+    await coordinator.close();
+  });
   it("stores only redacted surface content", async () => {
     const coordinator = new VisualSurfaceCoordinator(new HeadlessOverlayRenderer(), { sessionId: "surface-owner" });
     await coordinator.showSurface({ ...surface("redacted"), content: { title: "Email me@example.com", components: [{ type: "text", text: "token=abc123456789012345678901234567890" }] } });

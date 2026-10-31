@@ -32,7 +32,7 @@ const FINANCIAL_PATTERNS = [
 const CREDENTIAL_OR_SECURITY_PATTERNS = [
   /\b1password\b/i,
   /\bbitwarden\b/i,
-  /\bkeepass\b/i,
+  /\bkeepass/i,
   /\blastpass\b/i,
   /\bpassword\b/i,
   /\bsecret\b/i,

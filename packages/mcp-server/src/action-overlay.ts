@@ -84,6 +84,7 @@ const BADGES: Record<ToolActionPhase, { status: "neutral" | "info" | "success" |
 };
 
 const HALT_CODES = new Set(["emergency_stop_requested", "human_takeover_active", "pause_requested", "safety_blocked"]);
+const SCREEN_CAPTURE_TOOLS = new Set(["desktop.screenshot", "vision.find_text_on_screen"]);
 
 function elapsedLabel(milliseconds: number): string {
   const total = Math.max(0, Math.floor(milliseconds / 1000));
@@ -215,7 +216,9 @@ export class ToolActionOverlay {
     // run before the target hint has had its lead interval.
     const cardPaint = this.#renderWithinBudget();
     await cardPaint;
-    if (this.#frame) void this.#showFrame("info", false);
+    // Capture tools clear every surface right after begin(); painting a frame
+    // only to erase it again would flicker and race the capture.
+    if (this.#frame && !SCREEN_CAPTURE_TOOLS.has(action.tool)) void this.#showFrame("info", false);
     const ringPaint = this.#targetRing && input.target !== undefined && input.dryRun !== true
       ? this.#showTargetRing(input.target)
       : Promise.resolve();

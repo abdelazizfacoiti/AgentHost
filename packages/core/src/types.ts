@@ -1141,6 +1141,8 @@ export interface DesktopScreenshotResult {
     format?: "png" | "jpeg";
     scale?: number;
     region?: { x: number; y: number; width: number; height: number };
+    /** Screen position of image pixel (0,0) before scaling; absent when the window origin was unknown. */
+    screenOrigin?: { x: number; y: number };
   };
   reason: string;
 }

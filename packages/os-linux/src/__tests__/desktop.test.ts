@@ -8,6 +8,7 @@ import {
   clickLinuxDesktop,
   describeTypingStrategy,
   focusLinuxWindow,
+  parseXwininfoTree,
   getLinuxActiveWindow,
   getLinuxDesktopCapabilities,
   listLinuxWindows,
@@ -391,4 +392,17 @@ describe("Linux desktop helpers", () => {
     ).resolves.toMatchObject({ supported: false, reason: "Region capture cannot be combined with active-window capture." });
   });
 
+  it("reads true absolute window geometry from xwininfo", () => {
+    const tree = [
+      "     0x300000a \"◑ Avito.ma diesel car search\": (\"gnome-terminal-server\" \"Gnome-terminal\")  1854x1048+66+32  +66+32",
+      "        0x300000b (has no name): ()  1x1+-1+-1  +65+31",
+      "     0x37ff417 \"Voitures - Mozilla Firefox\": (\"firefox\" \"firefox\")  1854x1048+0+0  +66+32",
+      "     0x3000002 \"Terminal\": ()  10x10+-100+-100  +-100+-100"
+    ].join("\n");
+    const geometry = parseXwininfoTree(tree);
+    expect(geometry.get("50331658")).toEqual({ x: 66, y: 32, width: 1854, height: 1048 });
+    expect(geometry.get(String(0x37ff417))).toEqual({ x: 66, y: 32, width: 1854, height: 1048 });
+    expect(geometry.has(String(0x300000b))).toBe(false);
+    expect(geometry.get(String(0x3000002))).toEqual({ x: -100, y: -100, width: 10, height: 10 });
+  });
 });

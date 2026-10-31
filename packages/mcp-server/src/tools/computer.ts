@@ -38,6 +38,11 @@ const waitInput = z.object({
   }
 });
 
+const pauseInput = z.object({
+  ms: z.number().int().min(50).max(10_000),
+  reason: z.string().trim().min(1).max(200).optional()
+}).strict();
+
 function matches(expected: { windowId?: string | undefined; appName?: string | undefined; title?: string | undefined; pid?: number | undefined }, actual: DesktopWindowContext): boolean {
   return (expected.windowId === undefined || expected.windowId === actual.windowId)
     && (expected.appName === undefined || expected.appName === actual.appName)
@@ -159,6 +164,8 @@ export function createComputerTools(): AnyAgentHostToolDefinition<AgentHostMcpCo
       const timeout = input.timeoutMs ?? 5000;
       let lastState: Record<string, unknown> | undefined;
       while (Date.now() - start < timeout) {
+        // Each poll must see fresh titles and windows, not the 2s listing cache.
+        context.linux.invalidateWindowCache?.();
         const screenPromise: Promise<{ supported: boolean; bounds?: DesktopWindowBounds; reason: string }> =
           context.linux.getScreenGeometry === undefined
             ? Promise.resolve({ supported: false, reason: "geometry_unavailable" })
@@ -216,5 +223,33 @@ export function createComputerTools(): AnyAgentHostToolDefinition<AgentHostMcpCo
     }
   };
 
-  return [observe, waitFor, createRunStepsTool()];
+  const wait: AgentHostToolDefinition<z.infer<typeof pauseInput>, unknown, AgentHostMcpContext> = {
+    name: "computer.wait",
+    description: "Waits a fixed number of milliseconds (50-10000) for pages, animations, or apps to settle when no observable condition fits computer.wait_for.",
+    riskLevel: "observe",
+    inputSchema: pauseInput,
+    mcpInputSchema: {
+      type: "object",
+      properties: {
+        ms: { type: "integer", minimum: 50, maximum: 10000 },
+        reason: { type: "string", minLength: 1, maxLength: 200 }
+      },
+      required: ["ms"],
+      additionalProperties: false
+    },
+    inputSummary: "Wait for the screen to settle",
+    safety: { actionType: "observe" },
+    async handler(input): Promise<ToolResult<unknown>> {
+      const start = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, input.ms));
+      return toolSuccess({
+        tool: "computer.wait",
+        riskLevel: "observe",
+        data: { waitedMs: Date.now() - start },
+        observations: ["Waited; no action was executed. Prefer computer.wait_for when a window or title condition can confirm readiness."]
+      });
+    }
+  };
+
+  return [observe, waitFor, wait, createRunStepsTool()];
 }

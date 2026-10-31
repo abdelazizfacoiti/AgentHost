@@ -484,6 +484,39 @@ describe("governed tool runner", () => {
     expect(focusResult).toMatchObject({ ok: false, error: { code: "focus_failed" } });
   });
 
+  it("routes pointer calls to scroll-at-point, double/right click, and drag", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const pointerSpy = vi.fn(async (input: { action: string; activeWindow: { windowId: string } }) => ({
+      supported: true, backend: "xdotool", performed: true, action: input.action, activeWindow: input.activeWindow, reason: "ok"
+    }));
+    (context as unknown as { linux: unknown }).linux = {
+      getActiveWindow: vi.fn(async () => ({ supported: true, backend: "xdotool", activeWindow: { windowId: "123" }, reason: "ok" })),
+      pointer: pointerSpy
+    };
+    const pointer = createDesktopTools().find((entry) => entry.name === "desktop.pointer")!;
+    const activeWindow = { windowId: "123" };
+    await pointer.handler({ x: 400, y: 300, direction: "down", amount: 5, activeWindow }, context);
+    await pointer.handler({ action: "double_click", x: 10, y: 20, activeWindow }, context);
+    await pointer.handler({ action: "right_click", x: 10, y: 20, activeWindow }, context);
+    await pointer.handler({ startX: 1, startY: 2, endX: 30, endY: 40, activeWindow }, context);
+    await pointer.handler({ x: 10, y: 20, activeWindow }, context);
+    expect(pointerSpy.mock.calls.map(([call]) => call.action)).toEqual(["scroll", "double_click", "right_click", "drag", "move_mouse"]);
+    expect(pointerSpy.mock.calls[0]?.[0]).toMatchObject({ x: 400, y: 300, direction: "down", amount: 5 });
+  });
+
+  it("explains spawn failures when a whole command line is passed as the executable", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    (context as unknown as { linux: unknown }).linux = {
+      runSafeCommand: vi.fn(async () => { throw new Error("spawn xdotool type hello ENOENT"); })
+    };
+    const shell = createShellTools().find((entry) => entry.name === "shell.run")!;
+    const result = await shell.handler({ command: "xdotool type hello", cwd: home }, context);
+    expect(result).toMatchObject({ ok: false, error: { code: "execution_failed" } });
+    expect(result.error?.message).toContain('"args"');
+  });
+
   it("confirms private read-only effects without exposing execution fields to the schema", async () => {
     const home = await tempHome();
     const context = makeContext(home, []);
@@ -613,6 +646,57 @@ describe("governed tool runner", () => {
     const result = await runTool(tool, { value: "bounded" }, context);
     expect(result.ok).toBe(true);
     expect(result.state).toMatchObject({ activeWindow: { windowId: "after" }, windowChanged: true });
+  });
+
+  it("reports only windows that actually appeared during the call", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const windows = [{ windowId: "terminal" }, { windowId: "browser" }];
+    (context as unknown as { linux: unknown }).linux = {
+      getActiveWindow: vi.fn(async () => ({ supported: true, backend: "test", activeWindow: { windowId: "browser" }, reason: "ok" })),
+      listWindows: vi.fn(async () => ({ supported: true, backend: "test", windows: [...windows], truncated: false, reason: "ok" }))
+    };
+    const tool: AgentHostToolDefinition<{ value: string }, unknown> = {
+      name: "file.write",
+      description: "state test",
+      riskLevel: "low",
+      inputSchema: z.object({ value: z.string() }).strict(),
+      mcpInputSchema: {},
+      inputSummary: "state test",
+      safety: { actionType: "file_write" },
+      execution: { ...stateChanging(), requiresDryRun: false, requiresConfirmationToken: false },
+      handler: async (input) => {
+        if (input.value === "open") windows.push({ windowId: "dialog" });
+        return toolSuccess({ tool: "file.write", riskLevel: "low", data: { wrote: true } });
+      }
+    };
+    const quiet = await runTool(tool, { value: "noop" }, context);
+    expect(quiet.state?.newlyAppearedWindows).toBeUndefined();
+    expect(quiet.state).not.toHaveProperty("windows");
+    const opened = await runTool(tool, { value: "open" }, context);
+    expect(opened.state?.newlyAppearedWindows).toEqual([{ windowId: "dialog" }]);
+  });
+
+  it("does not nudge paging or scrolling that repeats the same input", async () => {
+    const home = await tempHome();
+    const context = makeContext(home, []);
+    const hotkey: AgentHostToolDefinition<{ keys: string[] }, unknown> = {
+      name: "desktop.hotkey",
+      description: "hotkey test",
+      riskLevel: "observe",
+      inputSchema: z.object({ keys: z.array(z.string()) }).strict(),
+      mcpInputSchema: {},
+      inputSummary: "Send hotkey",
+      safety: { actionType: "observe" },
+      execution: readOnly(),
+      handler: async () => toolSuccess({ tool: "desktop.hotkey", riskLevel: "observe", data: { sent: true } })
+    };
+    const paging = [];
+    for (let index = 0; index < 6; index += 1) paging.push(await runTool(hotkey, { keys: ["Page_Down"] }, context));
+    expect(paging.map((result) => result.observations?.join(" ") ?? "").join(" ")).not.toContain("exact call");
+    const copies = [];
+    for (let index = 0; index < 3; index += 1) copies.push(await runTool(hotkey, { keys: ["ctrl", "c"] }, context));
+    expect(copies[2]?.observations?.join(" ")).toContain("run 3 times");
   });
 
   it("passes window.focus geometry to the target ring before the handler", async () => {

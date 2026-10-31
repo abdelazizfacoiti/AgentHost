@@ -8,6 +8,8 @@ export const COMPUTER_ACTION_FAMILIES = [
   "shell",
   "vision",
   "window",
+  "app",
+  "ui",
   "blender",
   "ssh"
 ] as const;

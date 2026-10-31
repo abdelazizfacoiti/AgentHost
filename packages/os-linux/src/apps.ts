@@ -438,3 +438,56 @@ export async function openLinuxApp(
 
   return result;
 }
+
+export const URL_OPEN_BROWSERS = ["firefox", "chromium", "chromium-browser", "google-chrome", "brave-browser", "microsoft-edge"] as const;
+export type UrlOpenBrowser = (typeof URL_OPEN_BROWSERS)[number];
+
+export interface UrlOpenResult {
+  opened: boolean;
+  url: string;
+  launcher: string;
+  pid?: number;
+  reason: string;
+}
+
+/**
+ * Opens an http(s) URL or local file:// URL without a shell. A named browser
+ * gets `--new-tab` so an already-running instance reuses its window; otherwise
+ * the desktop default handler (xdg-open) decides.
+ */
+export async function openLinuxUrl(
+  input: { url: string; browser?: UrlOpenBrowser },
+  context: LinuxLookupContext = {}
+): Promise<UrlOpenResult> {
+  let parsed: URL;
+  try {
+    parsed = new URL(input.url);
+  } catch {
+    return { opened: false, url: input.url, launcher: "none", reason: "URL is not valid." };
+  }
+  if (!["http:", "https:", "file:"].includes(parsed.protocol)) {
+    return { opened: false, url: input.url, launcher: "none", reason: "Only http, https, and file URLs can be opened." };
+  }
+  const launcherName = input.browser ?? "xdg-open";
+  const launcherPath = await findCommandPath(launcherName, context);
+  if (launcherPath === undefined) {
+    return { opened: false, url: parsed.href, launcher: launcherName, reason: `${launcherName} is not installed or not on PATH.` };
+  }
+  const args = input.browser === undefined ? [parsed.href] : ["--new-tab", parsed.href];
+  const child = spawn(launcherPath, args, { detached: true, stdio: "ignore", shell: false });
+  const spawnError = await new Promise<Error | undefined>((resolve) => {
+    child.once("error", (error) => resolve(error));
+    child.once("spawn", () => resolve(undefined));
+  });
+  if (spawnError !== undefined) {
+    return { opened: false, url: parsed.href, launcher: launcherName, reason: spawnError.message };
+  }
+  child.unref();
+  return {
+    opened: true,
+    url: parsed.href,
+    launcher: launcherName,
+    ...(child.pid === undefined ? {} : { pid: child.pid }),
+    reason: input.browser === undefined ? "Opened with the desktop default handler." : `Opened in a new ${launcherName} tab.`
+  };
+}

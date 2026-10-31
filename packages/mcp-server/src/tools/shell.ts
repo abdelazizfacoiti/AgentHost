@@ -104,7 +104,20 @@ export function createShellTools(): AnyAgentHostToolDefinition<AgentHostMcpConte
         });
         return toolSuccess({ tool: "shell.run", riskLevel: "high", data, observations: ["Ran shell command."] });
       } catch (e) {
-        return toolFailure({ tool: "shell.run", riskLevel: "high", error: { code: "execution_failed", message: e instanceof Error ? e.message : "Execution failed" } });
+        const message = e instanceof Error ? e.message : "Execution failed";
+        // Commands are spawned without a shell, so "xdotool type foo" looks for
+        // an executable literally named that; say so instead of a bare ENOENT.
+        const spawnedWholeLine = /ENOENT/.test(message) && /\s/.test(input.command.trim()) && (input.args ?? []).length === 0;
+        return toolFailure({
+          tool: "shell.run",
+          riskLevel: "high",
+          error: {
+            code: "execution_failed",
+            message: spawnedWholeLine
+              ? `${message}. Commands run without a shell: put only the executable in "command" and pass the remaining tokens via "args".`
+              : message
+          }
+        });
       }
     }
   };

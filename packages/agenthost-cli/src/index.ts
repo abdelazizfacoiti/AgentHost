@@ -7,6 +7,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AGENTHOST_CONFIG_SCHEMA_VERSION, AGENTHOST_VERSION, acceptConfirmation, beginTakeover, clearActiveTaskApproval, clearPause, clearStop, defaultAgentHostHome, defaultPublicConfigPath, endTakeover, legacyConfigPath, listConfirmations, loadAgentHostConfig, normalizeSha256, readActiveTaskApproval, readActivityStatus, readRunState, readSha256Sidecar, redactLocalPath, rejectConfirmation, requestPause, requestStop, sha256File, transitionTask } from "@agenthost/core";
 import { renderTaskHtml, renderTaskMarkdown } from "./task-export.js";
+import { attentionClear, attentionRequest, attentionStatus } from "./attention.js";
+import { claudeHooksAdd, claudeHooksRemove, claudeHooksStatus } from "./hooks.js";
 import { INTEGRATION_TARGETS, integrationAdd, integrationRemove, integrationStatus, publicIntegrationReport, type IntegrationAction, type IntegrationPaths, type IntegrationTarget } from "./integrations.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -452,6 +454,17 @@ async function sessionsCommand(): Promise<Output> {
   const lock = await readLock();
   return { ok: true, command: "sessions", data: { background: lock ?? null, tasksDir: "[agenthost-home]/tasks", stopRequested: existsSync(path.join(agentHome, "run", "stop.requested")), takeoverActive: existsSync(path.join(agentHome, "run", "takeover.active")) } };
 }
+async function attentionCommand(args: ReturnType<typeof parseFlags>): Promise<Output> {
+  const action = args.positional[1] ?? "status";
+  const result = action === "request"
+    ? await attentionRequest(agentHome, args.values.get("source"), args.values.get("reason"))
+    : action === "clear"
+      ? await attentionClear(agentHome, args.flags.has("restore"))
+      : action === "status"
+        ? await attentionStatus(agentHome)
+        : { ok: false, error: "usage: agenthost attention request --source <client> --reason <permission|confirmation|idle|done> | clear [--restore] | status" };
+  return result.ok ? { ok: true, command: `attention ${action}`, data: result.data } : fail("attention", result.error ?? "attention_failed");
+}
 async function overlayCommand(sub: string | undefined, flags: ReturnType<typeof parseFlags>): Promise<Output> {
   const { listOverlayRendererPids, sweepOrphanedOverlayRenderers } = await import("@agenthost/app-overlay");
   if (sub === "hide") {
@@ -469,11 +482,26 @@ async function overlayCommand(sub: string | undefined, flags: ReturnType<typeof 
   }
   return await doctor();
 }
+function onPath(command: string): boolean { return spawnSync("sh", ["-c", `command -v ${command}`], { stdio: "ignore" }).status === 0; }
+// Ordered by how much an agent loses without them; never installed automatically.
+const DESKTOP_DEPENDENCIES: Array<{ name: string; aptPackage: string; impact: string; present: () => boolean }> = [
+  { name: "xdotool", aptPackage: "xdotool", impact: "required: clicks, typing, hotkeys", present: () => onPath("xdotool") },
+  { name: "wmctrl", aptPackage: "wmctrl", impact: "required: window list and focus", present: () => onPath("wmctrl") },
+  { name: "xwininfo", aptPackage: "x11-utils", impact: "accurate window coordinates", present: () => onPath("xwininfo") },
+  { name: "scrot", aptPackage: "scrot", impact: "screenshots", present: () => onPath("scrot") },
+  { name: "pyatspi", aptPackage: "python3-pyatspi", impact: "ui.* accessibility tools (read UIs as text)", present: () => pythonModuleExists("import pyatspi") },
+  { name: "tesseract", aptPackage: "tesseract-ocr", impact: "OCR (vision.find_text*)", present: () => onPath("tesseract") },
+  { name: "ffmpeg", aptPackage: "ffmpeg", impact: "JPEG, scaled, and cropped screenshots", present: () => onPath("ffmpeg") },
+  { name: "xclip", aptPackage: "xclip", impact: "faster paste (built-in GTK fallback otherwise)", present: () => onPath("xclip") || onPath("xsel") }
+];
 async function doctor(): Promise<Output> {
   const config = await configValidate(); const mcp = await probeMcp(mcpEntry()); const checks = { platform: process.platform === "linux", architecture: process.arch === "x64", node: Number(process.versions.node.split(".")[0]) >= 20, python: commandExists("python3"), x11: Boolean(process.env.DISPLAY), gtkProbe: pythonModuleExists("import gi; from gi.repository import Gtk"), mcpEntry: existsSync(mcpEntry()), mcpHandshake: mcp.handshake, codexConfig: existsSync(path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "config.toml")), storage: existsSync(agentHome) };
   const warnings = [!checks.architecture ? "x86_64 is the public RC target." : "", !checks.python ? "Install Python 3 for overlay diagnostics." : "", !checks.x11 ? "X11 DISPLAY is unavailable; visible overlay is unsupported." : ""].filter(Boolean);
   if (!mcp.handshake) warnings.push(mcp.reason ?? "mcp_handshake_unavailable");
-  return { ok: config.ok, command: "doctor", data: { version: AGENTHOST_VERSION, checks, config: config.ok ? "valid" : config.error, mcp, process: await status(), activity: (await readActivityStatus(agentHome)) ?? null, paths: { agentHostHome: "[agenthost-home]", config: "[config]", mcpEntry: "[installed-mcp-runtime]" } }, warnings };
+  const desktopDependencies = DESKTOP_DEPENDENCIES.map((dependency) => ({ name: dependency.name, impact: dependency.impact, installed: dependency.present(), aptPackage: dependency.aptPackage }));
+  const missing = desktopDependencies.filter((dependency) => !dependency.installed);
+  if (missing.length > 0) warnings.push(`Missing desktop tools (${missing.map((dependency) => dependency.name).join(", ")}). Install with: sudo apt install ${[...new Set(missing.map((dependency) => dependency.aptPackage))].join(" ")}`);
+  return { ok: config.ok, command: "doctor", data: { version: AGENTHOST_VERSION, checks, desktopDependencies, config: config.ok ? "valid" : config.error, mcp, process: await status(), activity: (await readActivityStatus(agentHome)) ?? null, paths: { agentHostHome: "[agenthost-home]", config: "[config]", mcpEntry: "[installed-mcp-runtime]" } }, warnings };
 }
 async function integrationsCommand(targetArg: string | undefined, args: ReturnType<typeof parseFlags>): Promise<Output> {
   const action = (args.positional[2] ?? "status") as IntegrationAction;
@@ -498,11 +526,19 @@ async function integrationsCommand(targetArg: string | undefined, args: ReturnTy
       ? await integrationRemove(target, paths, apply)
       : await integrationStatus(target, paths);
   if (value.error !== undefined) return fail(`integrations ${target} ${action}`, value.error);
+  // Claude Code also gets attention hooks so its own permission prompts raise the terminal.
+  const hooks = target !== "claude"
+    ? undefined
+    : action === "add"
+      ? await claudeHooksAdd(home, apply)
+      : action === "remove"
+        ? await claudeHooksRemove(home, apply)
+        : await claudeHooksStatus(home);
   return {
     ok: true,
     command: `integrations ${target} ${action}`,
-    data: publicIntegrationReport(value),
-    ...(value.applied ? { warnings: ["reload_client_session"] } : {})
+    data: { ...publicIntegrationReport(value), ...(hooks === undefined ? {} : { attentionHooks: hooks }) },
+    ...(value.applied || hooks?.applied === true ? { warnings: ["reload_client_session"] } : {})
   };
 }
 async function update(args: ReturnType<typeof parseFlags>): Promise<Output> {
@@ -527,7 +563,7 @@ async function uninstall(flags: ReturnType<typeof parseFlags>): Promise<Output> 
 async function main(): Promise<number> {
   const args = parseFlags(process.argv.slice(2)); const json = args.flags.has("json"); const [top, sub] = args.positional; let result: Output;
   try {
-    if (top === undefined || top === "help") result = { ok: true, command: "help", data: "agenthost version|doctor|setup|start|stop|status|task|confirmations|confirm|deny|agent|capabilities|permissions|sessions|overlay|integrations|config|update|uninstall" };
+    if (top === undefined || top === "help") result = { ok: true, command: "help", data: "agenthost version|doctor|setup|start|stop|status|task|confirmations|confirm|deny|agent|attention|capabilities|permissions|sessions|overlay|integrations|config|update|uninstall" };
     else if (top === "version") result = { ok: true, command: "version", data: { version: AGENTHOST_VERSION, platform: process.platform, architecture: process.arch } };
     else if (top === "doctor") result = await doctor();
     else if (top === "setup") result = await setup(args);
@@ -538,6 +574,7 @@ async function main(): Promise<number> {
     else if (top === "confirm" || top === "deny") result = await confirmationsCommand({ ...args, positional: ["confirmations", top, ...args.positional.slice(1)] });
     else if (top === "confirmations") result = await confirmationsCommand(args);
     else if (top === "agent") result = await agentCommand(args);
+    else if (top === "attention") result = await attentionCommand(args);
     else if (top === "capabilities") result = await capabilitiesCommand(args);
     else if (top === "permissions") result = await permissionsCommand();
     else if (top === "sessions") result = await sessionsCommand();

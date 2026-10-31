@@ -18,6 +18,8 @@ describe("classifyAppSensitivity", () => {
     expect(classifyAppSensitivity({ appName: "Bitwarden" })).toBe("credential_or_security");
     expect(classifyAppSensitivity({ appName: "SSH key manager" })).toBe("credential_or_security");
     expect(classifyAppSensitivity({ appName: "Keyring" })).toBe("credential_or_security");
+    expect(classifyAppSensitivity({ appName: "keepassxc" })).toBe("credential_or_security");
+    expect(classifyAppSensitivity({ appName: "org.keepassxc.KeePassXC" })).toBe("credential_or_security");
   });
 
   it("classifies system settings and normal apps", () => {

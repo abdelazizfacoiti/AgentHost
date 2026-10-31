@@ -172,7 +172,10 @@ async function actionTargetFor(toolName: string, input: unknown, context: AgentH
 }
 
 const STATE_RESULT_FAMILIES = new Set(["desktop", "window", "file", "shell"]);
-type CapturedToolState = ToolStateSnapshot & { screenFingerprint?: string };
+type CapturedToolState = Omit<ToolStateSnapshot, "newlyAppearedWindows"> & {
+  screenFingerprint?: string;
+  windows?: NonNullable<ToolStateSnapshot["newlyAppearedWindows"]>;
+};
 
 function needsStateResult(tool: AnyAgentHostToolDefinition): boolean {
   return tool.execution?.executionClass === "state_changing" && STATE_RESULT_FAMILIES.has(tool.name.split(".", 1)[0] ?? "");
@@ -187,24 +190,26 @@ async function captureToolState(context: AgentHostMcpContext): Promise<CapturedT
   return {
     capturedAt: new Date().toISOString(),
     ...(active?.activeWindow === undefined ? {} : { activeWindow: active.activeWindow }),
-    ...(windows === undefined ? {} : { newlyAppearedWindows: windows.windows.slice(0, 8) }),
+    ...(windows === undefined ? {} : { windows: windows.windows }),
     ...(screen?.bounds === undefined ? {} : { screenFingerprint: JSON.stringify(screen.bounds) })
   };
 }
 
+// Only windows absent from the pre-call snapshot are reported; the full list
+// stays private so results do not repeat every open window on each call.
 function attachStateDelta(result: ToolResult, before: CapturedToolState | undefined, after: CapturedToolState): ToolResult {
+  const { screenFingerprint: afterScreen, windows: afterWindows, ...afterState } = after;
   if (before === undefined) {
-    const { screenFingerprint: _screenFingerprint, ...state } = after;
-    result.state = state;
+    result.state = afterState;
     return result;
   }
   const beforeActive = before.activeWindow;
   const afterActive = after.activeWindow;
   const windowChanged = JSON.stringify(beforeActive ?? null) !== JSON.stringify(afterActive ?? null);
-  const priorIds = new Set((before.newlyAppearedWindows ?? []).map((window) => window.windowId));
-  const newlyAppearedWindows = (after.newlyAppearedWindows ?? []).filter((window) => !priorIds.has(window.windowId)).slice(0, 8);
+  const newlyAppearedWindows = before.windows === undefined
+    ? []
+    : (afterWindows ?? []).filter((window) => !before.windows!.some((prior) => prior.windowId === window.windowId)).slice(0, 8);
   const beforeScreen = before.screenFingerprint;
-  const { screenFingerprint: afterScreen, ...afterState } = after;
   result.state = {
     ...afterState,
     windowChanged,
@@ -634,10 +639,35 @@ async function executeGoverned(
 
 interface RepeatEntry {
   count: number;
+  stateKey?: string;
 }
 
 const REPEAT_TRACKER = new WeakMap<AgentHostMcpContext, Map<string, RepeatEntry>>();
 const REPEAT_EXEMPT = /^(?:task|agent|system|adapter|policy)\./;
+const REPEAT_EXEMPT_TOOLS = new Set(["desktop.screenshot", "computer.wait", "computer.wait_for", "computer.observe_state", "desktop.scroll"]);
+const NAVIGATION_KEYS = new Set([
+  "page_down", "page_up", "next", "prior", "down", "up", "left", "right", "tab", "home", "end", "space", "return", "enter", "escape"
+]);
+
+// Paging, scrolling and observing legitimately repeat the same input while the
+// screen advances, so they never count toward the "stop looping" nudge.
+function isRepeatExempt(toolName: string, input: unknown): boolean {
+  if (REPEAT_EXEMPT.test(toolName) || REPEAT_EXEMPT_TOOLS.has(toolName)) return true;
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return false;
+  const record = input as Record<string, unknown>;
+  if (toolName === "desktop.pointer" && record.action === "scroll") return true;
+  if (toolName === "desktop.hotkey" && Array.isArray(record.keys)) {
+    const keys = record.keys.map((key) => String(key).toLowerCase()).filter((key) => key !== "shift");
+    return keys.length > 0 && keys.every((key) => NAVIGATION_KEYS.has(key));
+  }
+  return false;
+}
+
+function repeatStateKey(result: ToolResult): string | undefined {
+  const state = result.state;
+  if (state === undefined) return undefined;
+  return stableKey({ activeWindow: state.activeWindow ?? null, appeared: (state.newlyAppearedWindows ?? []).map((window) => window.windowId) });
+}
 
 function stableKey(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableKey).join(",")}]`;
@@ -650,8 +680,8 @@ function stableKey(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-function noteRepeatedCall(context: AgentHostMcpContext, toolName: string, input: unknown): number {
-  if (REPEAT_EXEMPT.test(toolName)) return 0;
+function noteRepeatedCall(context: AgentHostMcpContext, toolName: string, input: unknown, stateKey?: string): number {
+  if (isRepeatExempt(toolName, input)) return 0;
   const comparable = input !== null && typeof input === "object" && !Array.isArray(input)
     ? Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([key]) => key !== "dryRun" && key !== "confirmationToken"))
     : input;
@@ -661,8 +691,13 @@ function noteRepeatedCall(context: AgentHostMcpContext, toolName: string, input:
     REPEAT_TRACKER.set(context, session);
   }
   const key = `${toolName}:${stableKey(comparable)}`;
-  const entry = session.get(key) ?? { count: 0 };
-  entry.count += 1;
+  const entry: RepeatEntry = session.get(key) ?? { count: 0 };
+  // A call whose observable state differs from the last identical call made
+  // progress, so the streak restarts instead of escalating.
+  entry.count = entry.count > 0 && stateKey !== undefined && entry.stateKey !== undefined && entry.stateKey !== stateKey
+    ? 1
+    : entry.count + 1;
+  if (stateKey !== undefined) entry.stateKey = stateKey;
   if (session.size > 200 && !session.has(key)) {
     const oldest = session.keys().next().value;
     if (oldest !== undefined) session.delete(oldest);
@@ -683,7 +718,10 @@ export async function runTool<Input>(
   const audit: AuditMeta = { inputSummary: "Tool call", preview: false, timings: emptyTimings() };
   await traceEvent(context, tool.name, "start", startedAt, { riskLevel: tool.riskLevel, ok: true });
   let action: ToolActionHandle | undefined;
-  if (shouldShowActionCard(tool.name, tool.execution?.executionClass, activityMode) && inputPassesSchema(tool, input)) {
+  const visibleAction = shouldShowActionCard(tool.name, tool.execution?.executionClass, activityMode) && inputPassesSchema(tool, input);
+  // Preview-only nested plan steps are not actions the user should see happen.
+  const finishTimelineEntry = visibleAction && options.previewOnly !== true ? context.actionTimeline?.begin(tool.name, input) : undefined;
+  if (visibleAction) {
     const overlayStartedAt = Date.now();
     const target = await actionTargetFor(tool.name, input, context);
     try {
@@ -737,6 +775,7 @@ export async function runTool<Input>(
   }
 
   if (needsStateResult(tool)) {
+    context.linux?.invalidateWindowCache?.();
     const stateAfter = await captureToolState(context).catch(() => undefined);
     if (stateAfter !== undefined) attachStateDelta(result, stateBefore, stateAfter);
   }
@@ -769,7 +808,7 @@ export async function runTool<Input>(
 
   await traceEvent(context, tool.name, "audit", startedAt, { riskLevel: result.riskLevel, ok: result.ok, code: result.error?.code });
   const auditPreparedAt = Date.now();
-  const repeats = noteRepeatedCall(context, tool.name, input);
+  const repeats = noteRepeatedCall(context, tool.name, input, repeatStateKey(result));
   if (repeats === 3 || repeats === 6) {
     result.observations = [
       ...(result.observations ?? []),
@@ -810,6 +849,7 @@ export async function runTool<Input>(
     // A local audit write failure must not turn a completed action into a second action.
   }
 
+  void finishTimelineEntry?.(result).catch(() => undefined);
   const actionStatus = await action?.finish(result).catch(() => undefined);
   if (actionStatus !== undefined && !actionStatus.hidden && (!actionStatus.visible || actionStatus.error !== undefined)) {
     result.overlay = `unavailable:${actionStatus.error ?? "overlay_not_visible"}`;

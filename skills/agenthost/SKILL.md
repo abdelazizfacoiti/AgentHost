@@ -73,7 +73,14 @@ coding tools directly.
    report instead of continuing. Do not start a new task until the current one
    is finished unless the user asks.
 8. **Prefer bulk text entry.** Use `desktop.type_text` for text, not per-character
-   key presses; use `desktop.hotkey` for shortcuts.
+   key presses; use `desktop.hotkey` for shortcuts. Punctuation, URLs, and
+   non-ASCII text are pasted layout-independently (xclip, or a built-in GTK
+   clipboard helper), so never split text into per-key hotkeys.
+10. **Prefer structure over pixels.** Open pages with `app.open_url` instead of
+    typing into the address bar. Read and drive UIs with `ui.find`/`ui.tree`
+    and `ui.activate`/`ui.set_text` before falling back to screenshots and
+    coordinates. When you must click from a screenshot, convert with the
+    returned `screenshotMetadata.screenOrigin`: screen = origin + image / scale.
 9. **Leave the machine as found.** Restore focus/state when the task ends; report
    what changed.
 
@@ -83,9 +90,11 @@ coding tools directly.
 |---|---|
 | Observe desktop state | `computer.observe_state` |
 | Capture screenshot | `desktop.screenshot` (optional region/JPEG/scale) |
-| Wait for a condition | `computer.wait_for` (window/title/file/screen conditions) |
+| Wait for a condition | `computer.wait_for` (window/title/file/screen conditions); `computer.wait` for a fixed settle delay |
+| Open apps and pages | `app.open`, `app.open_url` (http/https/file, optional `browser` for a new tab in the logged-in profile) |
+| Read/drive UI by accessibility | `ui.tree`, `ui.find`, `ui.activate`, `ui.set_text` (default target: active window) |
 | Run a bounded governed plan | `computer.run_steps` |
-| Click / move pointer | `desktop.click`, `desktop.pointer` |
+| Click / move pointer | `desktop.click`, `desktop.pointer` (`action`: scroll at x,y, double_click, right_click, drag) |
 | Type text / shortcuts | `desktop.type_text`, `desktop.hotkey` |
 | Windows | `window.list`, `window.focus` |
 | Files | `file.read`, `file.read_many`, `file.write`, `file.list`, `file.search`, `file.copy`, `file.move`, `file.delete`, `file.exists`, `file.ensure_dir` |
@@ -105,10 +114,15 @@ There is one autonomous policy. Do the task; do not ask for routine clicks.
 **Open an app and perform a GUI task**
 
 1. `computer.observe_state` or `window.list` to see the current desktop.
-2. Open/focus the app, then `desktop.screenshot` to verify.
-3. Loop directly: screenshot → click/type/hotkey → screenshot. No dry-run or
-   token is needed for routine local actions.
-4. Stop when the visible result matches the request; restore prior focus.
+2. Open with `app.open` / `app.open_url`, confirm with `computer.wait_for`
+   (`windowAppears` or `titleMatches`), and focus with `window.focus`.
+3. Find controls with `ui.find` (e.g. `query: "Appliquer", role: "push button"`)
+   and act with `ui.activate` / `ui.set_text`. If the app exposes no
+   accessibility tree, loop screenshot → click/type/hotkey → screenshot.
+   No dry-run or token is needed for routine local actions.
+4. Scroll long pages with `desktop.pointer` `{ direction: "down", amount: 5, x, y }`
+   over the content, not repeated Page_Down hotkeys into a sidebar.
+5. Stop when the visible result matches the request; restore prior focus.
 
 **Read an app or web page, then act**
 
@@ -159,6 +173,14 @@ The human can always intervene outside the chat:
 - `agenthost agent pause [--reason text]` — hold state-changing tools
 - `agenthost agent stop` — runtime stop when the client owns the MCP process
 - `agenthost agent resume --stop|--takeover|--pause` — operator-only gate clear
+- The right-side dock (default `overlay.layout: "dock"`) reserves screen space
+  and lists every agent action newest-first, with a pinned alert when an
+  approval is waiting or a stop/pause is active.
+- When AgentHost needs a confirmation, it raises the agent's terminal and
+  returns focus to the work window once the agent continues with the token.
+  `agenthost integrations claude add --apply` also installs Claude Code hooks
+  so Claude Code's own permission prompts raise the terminal the same way
+  (`agenthost attention request|clear|status`).
 - The action card exposes Pause/Resume/Stop and a close button; approval waits
   stay visible, are raised above other windows, and send a desktop
   notification. The notification names `agenthost confirmations`, never the

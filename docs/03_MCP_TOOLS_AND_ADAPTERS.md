@@ -1,7 +1,7 @@
 # AgentHost MCP Tools and Adapter Specification
 
 All callable tools return `ToolResult`. MCP transport is stdio. The current
-minimal-v2 server exposes 39 base tools. This number is generated from the
+minimal-v2 server exposes 46 base tools. This number is generated from the
 loaded set at startup; treat `system.list_capabilities` and
 `agenthost://capabilities` as authoritative instead of hard-coding counts.
 
@@ -13,7 +13,8 @@ the same loaded set.
 State-changing `desktop.*`, `window.*`, `file.*`, and `shell.*` results also
 carry a bounded top-level `state` snapshot when the backend can provide it:
 active-window metadata, `windowChanged`, newly appeared windows, and a cheap
-screen-change hint. Missing backend data is omitted rather than guessed.
+screen-change hint. `newlyAppearedWindows` lists only windows that were not
+present before the call. Missing backend data is omitted rather than guessed.
 
 ## Inventory
 
@@ -28,6 +29,9 @@ screen-change hint. Missing backend data is omitted rather than guessed.
 | `adapter.get` | observe | read_only |
 | `computer.observe_state` | observe | read_only |
 | `computer.wait_for` | observe | read_only |
+| `computer.wait` | observe | read_only (fixed 50-10000 ms settle delay) |
+| `ui.tree` | low | read_only (AT-SPI tree of an app or the active window) |
+| `ui.find` | low | read_only (elements by name/role with screen bounds) |
 | `window.list` | low | read_only |
 | `file.read` | low | read_only |
 | `file.read_many` | low | read_only |
@@ -50,6 +54,10 @@ screen-change hint. Missing backend data is omitted rather than guessed.
 | `desktop.hotkey` | medium | state_changing (routine) |
 | `desktop.type_text` | medium | state_changing (routine) |
 | `window.focus` | medium | state_changing (routine) |
+| `app.open` | low | state_changing (routine; desktop entry or executable) |
+| `app.open_url` | low | state_changing (routine; http/https/file, optional browser new tab) |
+| `ui.activate` | medium | state_changing (routine; accessibility action) |
+| `ui.set_text` | medium | state_changing (routine; layout-independent text) |
 | `file.write` | medium | state_changing (routine) |
 | `file.ensure_dir` | medium | state_changing (routine) |
 | `file.copy` | medium | state_changing (routine) |

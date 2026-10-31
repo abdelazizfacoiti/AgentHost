@@ -118,7 +118,10 @@ const clickInputSchema = guiContextRefine(z
     confirmationToken: confirmationTokenSchema
   }).strict());
 
+const POINTER_ACTIONS = ["move_mouse", "scroll", "double_click", "right_click", "drag"] as const;
+
 const pointerInputSchema = guiContextRefine(z.object({
+  action: z.enum(POINTER_ACTIONS).optional(),
   x: z.number().int().min(0).optional(), y: z.number().int().min(0).optional(),
   direction: z.enum(["up", "down", "left", "right"]).optional(), amount: z.number().int().min(1).max(20).optional(),
   startX: z.number().int().min(0).optional(), startY: z.number().int().min(0).optional(), endX: z.number().int().min(0).optional(), endY: z.number().int().min(0).optional(), durationMs: z.number().int().min(0).max(2000).optional(),
@@ -130,6 +133,15 @@ type HotkeyInput = z.infer<typeof hotkeyInputSchema>;
 type TypeTextInput = z.infer<typeof typeTextInputSchema>;
 type ClickInput = z.infer<typeof clickInputSchema>;
 type PointerInput = z.infer<typeof pointerInputSchema>;
+
+// Explicit action wins; otherwise drag endpoints imply drag, a direction implies
+// scroll (at x,y when given), and bare coordinates move the pointer.
+function pointerActionFor(input: PointerInput): (typeof POINTER_ACTIONS)[number] {
+  if (input.action !== undefined) return input.action;
+  if (input.startX !== undefined || input.endX !== undefined) return "drag";
+  if (input.direction !== undefined) return "scroll";
+  return "move_mouse";
+}
 
 const activeWindowMcpSchema = {
   type: "object",
@@ -447,6 +459,10 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
         return safetyFailure("desktop.screenshot", postResolutionSafety);
       }
 
+      // Read the window origin before capturing so image pixels can be mapped back to screen coordinates.
+      const windowOrigin = input.includeActiveWindowOnly === true
+        ? (await context.linux.getActiveWindowBounds?.().catch(() => undefined))?.bounds
+        : { x: 0, y: 0 };
       const capture = () => context.linux.screenshot({
         path: outputPath,
         ...(input.includeActiveWindowOnly === undefined ? {} : { includeActiveWindowOnly: input.includeActiveWindowOnly }),
@@ -474,15 +490,22 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
           geometryAvailable: true,
           format: screenshotFormat(input),
           ...(input.scale === undefined ? {} : { scale: input.scale }),
-          ...(input.region === undefined ? {} : { region: input.region })
+          ...(input.region === undefined ? {} : { region: input.region }),
+          ...(windowOrigin === undefined ? {} : {
+            screenOrigin: { x: windowOrigin.x + (input.region?.x ?? 0), y: windowOrigin.y + (input.region?.y ?? 0) }
+          })
         };
       }
+      const origin = data.screenshotMetadata?.screenOrigin;
       return toolSuccess({
         tool: "desktop.screenshot",
         riskLevel: "medium",
         strategy: "gui_control",
         data,
-        observations: ["Saved a screenshot locally under an approved AgentHost folder."]
+        observations: [
+          "Saved a screenshot locally under an approved AgentHost folder.",
+          ...(origin === undefined ? [] : [`To click a pixel in this image use screen x = ${origin.x} + imageX / ${input.scale ?? 1}, y = ${origin.y} + imageY / ${input.scale ?? 1}.`])
+        ]
       });
     }
   };
@@ -731,12 +754,13 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
 
   const pointer: AgentHostToolDefinition<PointerInput, DesktopPointerResult, AgentHostMcpContext> = {
     name: "desktop.pointer",
-    description: "Performs pointer actions (move, scroll, double-click, right-click, drag) when policy and active-window context allow it.",
+    description: "Performs pointer actions when policy and active-window context allow it: move_mouse, scroll (direction + amount, at x,y when given), double_click and right_click (at x,y), drag (startX/startY to endX/endY). The action is inferred when omitted.",
     riskLevel: "medium",
     inputSchema: pointerInputSchema,
     mcpInputSchema: {
       type: "object",
       properties: {
+        action: { type: "string", enum: [...POINTER_ACTIONS] },
         x: { type: "integer", minimum: 0 },
         y: { type: "integer", minimum: 0 },
         direction: { type: "string", enum: ["up", "down", "left", "right"] },
@@ -754,10 +778,10 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
       additionalProperties: false
     },
     inputSummary: "Pointer action",
-    auditInputSummary: (i) => `Pointer ${i.direction ?? (i.startX !== undefined ? "drag" : "action")} in ${activeWindowAppName(toActiveWindowContext(inputWindow(i))) ?? "active window"}.`,
+    auditInputSummary: (i) => `Pointer ${pointerActionFor(i)}${i.direction === undefined ? "" : ` ${i.direction}`} in ${activeWindowAppName(toActiveWindowContext(inputWindow(i))) ?? "active window"}.`,
     preview: {
       isDryRun: (i) => i.dryRun === true,
-      resolveEffect: (i, context) => desktopPreview("desktop.pointer", "gui_click", i, context, (window) => `Pointer action in ${window}.`, (window) => `pointer:${window}:${i.x ?? ""}:${i.y ?? ""}:${i.direction ?? ""}:${i.startX ?? ""}:${i.startY ?? ""}:${i.endX ?? ""}:${i.endY ?? ""}`, { x: i.x, y: i.y, direction: i.direction, amount: i.amount, startX: i.startX, startY: i.startY, endX: i.endX, endY: i.endY })
+      resolveEffect: (i, context) => desktopPreview("desktop.pointer", "gui_click", i, context, (window) => `Pointer action in ${window}.`, (window) => `pointer:${window}:${pointerActionFor(i)}:${i.x ?? ""}:${i.y ?? ""}:${i.direction ?? ""}:${i.startX ?? ""}:${i.startY ?? ""}:${i.endX ?? ""}:${i.endY ?? ""}`, { action: pointerActionFor(i), x: i.x, y: i.y, direction: i.direction, amount: i.amount, startX: i.startX, startY: i.startY, endX: i.endX, endY: i.endY })
     },
     safety: {
       actionType: "inspect",
@@ -798,7 +822,7 @@ export function createDesktopTools(): AnyAgentHostToolDefinition<AgentHostMcpCon
       }
 
       const data = await context.linux.pointer!({
-        action: input.x !== undefined && input.y !== undefined ? "move_mouse" : input.direction !== undefined ? "scroll" : "move_mouse",
+        action: pointerActionFor(input),
         activeWindow: validation.activeWindow!,
         ...(input.x === undefined ? {} : { x: input.x }),
         ...(input.y === undefined ? {} : { y: input.y }),

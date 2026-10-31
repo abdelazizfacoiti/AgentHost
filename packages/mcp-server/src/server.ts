@@ -15,6 +15,7 @@ import {
   summarizeForLog,
   validateOptionalAdapterExecutionPolicy,
   readRunState,
+  readAttention,
   requestPause,
   clearPause,
   requestStop,
@@ -57,6 +58,8 @@ import {
   listInstalledLinuxApps,
   listLinuxDirectory,
   openLinuxApp,
+  openLinuxUrl,
+  clearWindowListCache,
   readLinuxFile,
   probeLinuxSandboxSupport,
   runSafeLinuxCommand,
@@ -71,6 +74,8 @@ import type { AgentHostMcpContext, LinuxAutomation } from "./context.js";
 import { GrantStore } from "./grants.js";
 import { createAdapterTools } from "./tools/adapter.js";
 import { createDesktopTools } from "./tools/desktop.js";
+import { createAppTools } from "./tools/app.js";
+import { createUiTools } from "./tools/ui.js";
 import { createComputerTools } from "./tools/computer.js";
 import { createFileTools } from "./tools/file.js";
 import { createShellTools } from "./tools/shell.js";
@@ -83,6 +88,8 @@ import { applyProductionExecutionMetadata, materializeToolDefinitions, toolCapab
 import { listResourceEntries, readResource } from "./resources.js";
 import { runTool, type AnyAgentHostToolDefinition } from "./tool-runner.js";
 import { ToolActionOverlay } from "./action-overlay.js";
+import { HostAttention } from "./host-attention.js";
+import { ActionTimeline } from "./action-timeline.js";
 import { TaskActivityOverlay } from "./task-overlay.js";
 import { shouldShowActionCard, shouldShowActivityCard } from "./activity.js";
 
@@ -294,14 +301,16 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
   const overlay = new VisualSurfaceCoordinator(createOverlayRenderer(config.overlay?.rendererMode ?? config.overlayRendererMode ?? "auto", {
     sessionId,
     visual: {
-      layout: config.overlay?.layout ?? "ambient",
+      layout: config.overlay?.layout ?? "dock",
       dockSide: config.overlay?.dockSide ?? "right",
-      dockWidthPercent: config.overlay?.dockWidthPercent ?? 20,
+      dockWidthPercent: config.overlay?.dockWidthPercent ?? 18,
       dockReserveSpace: config.overlay?.dockReserveSpace ?? true,
       maxWidth: config.overlay?.maxWidth ?? 520
     }
   }), { sessionId }, { reducedMotion: config.overlay?.reducedMotion ?? false });
   let taskActivity: TaskActivityOverlay | undefined;
+  // Injected Linux automation means a test or embedded host; never drive the real desktop then.
+  const hostAttention = options.linux === undefined ? new HostAttention(config.agentHostDir) : undefined;
   const actionOverlay = new ToolActionOverlay(overlay, {
     widgetId: `agenthost-action-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`,
     placement: actionPill ? "top_center" : config.overlay?.preferredPosition ?? "top_right",
@@ -324,6 +333,19 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     },
     isPaused: async () => (await readRunState(config.agentHostDir)).pause.requested
   });
+  const actionTimeline = activityMode !== "off" && (config.overlay?.layout ?? "dock") === "dock" && config.overlay?.timeline !== false
+    ? new ActionTimeline(overlay, {
+      sessionId: sessionId.replace(/[^A-Za-z0-9._-]/g, "_"),
+      readAlerts: async () => {
+        const [state, attention] = await Promise.all([readRunState(config.agentHostDir), readAttention(config.agentHostDir)]);
+        return {
+          stopped: state.stop.requested,
+          paused: state.pause.requested,
+          ...(attention === undefined ? {} : { attention: { source: attention.source, reason: attention.reason } })
+        };
+      }
+    })
+    : undefined;
   if (process.env.NODE_ENV !== "test") sweepOrphanedOverlayRenderers();
   if (activityMode !== "off") {
     taskActivity = new TaskActivityOverlay({
@@ -344,6 +366,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       detectApp: (input) => detectLinuxApp(input, policy),
       listInstalledApps: (input) => listInstalledLinuxApps(input),
       openApp: (input) => openLinuxApp(input, policy),
+      openUrl: (input) => openLinuxUrl(input),
       getAppStrategy: (input) => getLinuxAppStrategy(input, policy),
       runSafeCommand: (input) => runSafeLinuxCommand(input),
       writeFile: (input) => writeLinuxFile(input, { agentHostDir: config.agentHostDir }),
@@ -360,6 +383,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
       getActiveWindowBounds: () => getLinuxActiveWindowBounds({ agentHostDir: config.agentHostDir }),
       screenshot: (input) => captureLinuxScreenshot(input, { agentHostDir: config.agentHostDir }),
       listWindows: (input) => listLinuxWindows(input, { agentHostDir: config.agentHostDir }),
+      invalidateWindowCache: () => clearWindowListCache(),
       focusWindow: (input) => focusLinuxWindow(input, { agentHostDir: config.agentHostDir }),
       hotkey: (input) => sendLinuxHotkey(input, { agentHostDir: config.agentHostDir }),
       typeText: (input) => typeLinuxText(input, { agentHostDir: config.agentHostDir }),
@@ -394,6 +418,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     grants,
     overlay,
     actionOverlay,
+    ...(actionTimeline === undefined ? {} : { actionTimeline }),
     overlayScreenshotSuppression: async (capture) => {
       try {
         return await overlay.withScreenshotSuppressed(capture);
@@ -413,10 +438,12 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     ...createShellTools(),
     ...createFileTools(),
     ...createDesktopTools(),
+    ...createAppTools(),
     ...createComputerTools(),
     ...createTaskTools(),
     ...createAgentTools(),
-    ...createWindowTools()
+    ...createWindowTools(),
+    ...createUiTools()
   ];
 
   const loadedTools = materializeToolDefinitions(applyProductionExecutionMetadata(tools));
@@ -505,8 +532,14 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     const trackActivity = shouldShowActivityCard(tool.name, activityMode);
     if (showActionCard) recordActivity(config.agentHostDir, sessionId, activityMode, tool.name, "started", actionOverlay);
     if (trackActivity) void taskActivity?.noteActivity({ toolName: tool.name, summary: activitySummary(tool, rawInput) });
+    if (hostAttention !== undefined && typeof (rawInput as Record<string, unknown>).confirmationToken === "string") {
+      await hostAttention.resolveConfirmation();
+    }
     const result = await runTool(tool, rawInput, context);
-    if (result.error?.code === "confirmation_required") signalApprovalRequired();
+    if (result.error?.code === "confirmation_required") {
+      signalApprovalRequired();
+      void hostAttention?.requestConfirmation();
+    }
     else if (result.overlay?.startsWith("unavailable:") === true) signalOverlayUnavailable();
     if (showActionCard || (result.error?.code === "confirmation_required" && activityMode !== "off")) {
       recordActivity(config.agentHostDir, sessionId, activityMode, tool.name, "finished", actionOverlay, activityOutcome(result));
@@ -528,6 +561,7 @@ export async function createAgentHostMcpServer(options: AgentHostServerOptions =
     resourceClosePromise = (async () => {
       await taskActivity?.close();
       await actionOverlay.close();
+      await actionTimeline?.close();
       await overlay.close();
       if (process.env.NODE_ENV !== "test") sweepOrphanedOverlayRenderers();
     })();

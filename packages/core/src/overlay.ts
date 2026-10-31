@@ -29,6 +29,8 @@ export interface OverlayPublicConfig {
   dockSide: OverlayDockSide;
   dockWidthPercent: number;
   dockReserveSpace: boolean;
+  /** Newest-first list of agent actions inside the dock (dock layout only). */
+  timeline: boolean;
   frame: boolean;
   actionPill: boolean;
   targetRing: boolean;
@@ -65,12 +67,19 @@ export type OverlayWidgetComponent =
   | { type: "progress"; value: number; label?: string }
   | { type: "spinner"; label?: string }
   | { type: "checklist"; items: Array<{ label: string; checked: boolean; state?: "pending" | "active" | "done" | "failed" }> }
+  | { type: "timeline"; entries: OverlayTimelineEntry[] }
   | { type: "key_value"; key: string; value: string }
   | { type: "button"; label: string; event: OverlayEventName }
   | { type: "choice"; label: string; event: "accepted" | "rejected" | "cancelled" }
   | { type: "comparison"; before: string; after: string }
   | { type: "warning"; text: string }
   | { type: "image_reference"; evidenceId: string; alt: string };
+
+export const OVERLAY_TIMELINE_STATES = ["running", "done", "failed", "waiting", "halted"] as const;
+export type OverlayTimelineState = (typeof OVERLAY_TIMELINE_STATES)[number];
+/** One agent action in the dock timeline; `time` is a short display string such as "12s". */
+export interface OverlayTimelineEntry { label: string; state: OverlayTimelineState; time?: string; detail?: string }
+export const OVERLAY_TIMELINE_MAX_ENTRIES = 40;
 
 export interface OverlayWidget { widgetId?: string; title: string; components: OverlayWidgetComponent[]; target?: OverlayTargetBinding; placement?: OverlayPlacement; displayPolicy?: OverlayDisplayPolicy; style?: OverlayStyleTokens; animation?: OverlayAnimation; interaction?: OverlayInteractionPolicy; accessibilityLabel?: string; sensitivity: OverlaySensitivity; ttlMs?: number; persistent?: boolean; }
 export interface OverlayWidgetEvent { eventId: string; overlayId: string; event: OverlayEventName; createdAt: string; ownerSessionId: string; }
@@ -159,7 +168,7 @@ export function validateOverlayWidget(widget: OverlayWidget, reducedMotion = fal
   if (!Array.isArray(widget.components) || widget.components.length > 30) errors.push("overlay_widget_components_invalid");
   if (widget.placement !== undefined && !["top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"].includes(widget.placement)) errors.push("overlay_widget_placement_invalid");
   if (widget.displayPolicy !== undefined && !["primary", "all"].includes(widget.displayPolicy)) errors.push("overlay_widget_display_policy_invalid");
-  const allowedComponents = new Set(["heading", "text", "divider", "icon", "status_badge", "progress", "spinner", "checklist", "key_value", "button", "choice", "comparison", "warning", "image_reference"]);
+  const allowedComponents = new Set(["heading", "text", "divider", "icon", "status_badge", "progress", "spinner", "checklist", "timeline", "key_value", "button", "choice", "comparison", "warning", "image_reference"]);
   for (const component of widget.components ?? []) {
     if (component === null || typeof component !== "object") { errors.push("overlay_component_unsupported"); continue; }
     if (!allowedComponents.has(component.type)) {
@@ -177,6 +186,17 @@ export function validateOverlayWidget(widget: OverlayWidget, reducedMotion = fal
     if (component.type === "checklist") {
       for (const item of component.items) {
         if (item.state !== undefined && !["pending", "active", "done", "failed"].includes(item.state)) errors.push("overlay_checklist_state_invalid");
+      }
+    }
+    if (component.type === "timeline") {
+      if (!Array.isArray(component.entries) || component.entries.length > OVERLAY_TIMELINE_MAX_ENTRIES) errors.push("overlay_timeline_invalid");
+      for (const entry of Array.isArray(component.entries) ? component.entries : []) {
+        if (!OVERLAY_TIMELINE_STATES.includes(entry.state)) errors.push("overlay_timeline_state_invalid");
+        for (const text of [entry.label, entry.time, entry.detail]) {
+          if (text === undefined) continue;
+          if (typeof text !== "string" || text.length > 200) errors.push("overlay_timeline_text_invalid");
+          else errors.push(...redactOverlayText(text, widget.sensitivity).errors);
+        }
       }
     }
     if (component.type === "icon" && !["info", "success", "warning", "danger", "pointer", "check", "close"].includes(component.token)) errors.push("overlay_icon_token_invalid");

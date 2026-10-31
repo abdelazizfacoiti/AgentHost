@@ -24,6 +24,7 @@ import {
 } from "@agenthost/core";
 import { detectLinuxAccessibilitySupport, type LinuxAccessibilityContext } from "./accessibility.js";
 import { findCommandPath, type LinuxLookupContext } from "./dependencies.js";
+import { leaseGtkClipboard, readGtkClipboard, restoreGtkClipboard } from "./gtk-clipboard.js";
 import { runSafeLinuxCommand } from "./shell.js";
 
 export interface LinuxDesktopContext extends LinuxLookupContext {
@@ -829,9 +830,7 @@ async function pasteViaClipboard(
 ): Promise<{ ok: boolean; reason: string }> {
   const xclip = await findCommandPath("xclip", context);
   const xsel = xclip === undefined ? await findCommandPath("xsel", context) : undefined;
-  if (xclip === undefined && xsel === undefined) {
-    return { ok: false, reason: "Layout-unsafe characters require a clipboard backend; install xclip or xsel for non-ASCII typing." };
-  }
+  if (xclip === undefined && xsel === undefined) return await pasteViaGtkClipboard(xdotoolPath, text, context);
   const clipboardCommand = xclip ?? xsel!;
   const readArgs = xclip !== undefined ? ["-selection", "clipboard", "-o"] : ["--clipboard", "--output"];
   const writeArgs = xclip !== undefined ? ["-selection", "clipboard", "-i"] : ["--clipboard", "--input"];
@@ -848,6 +847,31 @@ async function pasteViaClipboard(
   return restored
     ? { ok: true, reason: "Pasted text via the clipboard (layout-independent) and restored the prior clipboard contents." }
     : { ok: true, reason: "Pasted text via the clipboard (layout-independent); prior clipboard contents could not be restored." };
+}
+
+async function pasteViaGtkClipboard(
+  xdotoolPath: string,
+  text: string,
+  context: LinuxDesktopContext
+): Promise<{ ok: boolean; reason: string }> {
+  const previousClipboard = await readGtkClipboard(context);
+  const lease = await leaseGtkClipboard(text, context);
+  if (lease === undefined) {
+    return { ok: false, reason: "Layout-unsafe characters require a clipboard backend; install xclip (sudo apt install xclip) or python3-gi for non-ASCII typing." };
+  }
+  const paste = await runDesktopCommand(xdotoolPath, ["key", "ctrl+v"], context);
+  // The target app requests the selection asynchronously after Ctrl+V; keep
+  // ownership long enough for that round-trip before releasing it.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  lease.release();
+  if (paste.exitCode !== 0) return { ok: false, reason: "The clipboard paste hotkey did not complete successfully." };
+  const restored = previousClipboard !== undefined && await restoreGtkClipboard(previousClipboard, context);
+  return {
+    ok: true,
+    reason: restored
+      ? "Pasted text via the built-in GTK clipboard helper (layout-independent; xclip not installed) and restored the prior clipboard contents."
+      : "Pasted text via the built-in GTK clipboard helper (layout-independent; xclip not installed)."
+  };
 }
 
 /** Best-effort read of the currently active window id for verification and focus restoration. */
@@ -1010,7 +1034,7 @@ export async function clickLinuxDesktop(
 
   const result = await runDesktopCommand(
     verification.xdotoolPath,
-    ["mousemove", "--sync", String(input.x), String(input.y), "click", xdotoolButton(button)],
+    ["mousemove", String(input.x), String(input.y), "click", xdotoolButton(button)],
     context
   );
 
@@ -1042,13 +1066,19 @@ export async function performLinuxPointerAction(input: LinuxDesktopPointerInput,
   const points = input.action === "drag" ? [[input.startX, input.startY], [input.endX, input.endY]] : input.x === undefined ? [] : [[input.x, input.y]];
   if (points.some(([x, y]) => x === undefined || y === undefined || !inside(x, y, geometry))) return { supported: false, backend: verification.backend, performed: false, action: input.action, activeWindow: verification.activeWindow, reason: "Pointer coordinates are outside safe X11 screen bounds." };
   let args: string[];
-  if (input.action === "move_mouse") args = ["mousemove", "--sync", String(input.x), String(input.y)];
-  else if (input.action === "scroll") { const button = input.direction === "up" ? "4" : input.direction === "down" ? "5" : input.direction === "left" ? "6" : "7"; args = ["click", "--repeat", String(input.amount), button]; }
-  else if (input.action === "double_click") args = input.x === undefined ? ["click", "--repeat", "2", "--delay", "100", "1"] : ["mousemove", "--sync", String(input.x), String(input.y), "click", "--repeat", "2", "--delay", "100", "1"];
-  else if (input.action === "right_click") args = input.x === undefined ? ["click", "3"] : ["mousemove", "--sync", String(input.x), String(input.y), "click", "3"];
-  else args = ["mousemove", "--sync", String(input.startX), String(input.startY), "mousedown", "1", "mousemove", "--sync", String(input.endX), String(input.endY), "mouseup", "1"];
+  if (input.action === "move_mouse") args = ["mousemove", String(input.x), String(input.y)];
+  else if (input.action === "scroll") { const button = input.direction === "up" ? "4" : input.direction === "down" ? "5" : input.direction === "left" ? "6" : "7"; const wheel = ["click", "--repeat", String(input.amount ?? 3), button]; args = input.x === undefined ? wheel : ["mousemove", String(input.x), String(input.y), ...wheel]; }
+  else if (input.action === "double_click") args = input.x === undefined ? ["click", "--repeat", "2", "--delay", "100", "1"] : ["mousemove", String(input.x), String(input.y), "click", "--repeat", "2", "--delay", "100", "1"];
+  else if (input.action === "right_click") args = input.x === undefined ? ["click", "3"] : ["mousemove", String(input.x), String(input.y), "click", "3"];
+  else args = ["mousemove", String(input.startX), String(input.startY), "mousedown", "1", "mousemove", String(input.endX), String(input.endY), "mouseup", "1"];
   const result = await runDesktopCommand(verification.xdotoolPath, args, context);
-  return { supported: result.exitCode === 0, backend: verification.backend, performed: result.exitCode === 0, action: input.action, activeWindow: verification.activeWindow, reason: result.exitCode === 0 ? "Performed bounded X11 pointer action." : "Pointer backend did not complete successfully." };
+  return { supported: result.exitCode === 0, backend: verification.backend, performed: result.exitCode === 0, action: input.action, activeWindow: verification.activeWindow, reason: result.exitCode === 0 ? "Performed bounded X11 pointer action." : pointerFailureReason(result) };
+}
+
+function pointerFailureReason(result: { stderr: string; timedOut: boolean }): string {
+  if (result.timedOut) return "Pointer backend timed out.";
+  const detail = trimLine(redactSensitiveText(result.stderr))?.slice(0, 200);
+  return detail === undefined ? "Pointer backend did not complete successfully." : `Pointer backend did not complete successfully: ${detail}`;
 }
 
 function parseWmctrlLine(line: string): RawWindowSummary | undefined {
@@ -1149,6 +1179,7 @@ async function listRawWindows(context: LinuxDesktopContext = {}): Promise<  | { 
   }
 
   const windows: RawWindowSummary[] = [];
+  const absolute = await absoluteWindowGeometry(context);
 
   for (const line of result.stdout.split(/\r?\n/)) {
     const parsed = parseWmctrlLine(line);
@@ -1156,6 +1187,9 @@ async function listRawWindows(context: LinuxDesktopContext = {}): Promise<  | { 
     if (parsed === undefined) {
       continue;
     }
+
+    const corrected = absolute.get(parsed.windowId);
+    if (corrected !== undefined) parsed.bounds = corrected;
 
     if (parsed.pid !== undefined) {
       const appName = await readProcessName(parsed.pid);
@@ -1177,6 +1211,34 @@ async function listRawWindows(context: LinuxDesktopContext = {}): Promise<  | { 
     windows,
     reason: "Listed visible X11 windows through wmctrl."
   };
+}
+
+const XWININFO_LINE = /^\s*(0x[0-9a-f]+)\s.*?\s(\d+)x(\d+)[+-]-?\d+[+-]-?\d+\s+\+?(-?\d+)\+?(-?\d+)\s*$/i;
+
+export function parseXwininfoTree(output: string): Map<string, DesktopWindowBounds> {
+  const geometry = new Map<string, DesktopWindowBounds>();
+  for (const line of output.split(/\r?\n/)) {
+    const match = XWININFO_LINE.exec(line);
+    if (match === null) continue;
+    const width = Number(match[2]), height = Number(match[3]), x = Number(match[4]), y = Number(match[5]);
+    if (width <= 1 || height <= 1) continue;
+    geometry.set(String(Number.parseInt(match[1]!, 16)), { x, y, width, height });
+  }
+  return geometry;
+}
+
+/**
+ * wmctrl -G double-counts the client offset for windows whose parent is the
+ * root (client-side decorations under mutter report 132,64 for a window at
+ * 66,32), which makes screenshot-derived clicks land in the wrong place.
+ * One `xwininfo -root -tree` call yields true absolute geometry for every
+ * window; when it is unavailable the wmctrl values are kept as-is.
+ */
+async function absoluteWindowGeometry(context: LinuxDesktopContext): Promise<Map<string, DesktopWindowBounds>> {
+  const xwininfo = await findCommandPath("xwininfo", context);
+  if (xwininfo === undefined) return new Map();
+  const result = await runDesktopCommand(xwininfo, ["-root", "-tree"], context).catch(() => undefined);
+  return result?.exitCode === 0 ? parseXwininfoTree(result.stdout) : new Map();
 }
 
 export async function listLinuxWindows(
